@@ -1,5 +1,4 @@
-import type { Page } from "playwright";
-
+import type { CloudflareBrowserBinding, DealsPage } from "./browser.ts";
 import { parsePriceFr, withBrowser, withPage } from "./browser.ts";
 import type { DealSource, RawDeal } from "./DealSource.ts";
 
@@ -33,6 +32,12 @@ export class AmazonCollector implements DealSource {
   constructor(
     protected dealsUrl: string,
     protected limit = 6,
+    /**
+     * The Workers "Browser Rendering" binding, passed only when running on
+     * Cloudflare — see `CollectionService`. Undefined everywhere else,
+     * which makes `withBrowser` fall back to a local Playwright Chromium.
+     */
+    protected cloudflareBinding?: CloudflareBrowserBinding,
   ) {}
 
   async discover(): Promise<RawDeal[]> {
@@ -109,11 +114,11 @@ export class AmazonCollector implements DealSource {
       }
 
       return deals;
-    });
+    }, this.cloudflareBinding);
   }
 
   protected async fetchPrice(
-    page: Page,
+    page: DealsPage,
     url: string,
   ): Promise<number | undefined> {
     const response = await page.goto(url, {

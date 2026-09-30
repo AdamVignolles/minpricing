@@ -1,3 +1,4 @@
+import type { CloudflareBrowserBinding } from "./browser.ts";
 import { parsePriceFr, withBrowser, withPage } from "./browser.ts";
 import type { DealSource, RawDeal } from "./DealSource.ts";
 
@@ -16,31 +17,35 @@ export class CdiscountCollector implements DealSource {
   constructor(
     protected homeUrl: string,
     protected limit = 12,
+    /** See {@link AmazonCollector}'s constructor doc — same deal. */
+    protected cloudflareBinding?: CloudflareBrowserBinding,
   ) {}
 
   async discover(): Promise<RawDeal[]> {
-    return withBrowser((browser) =>
-      withPage(browser, async (page) => {
-        const response = await page.goto(this.homeUrl, {
-          waitUntil: "networkidle",
-          timeout: 20_000,
-        });
-        if (!response || !response.ok()) {
-          throw new Error(
-            `Cdiscount page returned ${response?.status() ?? "no response"}`,
-          );
-        }
-
-        await page
-          .waitForSelector('[data-e2e="offer-item"]', { timeout: 10_000 })
-          .catch(() => {
-            // No card showed up in time: the evaluate() below just finds
-            // none, and this run reports 0 deals rather than throwing.
+    return withBrowser(
+      (browser) =>
+        withPage(browser, async (page) => {
+          const response = await page.goto(this.homeUrl, {
+            waitUntil: "networkidle",
+            timeout: 20_000,
           });
+          if (!response || !response.ok()) {
+            throw new Error(
+              `Cdiscount page returned ${response?.status() ?? "no response"}`,
+            );
+          }
 
-        const cards = await page.evaluate(() =>
-          Array.from(document.querySelectorAll('[data-e2e="offer-item"]')).map(
-            (el) => {
+          await page
+            .waitForSelector('[data-e2e="offer-item"]', { timeout: 10_000 })
+            .catch(() => {
+              // No card showed up in time: the evaluate() below just finds
+              // none, and this run reports 0 deals rather than throwing.
+            });
+
+          const cards = await page.evaluate(() =>
+            Array.from(
+              document.querySelectorAll('[data-e2e="offer-item"]'),
+            ).map((el) => {
               const link = el.closest("a") as HTMLAnchorElement | null;
               const title =
                 el
@@ -57,35 +62,35 @@ export class CdiscountCollector implements DealSource {
                 priceText,
                 imageUrl: img?.src || null,
               };
-            },
-          ),
-        );
+            }),
+          );
 
-        const deals: RawDeal[] = [];
-        for (const card of cards.slice(0, this.limit)) {
-          if (!card.url || !card.title || !card.priceText) {
-            continue;
+          const deals: RawDeal[] = [];
+          for (const card of cards.slice(0, this.limit)) {
+            if (!card.url || !card.title || !card.priceText) {
+              continue;
+            }
+
+            const price = parsePriceFr(card.priceText);
+            if (price === undefined) {
+              continue;
+            }
+
+            const url = card.url.split("#")[0];
+            deals.push({
+              externalId: url,
+              title: card.title,
+              url,
+              imageUrl: card.imageUrl ?? undefined,
+              price,
+              currency: "EUR",
+              availability: "in_stock",
+            });
           }
 
-          const price = parsePriceFr(card.priceText);
-          if (price === undefined) {
-            continue;
-          }
-
-          const url = card.url.split("#")[0];
-          deals.push({
-            externalId: url,
-            title: card.title,
-            url,
-            imageUrl: card.imageUrl ?? undefined,
-            price,
-            currency: "EUR",
-            availability: "in_stock",
-          });
-        }
-
-        return deals;
-      }),
+          return deals;
+        }),
+      this.cloudflareBinding,
     );
   }
 }

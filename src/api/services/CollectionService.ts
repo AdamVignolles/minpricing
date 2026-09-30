@@ -1,9 +1,10 @@
-import { $env, $inject, z } from "alepha";
+import { $env, $inject, Alepha, z } from "alepha";
 import { DateTimeProvider } from "alepha/datetime";
 import { $logger } from "alepha/logger";
 import { $repository } from "alepha/orm";
 
 import { AmazonCollector } from "../collectors/AmazonCollector.ts";
+import type { CloudflareBrowserBinding } from "../collectors/browser.ts";
 import { CdiscountCollector } from "../collectors/CdiscountCollector.ts";
 import type { DealSource, RawDeal } from "../collectors/DealSource.ts";
 import { ManualCollector } from "../collectors/ManualCollector.ts";
@@ -33,6 +34,7 @@ export interface CollectionSummary {
  */
 export class CollectionService {
   protected log = $logger();
+  protected alepha = $inject(Alepha);
   protected dateTime = $inject(DateTimeProvider);
 
   protected sources = $repository(sourceEntity);
@@ -63,9 +65,33 @@ export class CollectionService {
   protected readonly collectorsById: Record<string, DealSource> = {
     manual: new ManualCollector(),
     steam: new SteamCollector(),
-    amazon: new AmazonCollector(this.env.AMAZON_DEALS_URL),
-    cdiscount: new CdiscountCollector(this.env.CDISCOUNT_HOME_URL),
+    amazon: new AmazonCollector(
+      this.env.AMAZON_DEALS_URL,
+      undefined,
+      this.cloudflareBrowserBinding(),
+    ),
+    cdiscount: new CdiscountCollector(
+      this.env.CDISCOUNT_HOME_URL,
+      undefined,
+      this.cloudflareBrowserBinding(),
+    ),
   };
+
+  /**
+   * On Cloudflare Workers, Amazon/Cdiscount's Playwright-based collectors
+   * launch through the "Browser Rendering" binding instead (no process
+   * spawning allowed on Workers) — see `browser.ts`. `undefined` locally /
+   * on a plain Node server, which keeps them on local Playwright.
+   */
+  protected cloudflareBrowserBinding(): CloudflareBrowserBinding | undefined {
+    if (!this.alepha.isServerless()) {
+      return undefined;
+    }
+    const cloudflareEnv = this.alepha.get("cloudflare.env") as
+      | Record<string, unknown>
+      | undefined;
+    return cloudflareEnv?.BROWSER as CloudflareBrowserBinding | undefined;
+  }
 
   async runAll(): Promise<CollectionSummary[]> {
     const sources = await this.sources.findMany({

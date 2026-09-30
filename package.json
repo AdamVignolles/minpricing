@@ -8,9 +8,11 @@
     "test": "alepha test",
     "lint": "alepha lint",
     "typecheck": "alepha typecheck",
-    "verify": "alepha verify"
+    "verify": "alepha verify",
+    "deploy:cloudflare": "alepha platform build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform migrate --env production && alepha platform deploy --env production"
   },
   "dependencies": {
+    "@cloudflare/puppeteer": "^1.4.0",
     "alepha": "^0.30.0",
     "playwright": "^1.63.0",
     "react": "^19.2.8",
@@ -19,6 +21,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.3",
+    "wrangler": "^4.144.0"
   }
 }
