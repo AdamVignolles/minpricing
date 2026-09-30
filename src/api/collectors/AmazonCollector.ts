@@ -33,11 +33,18 @@ export class AmazonCollector implements DealSource {
     protected dealsUrl: string,
     protected limit = 6,
     /**
-     * The Workers "Browser Rendering" binding, passed only when running on
-     * Cloudflare — see `CollectionService`. Undefined everywhere else,
-     * which makes `withBrowser` fall back to a local Playwright Chromium.
+     * Resolves the Workers "Browser Rendering" binding, only truthy when
+     * running on Cloudflare — see `CollectionService`. A getter, not a
+     * plain value: `CollectionService` is a long-lived singleton reused
+     * across many invocations in the same Worker isolate, so the binding
+     * must be looked up fresh on every `discover()` call, not baked in at
+     * construction time (it would otherwise permanently capture whatever
+     * was in scope the one time this collector got constructed — often
+     * `undefined`, before any request had bound `env`). Undefined
+     * everywhere else, which makes `withBrowser` fall back to a local
+     * Playwright Chromium.
      */
-    protected cloudflareBinding?: CloudflareBrowserBinding,
+    protected getCloudflareBinding?: () => CloudflareBrowserBinding | undefined,
   ) {}
 
   async discover(): Promise<RawDeal[]> {
@@ -114,7 +121,7 @@ export class AmazonCollector implements DealSource {
       }
 
       return deals;
-    }, this.cloudflareBinding);
+    }, this.getCloudflareBinding?.());
   }
 
   protected async fetchPrice(

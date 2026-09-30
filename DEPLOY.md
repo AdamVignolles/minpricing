@@ -53,7 +53,7 @@ This runs, in order:
 2. `node scripts/patch-cloudflare-browser-binding.mjs` — adds
    `"browser": { "binding": "BROWSER" }` to that file. `alepha platform
 deploy` only ever merges `.vars` into it afterwards, so this survives.
-3. `alepha platform migrate --env production` — applies any new D1 schema
+3. `alepha platform db migrate --env production` — applies any new D1 schema
    migrations.
 4. `alepha platform deploy --env production` — uploads the patched config.
 
@@ -127,3 +127,37 @@ per-request fresh browser context) — only the underlying engine differs.
 If Cloudflare ever changes the Browser Rendering binding's shape, or
 Alepha adds first-class support for it, `browser.ts` is the only file that
 needs to change.
+
+## Gotcha: Workers bundling for `playwright` / `@cloudflare/puppeteer`
+
+Two related but opposite bugs hit this exact code path during the first
+production deploy — worth knowing if collectors ever start erroring with
+"No such module" again:
+
+1. **`playwright` must never be a static top-level import.** Cloudflare
+   Workers validates every static `import ... from "x"` at deploy time and
+   rejects the bundle if `x` doesn't resolve — even on a code path that
+   never runs there. `browser.ts` uses a dynamic `await import("playwright")`
+   inside the non-Cloudflare branch of `withBrowser` instead, which is only
+   resolved if actually awaited (never on Workers, since the Cloudflare
+   binding branch is taken first).
+2. **`@cloudflare/puppeteer` must NOT be Vite `ssr.external`.** Unlike
+   `playwright`, this package genuinely needs to run inside workerd — it's
+   the real Cloudflare Browser Rendering client. Marking it external (as
+   `playwright`/`playwright-core` correctly are) means it's never bundled,
+   so the dynamic `import("@cloudflare/puppeteer")` fails at runtime with
+   the same "No such module" error, just one step later (after the
+   `BROWSER` binding is found). `vite.config.ts`'s `ssr.external` list must
+   contain only `playwright` and `playwright-core`, never
+   `@cloudflare/puppeteer`.
+
+Also: `CollectionService` resolves the Cloudflare browser binding via a
+**getter function** passed into `AmazonCollector`/`CdiscountCollector`
+(`() => this.cloudflareBrowserBinding()`), not a plain value baked into
+their constructors. `CollectionService` is a long-lived singleton reused
+across many Worker invocations in the same isolate — a plain value would
+freeze whatever `cloudflare.env` looked like the one time the singleton
+was first constructed (often `undefined`, before any request had bound
+`env`), and every collection run afterwards would silently fall back to
+the (non-existent-on-Workers) `playwright` path forever.
+

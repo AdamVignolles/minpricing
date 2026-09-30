@@ -18,7 +18,7 @@ export class CdiscountCollector implements DealSource {
     protected homeUrl: string,
     protected limit = 12,
     /** See {@link AmazonCollector}'s constructor doc — same deal. */
-    protected cloudflareBinding?: CloudflareBrowserBinding,
+    protected getCloudflareBinding?: () => CloudflareBrowserBinding | undefined,
   ) {}
 
   async discover(): Promise<RawDeal[]> {
@@ -90,7 +90,7 @@ export class CdiscountCollector implements DealSource {
 
           return deals;
         }),
-      this.cloudflareBinding,
+      this.getCloudflareBinding?.(),
     );
   }
 }

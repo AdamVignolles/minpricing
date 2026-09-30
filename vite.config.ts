@@ -13,7 +13,7 @@ export default defineConfig({
   // must stay a real `require`/`import` at runtime instead of being
   // inlined into the server bundle.
   ssr: {
-    external: ["playwright", "playwright-core", "@cloudflare/puppeteer"],
+    external: ["playwright", "playwright-core"],
   },
   test: {
     root: ".",

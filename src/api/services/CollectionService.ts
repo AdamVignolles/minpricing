@@ -65,15 +65,13 @@ export class CollectionService {
   protected readonly collectorsById: Record<string, DealSource> = {
     manual: new ManualCollector(),
     steam: new SteamCollector(),
-    amazon: new AmazonCollector(
-      this.env.AMAZON_DEALS_URL,
-      undefined,
+    amazon: new AmazonCollector(this.env.AMAZON_DEALS_URL, undefined, () =>
       this.cloudflareBrowserBinding(),
     ),
     cdiscount: new CdiscountCollector(
       this.env.CDISCOUNT_HOME_URL,
       undefined,
-      this.cloudflareBrowserBinding(),
+      () => this.cloudflareBrowserBinding(),
     ),
   };
 
