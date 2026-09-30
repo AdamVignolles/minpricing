@@ -9,7 +9,8 @@
     "lint": "alepha lint",
     "typecheck": "alepha typecheck",
     "verify": "alepha verify",
-    "deploy:cloudflare": "alepha platform build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform migrate --env production && alepha platform deploy --env production"
+    "deploy:cloudflare": "alepha platform build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform migrate --env production && alepha platform deploy --env production",
+    "build:cloudflare": "alepha platform build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform migrate --env production"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.4.0",

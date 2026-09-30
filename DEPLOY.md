@@ -63,6 +63,32 @@ deploy` only ever merges `.vars` into it afterwards, so this survives.
 npx alepha platform status --env production
 ```
 
+## Using Cloudflare's dashboard "Workers Builds" (git-push auto-deploy)
+
+If instead of running commands locally you want Cloudflare to build/deploy
+on every push (Workers & Pages → your project → **Settings → Build**),
+set these two fields exactly — leaving the framework auto-detected (it
+guesses "Hydrogen" and forces `dist/client` + `remix vite:build`, which is
+wrong for this app and is exactly what was failing):
+
+- **Build command**: `npm run build:cloudflare`
+- **Deploy command**: `npx wrangler deploy --config dist/wrangler.jsonc`
+- **Environment variables** (Settings → Environment variables, for the
+  *Build* step, not just runtime secrets): `CLOUDFLARE_API_TOKEN` and
+  `CLOUDFLARE_ACCOUNT_ID` — `alepha platform build` needs them to look up
+  the D1 database it must bind to (created once by the first `alepha
+  platform up` below, run locally).
+
+The `--config` flag on the deploy command is what stops wrangler from
+falling into its "no config found, let me guess your framework" wizard
+(the `Detected Project Settings: Framework: Hydrogen` error) — it now
+points straight at the real, already-built config instead.
+
+You still need to run `alepha platform up --env production` **once**,
+locally, before wiring this up: it's the only command that provisions the
+D1 database in the first place; the dashboard's build only ever
+regenerates config for resources that already exist.
+
 ## Known limitation
 
 Amazon and Cdiscount's collectors (`AmazonCollector.ts` /
