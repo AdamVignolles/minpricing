@@ -1,5 +1,3 @@
-import { chromium } from "playwright";
-
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -70,6 +68,13 @@ export async function withBrowser<T>(
     }
   }
 
+  // Dynamic import, not a static `import { chromium } from "playwright"` at
+  // the top of the file: on Cloudflare Workers, a static import must resolve
+  // to a real bundled module or the deploy is rejected outright ("No such
+  // module... [code: 10021]"), even though this branch never runs there.
+  // A dynamic `import()` is only resolved if actually awaited, so it never
+  // trips that check on the `cloudflareBinding` path above.
+  const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {
     return await fn({ engine: "playwright", browser });
