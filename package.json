@@ -1,0 +1,23 @@
+{
+  "name": "minpricing",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "alepha dev",
+    "build": "alepha build",
+    "test": "alepha test",
+    "lint": "alepha lint",
+    "typecheck": "alepha typecheck",
+    "verify": "alepha verify"
+  },
+  "dependencies": {
+    "alepha": "^0.30.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "tailwindcss": "^4.3.3"
+  }
+}
