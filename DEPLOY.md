@@ -74,10 +74,10 @@ wrong for this app and is exactly what was failing):
 - **Build command**: `npm run build:cloudflare`
 - **Deploy command**: `npx wrangler deploy --config dist/wrangler.jsonc`
 - **Environment variables** (Settings → Environment variables, for the
-  *Build* step, not just runtime secrets): `CLOUDFLARE_API_TOKEN` and
+  _Build_ step, not just runtime secrets): `CLOUDFLARE_API_TOKEN` and
   `CLOUDFLARE_ACCOUNT_ID` — `alepha platform build` needs them to look up
   the D1 database it must bind to (created once by the first `alepha
-  platform up` below, run locally).
+platform up` below, run locally).
 
 The `--config` flag on the deploy command is what stops wrangler from
 falling into its "no config found, let me guess your framework" wizard
@@ -88,6 +88,28 @@ You still need to run `alepha platform up --env production` **once**,
 locally, before wiring this up: it's the only command that provisions the
 D1 database in the first place; the dashboard's build only ever
 regenerates config for resources that already exist.
+
+## Migrations: `alepha db migrations create` is unreliable here
+
+This project's schema-drift check (`alepha db migrations check`, and the
+`migrate d1` step inside `alepha platform up`) correctly reads every
+`$entity` in the app. `alepha db migrations create`, however, boots the app
+through a separate script that only sees repositories that have actually
+been _instantiated_ — in this app that resolves to just Alepha's own
+internal `alepha_sequences` table, not `deals`, `sources`, etc. Running
+`alepha db migrations create` here does **not** error, but it silently
+generates a migration that drops every real table (or a migration missing
+them entirely). **Do not run it.**
+
+The current `migrations/sqlite/<timestamp>_initial_schema/` migration was
+generated correctly by driving Alepha's internal `RepositoryProvider` +
+`DrizzleKitProvider.generateMigration()` directly (the same code path
+`migrations check` uses) instead of the buggy CLI wrapper. If the schema
+changes again and a new migration is needed, ask for it to be generated
+the same way rather than via `alepha db migrations create` — or verify with
+`alepha db migrations check` afterwards and inspect the generated SQL
+before committing (a `DROP TABLE` for an entity you didn't touch is the
+tell that it picked up the same bug).
 
 ## Known limitation
 
