@@ -1,3 +1,4 @@
+-- nonce:20260930134100 (forces a fresh D1 import etag; see DEPLOY.md)
 CREATE TABLE `alepha_sequences` (
 	`id` text PRIMARY KEY,
 	`created_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
