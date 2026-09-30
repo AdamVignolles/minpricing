@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "alepha": "^0.30.0",
+    "playwright": "^1.63.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
