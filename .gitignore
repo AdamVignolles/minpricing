@@ -40,3 +40,7 @@ coverage/
 !.yarn/versions
 .pnp.*
 data/
+
+# Dealabs login session (Playwright storageState) — sensitive, local only
+.dealabs-session.json
+.dealabs-debug/

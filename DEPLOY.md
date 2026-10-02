@@ -160,4 +160,3 @@ freeze whatever `cloudflare.env` looked like the one time the singleton
 was first constructed (often `undefined`, before any request had bound
 `env`), and every collection run afterwards would silently fall back to
 the (non-existent-on-Workers) `playwright` path forever.
-

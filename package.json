@@ -10,19 +10,26 @@
     "typecheck": "alepha typecheck",
     "verify": "alepha verify",
     "deploy:cloudflare": "alepha platform build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform db migrate --env production && alepha platform deploy --env production",
-    "build:cloudflare": "alepha platform build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform db migrate --env production"
+    "build:cloudflare": "alepha platform build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform db migrate --env production",
+    "dealabs:login": "node scripts/dealabs-login.mjs"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.4.0",
+    "@mantine/charts": "^9.6.3",
+    "@mantine/core": "^9.6.3",
+    "@mantine/hooks": "^9.6.3",
+    "@mantine/notifications": "^9.6.3",
     "alepha": "^0.30.0",
     "playwright": "^1.63.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
-    "tailwindcss": "^4.3.3",
+    "postcss": "^8.5.28",
+    "postcss-preset-mantine": "^1.18.0",
+    "postcss-simple-vars": "^7.0.1",
     "wrangler": "^4.144.0"
   }
 }

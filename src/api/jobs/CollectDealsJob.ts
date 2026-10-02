@@ -21,13 +21,29 @@ export class CollectDealsJob {
     cron: "*/30 * * * *",
     handler: async () => {
       const summaries = await this.collection.runAll();
+
+      // One structured entry per source — rather than a single concatenated
+      // string — so each source's numbers/error survive as `data` on the
+      // job execution's captured logs (see `AdminController.runs`), and the
+      // admin UI can show a clear per-source breakdown instead of a wall of
+      // JSON.
+      for (const summary of summaries) {
+        if (summary.error) {
+          this.log.warn(
+            `${summary.sourceId}: collection failed — ${summary.error}`,
+            summary,
+          );
+        } else {
+          this.log.info(
+            `${summary.sourceId}: ${summary.collected} offer(s) collected, ${summary.created} created, ${summary.updated} updated`,
+            summary,
+          );
+        }
+      }
+
+      const failures = summaries.filter((s) => s.error).length;
       this.log.info(
-        `Collection run: ${summaries
-          .map(
-            (s) =>
-              `${s.sourceId}=${s.collected}${s.error ? ` (error: ${s.error})` : ""}`,
-          )
-          .join(", ")}`,
+        `Collection run complete: ${summaries.length} source(s), ${failures} failure(s)`,
       );
     },
   });

@@ -19,6 +19,23 @@ export const trackedProductEntity = $entity({
     categoryId: z.text().optional(),
     steamAppId: z.number().optional(),
     manualPrice: z.number().min(0).optional(),
+    /**
+     * Idealo.fr product page URL (price comparison across merchants), used
+     * purely as an external "market reference price" to tell ScoringService
+     * how good a deal really is beyond our own price history — see
+     * {@link IdealoReferenceService}. Optional: most products won't have a
+     * matching Idealo listing.
+     */
+    idealoUrl: z.text().optional(),
+    /**
+     * Last Idealo "best price" successfully scraped, cached so every
+     * collection run doesn't re-scrape a bot-protected page. Kept even when
+     * a later scrape attempt fails, so scoring still has a (stale) reference
+     * rather than none at all.
+     */
+    idealoReferencePrice: z.number().min(0).optional(),
+    /** When {@link idealoReferencePrice} was last (successfully or not) checked. */
+    idealoCheckedAt: z.datetime().optional(),
     currency: db.default(z.text(), "EUR"),
     enabled: db.default(z.boolean(), true),
     createdAt: db.createdAt(),

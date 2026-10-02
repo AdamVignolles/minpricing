@@ -1,3 +1,93 @@
-@import "tailwindcss";
+/*
+ * Mantine's stylesheets. Order matters: `core` defines the CSS variables and
+ * component styles every other package builds on, so it must come first.
+ *
+ * These are plain CSS imports rather than `@import` inside a layer — Mantine
+ * already scopes everything under `.mantine-*` class names, and the project
+ * ships no competing reset.
+ */
+@import "@mantine/core/styles.css";
+@import "@mantine/charts/styles.css";
+@import "@mantine/notifications/styles.css";
 
-/* Add your styles here */
+/*
+ * Mantine paints `Paper`/`Card` with the page background, which makes a grid
+ * of cards read as one flat sheet. A deal grid needs its cards to be objects
+ * you could pick up, so surfaces get their own value, one step away from the
+ * page in both schemes.
+ *
+ * `:root[...]` matches Mantine's own selector specificity; the later source
+ * order is what makes these win.
+ */
+:root[data-mantine-color-scheme="light"] {
+  --mantine-color-body: #f6f7f9;
+  --app-surface: #ffffff;
+  --app-surface-muted: #eef1f5;
+}
+
+:root[data-mantine-color-scheme="dark"] {
+  --app-surface: #171e27;
+  --app-surface-muted: #0c0f14;
+}
+
+.mantine-Paper-root,
+.mantine-Card-root {
+  --paper-bg: var(--app-surface);
+}
+
+/*
+ * Prices are read by comparison, column against column. Proportional digits
+ * make "1 299,00" and "149,99" different widths, so the eye has to re-anchor
+ * on every card. Applied wherever a figure is meant to be compared.
+ */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Horizontal rails: scrollable on touch, without a visible scrollbar. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * Titles in a grid must occupy a fixed number of lines, otherwise cards of
+ * different heights break the horizontal scan the whole layout relies on.
+ */
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/*
+ * The only motion in the product: a card lifting under the pointer. It exists
+ * to say "this is clickable", so it is disabled for users who asked for less.
+ */
+.lift {
+  transition:
+    transform 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.lift:hover {
+  transform: translateY(-2px);
+  border-color: var(--mantine-primary-color-filled);
+  box-shadow: var(--mantine-shadow-md);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lift,
+  .lift:hover {
+    transition: none;
+    transform: none;
+  }
+}

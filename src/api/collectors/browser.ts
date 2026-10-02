@@ -60,7 +60,8 @@ export async function withBrowser<T>(
 ): Promise<T> {
   if (cloudflareBinding) {
     const { default: puppeteer } = await import("@cloudflare/puppeteer");
-    const browser = await puppeteer.launch(cloudflareBinding);
+    await waitForLaunchSlot();
+    const browser = await launchCloudflareBrowser(puppeteer, cloudflareBinding);
     try {
       return await fn({ engine: "cloudflare", browser });
     } finally {
@@ -81,6 +82,73 @@ export async function withBrowser<T>(
   } finally {
     await browser.close();
   }
+}
+
+/**
+ * Cloudflare's free Browser Rendering plan only allows one new browser to
+ * be launched every 20s account-wide. The margin added on top of that is
+ * deliberate: the 20s window is enforced server-side and starts from the
+ * previous launch *attempt*, so cutting it exactly at 20s still raced to a
+ * 429 in testing.
+ */
+const MIN_LAUNCH_INTERVAL_MS = 21_000;
+
+/**
+ * Timestamp (ms) of the last Cloudflare browser launch *attempt* made by
+ * this isolate, successful or not. Cloudflare Workers routinely reuse the
+ * same isolate across several invocations (e.g. consecutive cron ticks, or
+ * `CollectionService.runAll()` calling into both Amazon's and Cdiscount's
+ * `discover()` within the same request), so this module-level value is
+ * what lets a *later* launch know to wait rather than just reacting to a
+ * 429 after the fact. It resets to 0 on a fresh isolate, which is fine: an
+ * isolate that has never launched a browser has nothing to wait for.
+ */
+let lastLaunchAttemptAt = 0;
+
+/**
+ * Blocks until at least {@link MIN_LAUNCH_INTERVAL_MS} has passed since the
+ * last launch attempt *in this isolate*. Proactive, not just reactive: by
+ * the time `CollectionService` moves from Amazon to Cdiscount, waiting
+ * here avoids spending a launch attempt that was always going to 429.
+ */
+async function waitForLaunchSlot(): Promise<void> {
+  const elapsed = Date.now() - lastLaunchAttemptAt;
+  const remaining = MIN_LAUNCH_INTERVAL_MS - elapsed;
+  if (remaining > 0) {
+    await new Promise((resolve) => setTimeout(resolve, remaining));
+  }
+}
+
+/**
+ * Retrying after a 429 (with the same margin-of-safety delay) is a safety
+ * net for launches this isolate didn't know about — another isolate, or
+ * manual testing, using up the same account-wide window. A request that
+ * fails for a real reason (bad binding, the 10min/day quota truly
+ * exhausted) still surfaces after exhausting the retries.
+ */
+async function launchCloudflareBrowser(
+  puppeteer: typeof import("@cloudflare/puppeteer").default,
+  binding: CloudflareBrowserBinding,
+  attempts = 3,
+): Promise<import("@cloudflare/puppeteer").Browser> {
+  for (let attempt = 1; ; attempt++) {
+    lastLaunchAttemptAt = Date.now();
+    try {
+      return await puppeteer.launch(binding);
+    } catch (error) {
+      if (attempt >= attempts || !isRateLimitError(error)) {
+        throw error;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, MIN_LAUNCH_INTERVAL_MS),
+      );
+    }
+  }
+}
+
+function isRateLimitError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("429") || /rate limit/i.test(message);
 }
 
 /**
@@ -163,4 +231,86 @@ export function parsePriceFr(text: string): number | undefined {
   }
 
   return Number(match[1].replace(",", "."));
+}
+
+/**
+ * Scrolls a listing page toward the bottom in viewport-sized steps,
+ * re-extracting and accumulating matching elements after every step, and
+ * stops early once scrolling further stops moving the page.
+ *
+ * This exists *instead of* a simpler "scroll to the bottom, then read the
+ * DOM once" helper because Amazon's (and, to a lesser extent, Cdiscount's)
+ * deal grid is virtualized: at any given moment the DOM only holds the
+ * handful of cards near the current scroll position, older ones get
+ * unmounted as new ones render in. Reading the DOM only once at the end
+ * therefore only ever sees whichever batch happened to be mounted at the
+ * final scroll position — measured in testing at just 5-10 cards — while
+ * collecting after *every* step and merging by key surfaced 200+ distinct
+ * cards on the same page. `scrollBy(window.innerHeight)` rather than one
+ * `scrollTo(0, scrollHeight)` jump matters for the same reason: a big jump
+ * skips past batches fast enough that their `IntersectionObserver` never
+ * fires, which measured as *emptying* the grid (cards briefly go to 0)
+ * instead of growing it.
+ *
+ * `rounds` is a ceiling, not a target: once a few consecutive steps fail
+ * to move `scrollY` any further, the page has clearly finished loading
+ * everything it ever will, and scrolling again would just burn time for
+ * nothing — so a generous `rounds` default costs almost nothing on a
+ * short list, while still giving a long one the room it needs to fully
+ * unroll. Uses only the `evaluate` method already on {@link DealsPage}, so
+ * it works identically on both the Playwright and Cloudflare engines.
+ */
+export async function scrollAndCollect<T>(
+  page: DealsPage,
+  extract: () => Promise<T[]>,
+  keyOf: (item: T) => string | null | undefined,
+  options: { rounds?: number; pauseMs?: number } = {},
+): Promise<T[]> {
+  const { rounds = 25, pauseMs = 700 } = options;
+  const byKey = new Map<string, T>();
+  let lastScrollY = -1;
+  let unchangedStreak = 0;
+
+  for (let i = 0; i < rounds; i++) {
+    for (const item of await extract()) {
+      const key = keyOf(item);
+      if (key && !byKey.has(key)) {
+        byKey.set(key, item);
+      }
+    }
+
+    const scrollY = await page.evaluate(
+      (ms) =>
+        new Promise<number>((resolve) => {
+          window.scrollBy(0, window.innerHeight);
+          setTimeout(() => resolve(window.scrollY), ms);
+        }),
+      pauseMs,
+    );
+
+    if (scrollY <= lastScrollY) {
+      unchangedStreak++;
+      // 3, not 2: Amazon's grid briefly reports an unchanged/empty batch
+      // between two virtualization windows while new cards are still
+      // mounting — stopping on the first repeat cut the run short before
+      // reaching the actual end in testing.
+      if (unchangedStreak >= 3) {
+        break;
+      }
+    } else {
+      unchangedStreak = 0;
+    }
+    lastScrollY = scrollY;
+  }
+
+  // One last extraction: the final scroll step above may have mounted a
+  // batch that was never read inside the loop.
+  for (const item of await extract()) {
+    const key = keyOf(item);
+    if (key && !byKey.has(key)) {
+      byKey.set(key, item);
+    }
+  }
+
+  return Array.from(byKey.values());
 }

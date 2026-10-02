@@ -18,22 +18,30 @@ src/
 │   ├── schemas/          # Request/response schemas
 │   └── index.ts          # ApiModule ($module)
 ├── web/                  # Frontend (React, SSR)
-│   ├── components/       # React components
-│   ├── AppRouter.ts      # $page routes
+│   ├── components/       # ui/ (design system), deals/, layout/
+│   ├── pages/            # One file per route
+│   ├── theme.ts          # Mantine theme
+│   ├── AppRouter.ts      # $page routes (layout + children)
 │   └── index.ts          # WebModule ($module)
 ├── main.server.ts        # Server entry
 ├── main.browser.ts       # Browser entry
-└── main.css              # Tailwind entry
+└── main.css              # Mantine styles + app CSS variables
 ```
 
 `src/api/` and `src/web/` each have an `index.ts` exporting the `$module`
 that groups everything below it — register new services there. The
 subdirectories are plain folders; they have no `index.ts` of their own.
 
-Tailwind is already wired up through `vite.config.ts` — style with utility
-classes, don't add another CSS framework. The scaffolded home page renders
-`GettingStarted` from the framework and carries no classes of its own, so
-there is no house style to match: the first component you write sets it.
+The UI is built on **Mantine** (`@mantine/core`, `hooks`, `charts`,
+`notifications`), wired through `postcss.config.cjs`. Style with Mantine
+components and props; don't add another CSS framework. The shared theme lives
+in `src/web/theme.ts` and the shell in `src/web/components/layout/AppLayout.tsx`
+— a layout `$page` that owns `MantineProvider` and renders every other route
+through `NestedView`.
+
+One convention matters more than the rest: the accent colour (`signal`, lime)
+is reserved for price and discount information. Never use it decoratively, and
+always state a discount in words as well as colour.
 
 `vite.config.ts` also holds the Vitest config, under `test`. Don't add a
 `vitest.config.ts`: one file keeps plugins and path aliases identical between

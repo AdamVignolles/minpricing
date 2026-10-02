@@ -1,11 +1,12 @@
 # DealRadar — Dossier d'architecture (v1)
 
 > Périmètre confirmé : **outil privé** (pas de site public, pas de SEO) qui aide
-> à repérer et **préparer des posts pour Dealabs** : collecte de quelques
+> à repérer et **publier des deals sur Dealabs** : collecte de quelques
 > produits/prix par jour sur **Amazon, Cdiscount et le jeu vidéo**, détection
-> des vraies baisses de prix via historique, et génération d'un **brouillon**
-> que l'utilisateur relit et poste lui-même sur Dealabs (pas de publication
-> automatique). Volume : quelques deals/jour, usage mono-utilisateur.
+> des vraies baisses de prix via historique, génération d'un **brouillon**,
+> et publication automatique via un navigateur Playwright authentifié avec
+> ta propre session Dealabs (login manuel une fois, `npm run dealabs:login`).
+> Volume : quelques deals/jour, usage mono-utilisateur.
 
 Ce dossier est volontairement recadré par rapport au brief initial
 (agrégateur public multi-sources) : on garde la même colonne vertébrale
@@ -26,12 +27,19 @@ Un outil personnel qui :
 4. te présente, dans une console privée, les produits dont la baisse est
    jugée intéressante, avec un **brouillon de post Dealabs pré-rempli**
    (titre, prix, lien, image, texte) ;
-5. te laisse copier/ajuster ce brouillon et le poster toi-même sur Dealabs.
+5. te laisse soit copier/ajuster ce brouillon et poster toi-même sur
+   Dealabs, soit déclencher la **publication automatique** (bouton
+   "Publication automatique") qui remplit et soumet le formulaire Dealabs
+   pour toi via Playwright, en réutilisant une session que tu as toi-même
+   ouverte (`npm run dealabs:login`).
 
 Pas de site public, pas d'indexation, pas de compte utilisateur autre que
-le tien (auth simple), pas de publication automatique sur Dealabs (leurs CGU
-et anti-bot ne le permettent pas de façon fiable, et un post généré à 100%
-sans relecture humaine serait risqué).
+le tien (auth simple). La publication automatique utilise ta propre
+session Dealabs (jamais ton mot de passe, jamais stocké par l'outil) ;
+assume-la en connaissance de cause : elle peut enfreindre les CGU
+anti-bot de Dealabs et risquer un bannissement de compte si Dealabs la
+détecte — c'est un choix délibéré de l'utilisateur, documenté ici plutôt
+que caché.
 
 ## 2. Fonctionnement global
 
@@ -188,6 +196,49 @@ respect du `robots.txt`), sans contourner de protection anti-bot. On ne
 scrape jamais de CAPTCHA/anti-bot — si un site bloque, la source est
 marquée en erreur et il faut soit un accès API, soit une saisie manuelle.
 
+### Élargir le volume de bons plans trouvés par `discover()`
+
+`AmazonCollector`/`CdiscountCollector` fusionnent les cartes de **toutes**
+les URLs de listing données (dédupliquées par ASIN/URL) avant d'appliquer
+un plafond `limit` — donc les deux leviers pour en trouver plus :
+
+1. **Ajouter des URLs de listing** via `AMAZON_DEALS_URL` /
+   `CDISCOUNT_HOME_URL` (liste séparée par des virgules — chaque page
+   supplémentaire (catégorie, promo dédiée…) contribue ses propres cartes
+   gratuitement, avant même que `limit` s'applique).
+2. **Relever `AMAZON_DEALS_LIMIT` / `CDISCOUNT_DEALS_LIMIT`** (défauts :
+   40 / 60) — mais progressivement : pour Amazon, chaque candidat
+   au-dessus de la limite précédente ouvre une page produit de plus, donc
+   une requête de plus qui peut déclencher la protection anti-bot.
+
+La grille de deals Amazon est **virtualisée** : le DOM ne contient jamais
+que le lot de cartes proche de la position de scroll courante, les plus
+anciennes étant démontées au fur et à mesure que de nouvelles apparaissent.
+Deux conséquences vérifiées en direct sur `amazon.fr/deals` :
+
+- Un grand saut `scrollTo(0, document.body.scrollHeight)` **vide** la
+  grille (passée de 10 cartes à 0) car il saute par-dessus les zones de
+  déclenchement des `IntersectionObserver` qui chargent le lot suivant.
+- Même avec un scroll incrémental correct, ne lire le DOM qu'une seule
+  fois à la fin ne capture que la dernière fenêtre de virtualisation
+  (~5-10 cartes) — jamais l'ensemble réellement vu pendant le scroll.
+
+`scrollAndCollect` (dans `browser.ts`) règle ça en scrollant un viewport à
+la fois (`scrollBy`) et en **ré-extrayant et fusionnant les cartes
+(dédupliquées par clé) après chaque étape**, pas seulement à la fin — vérifié
+en conditions réelles : ~200 ASIN uniques récupérés sur une même page,
+contre 5 à 10 avec une lecture unique. Il s'arrête après 3 étapes
+consécutives sans progression du scroll (2 aurait coupé trop tôt : la
+grille Amazon peut brièvement sembler ne plus avancer en pleine transition
+entre deux fenêtres de virtualisation).
+
+Cdiscount n'est pas concerné par ce problème : le carrousel "Bons plans"
+de sa page d'accueil n'est pas virtualisé et ne contient qu'une poignée de
+cartes statiques (~8) quel que soit le scroll — c'est une limite de
+contenu, pas de technique de scraping. `CdiscountCollector` utilise quand
+même `scrollAndCollect` par cohérence et au cas où une future page de
+listing serait, elle, virtualisée.
+
 ## 7. Modèle de données
 
 ```ts
@@ -260,8 +311,10 @@ const Source = $entity({
 
 `DealabsDraft` est la table clé propre à ce projet : elle stocke le
 brouillon généré (titre formaté façon Dealabs, corps du message, lien
-affilié le cas échéant) et son statut, pour que la console affiche
-"à relire" / "posté" / "ignoré" — sans jamais poster automatiquement.
+affilié le cas échéant) et son statut ("à relire" / "posté" / "ignoré").
+Le passage à "posté" peut venir soit d'une vérification manuelle (lien
+collé par l'utilisateur après un post manuel), soit de la publication
+automatique elle-même une fois le formulaire Dealabs soumis avec succès.
 
 ## 8. Algorithme de détection des bons plans / historique de prix
 
@@ -280,7 +333,9 @@ affilié le cas échéant) et son statut, pour que la console affiche
 Métriques retenues : réduction annoncée, écart au prix minimum historique,
 écart au prix moyen historique, ancienneté de l'historique (plus il y a de
 points, plus la confiance est haute), fiabilité de la source (API > saisie
-manuelle > scrape).
+manuelle > scrape), et — en bonus optionnel — écart à un prix de référence
+marché externe (Idealo.fr, quand le produit suivi a une page Idealo
+configurée).
 
 ```
 score = clamp(0..100,
@@ -288,12 +343,57 @@ score = clamp(0..100,
   + 30 * (isNewHistoricalMin ? 1 : 0)      // vrai plus bas prix jamais vu = signal fort
   + 20 * sourceReliabilityWeight            // 1.0 API, 0.7 manuel, 0.4 scrape
   + 10 * min(historyPoints / 10, 1)        // confiance liée à la profondeur d'historique
+  + 20 * (discountVsIdealoPrice)           // bonus : écart au prix de référence Idealo, 0 si absent
 )
 ```
+
+Le bonus Idealo (`IdealoReferenceService`) compare le prix actuel au prix
+le plus bas listé sur Idealo.fr tous marchands confondus, ce qui permet de
+distinguer un vrai bon plan (qui bat aussi le marché large) d'un produit
+qui n'a simplement jamais baissé dans notre propre historique (souvent
+mince, vu le peu de produits suivis). Scrapé via navigateur headless
+(même mécanisme que Amazon/Cdiscount, voir `browser.ts`), avec un cache de
+24h sur `TrackedProduct.idealoReferencePrice` : Idealo a une protection
+anti-bot agressive, donc un échec de scrape ne bloque jamais la collecte —
+le dernier prix en cache est réutilisé, ou le bonus vaut simplement 0.
 
 Volontairement simple et explicable ligne par ligne (pas de boîte noire) ;
 évolutif plus tard (pondérations ajustables en config, puis modèle appris
 si le volume de données le justifie un jour — pas au MVP).
+
+### Classification du bon plan
+
+En plus du score numérique, `ScoringService.classifyDeal` range chaque
+offre dans une étiquette lisible : `excellent` / `good` / `average` /
+`overpriced` / `unknown`. Mêmes comparaisons que le score (prix de
+référence Idealo si disponible, sinon écart à la moyenne historique), donc
+l'étiquette ne peut jamais contredire le score affiché à côté. Exposée par
+`GET /deals/:id/price-stats` (`classification`) et affichée sur la fiche
+détail comme badge ("Excellente affaire", "Prix normal", "Au-dessus du
+marché"…), à côté du graphique d'historique qui trace aussi le prix de
+référence Idealo en ligne horizontale quand il est connu.
+
+### Historique de prix Idealo (best-effort)
+
+À l'ouverture d'une fiche de bon plan, si le produit suivi a un `idealoUrl`
+configuré, le front appelle `GET /deals/:id/idealo-history`, qui déclenche
+un scrape **en direct** (pas de cache, pas de pré-collecte : une seule
+visite, pas un run de collecte à protéger) du graphique "évolution du
+prix" d'Idealo via `IdealoReferenceService.getPriceHistory`, affiché dans
+un second graphique sous l'historique de nos propres relevés.
+
+Important : Idealo a renvoyé un 403 brut (aucun HTML, aucune donnée JS) à
+chaque tentative de scrape faite depuis cet environnement de
+développement — la vraie structure du graphique n'a donc jamais pu être
+inspectée. `scrapeIdealoHistory` essaie plusieurs stratégies génériques
+(globals SSR usuels `__NEXT_DATA__`/`__NUXT__`/..., scan structurel de tout
+JSON inline ressemblant à une série date/prix, attribut `data-*` d'un
+conteneur de graphique) plutôt qu'un sélecteur unique conçu sur la vraie
+page — sans garantie que l'une d'elles corresponde au marquage réel
+d'Idealo. Dégrade toujours proprement (`available: false`, jamais
+d'erreur, jamais de donnée inventée) si rien ne correspond ou si Idealo
+bloque la requête. À réévaluer/ajuster une fois testé depuis un
+environnement qui n'est pas bloqué par Idealo.
 
 ## 10. Déduplication
 
@@ -343,7 +443,8 @@ Toutes en `$action` Alepha, avec schémas Zod de requête/réponse. Routes
   d'un deal avec graphique d'historique de prix (lib légère, ex: recharts),
   vue "brouillon Dealabs" éditable + bouton copier, panneau admin (état des
   sources, dernières erreurs).
-- Tailwind pour le style, pas de nouvelle lib CSS.
+- Mantine pour le style et les composants (`@mantine/core`, `charts`,
+  `notifications`), pas de nouvelle lib CSS.
 
 ## 14. Sécurité
 
@@ -404,9 +505,14 @@ non nécessaire au MVP.
 - Cdiscount : pas d'API publique fiable connue — saisie manuelle assistée.
 - Scraping : jamais en contournement d'anti-bot/CAPTCHA ; toute source qui
   l'exige reste "manuelle" plutôt que "scrape".
-- Publication Dealabs : volontairement non automatisée (CGU de la
-  plateforme, risque de ban de compte) — l'outil reste un générateur de
-  brouillon, jamais un poster automatique.
+- Publication Dealabs : automatisée via Playwright + une session que tu
+  ouvres toi-même (`npm run dealabs:login`). Risque assumé : CGU de la
+  plateforme, risque de ban de compte si l'automatisation est détectée.
+  L'outil ne stocke jamais ton mot de passe Dealabs, seulement un fichier
+  de session local (cookies/local storage), et refuse de tourner sur le
+  déploiement serverless (pas de navigateur persistant possible sur
+  Workers). En cas d'échec du formulaire auto (sélecteurs Dealabs qui
+  changent), le flux copier/coller manuel reste disponible en secours.
 
 ## 21. MVP
 

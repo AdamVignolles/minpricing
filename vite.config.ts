@@ -1,8 +1,8 @@
-import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  plugins: [tailwindcss()],
+  // Styling is Mantine + PostCSS (see postcss.config.cjs), which Vite picks
+  // up on its own — no style plugin to register here.
   server: {
     watch: {
       ignored: ["**/data/**"],

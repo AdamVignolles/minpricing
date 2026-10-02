@@ -11,6 +11,13 @@ export interface PriceStats {
   maxPrice: number;
   isNewHistoricalMin: boolean;
   historyPoints: number;
+  /**
+   * External "market reference price" (currently: Idealo's lowest listed
+   * price across merchants), when available — see
+   * {@link IdealoReferenceService}. Lets {@link ScoringService} reward a
+   * deal that beats the wider market, not just our own price history.
+   */
+  referencePrice?: number;
 }
 
 /**
@@ -24,6 +31,14 @@ export class PricingService {
   protected history = $repository(priceHistoryEntity);
   protected dateTime = $inject(DateTimeProvider);
 
+  /**
+   * How long an unchanged price may go unrecorded. Without this, a stable
+   * price produces a single point ever, and the detail page's chart has
+   * nothing to draw a line between — the history looked empty even on
+   * deals tracked for weeks.
+   */
+  protected static readonly HEARTBEAT_MS = 24 * 60 * 60 * 1000;
+
   async recordObservation(
     dealId: string,
     price: number,
@@ -36,9 +51,14 @@ export class PricingService {
       limit: 1,
     });
 
-    if (last[0] && last[0].price === price) {
-      // Price unchanged since last observation: nothing to record.
-      return;
+    const previous = last[0];
+    if (previous && previous.price === price) {
+      const age =
+        Date.now() - new Date(previous.observedAt as string | number).getTime();
+      if (age < PricingService.HEARTBEAT_MS) {
+        // Price unchanged and recorded recently: nothing to record.
+        return;
+      }
     }
 
     await this.history.create({
@@ -50,7 +70,11 @@ export class PricingService {
     });
   }
 
-  async getStats(dealId: string, currentPrice: number): Promise<PriceStats> {
+  async getStats(
+    dealId: string,
+    currentPrice: number,
+    referencePrice?: number,
+  ): Promise<PriceStats> {
     const rows = await this.history.findMany({
       where: { dealId: { eq: dealId } },
     });
@@ -69,6 +93,7 @@ export class PricingService {
       maxPrice,
       isNewHistoricalMin: currentPrice <= minPrice,
       historyPoints: prices.length,
+      referencePrice,
     };
   }
 }

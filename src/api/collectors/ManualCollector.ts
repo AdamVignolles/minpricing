@@ -21,6 +21,7 @@ export class ManualCollector implements DealSource {
 
       deals.push({
         externalId: product.id,
+        productId: product.id,
         title: product.title,
         url: product.url,
         price: product.manualPrice,

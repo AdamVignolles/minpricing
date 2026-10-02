@@ -4,6 +4,7 @@ import { $repository } from "alepha/orm";
 import { $action } from "alepha/server";
 
 import { trackedProductEntity } from "../entities/TrackedProduct.ts";
+import { $adminSession } from "../services/AdminAuth.ts";
 import { CollectionService } from "../services/CollectionService.ts";
 
 const trackedProductResponseSchema = trackedProductEntity.schema;
@@ -13,6 +14,9 @@ const trackedProductResponseSchema = trackedProductEntity.schema;
  * collect it immediately for "manual" sources (there is no price yet, see
  * `updateManualPrice`); for "api" sources (Steam) it is picked up on the
  * next cron run, or immediately via `POST /api/admin/collect`.
+ *
+ * Admin-only: every action here is only ever called from the `/admin`
+ * dashboard, so all three sit behind the same {@link $adminSession} gate.
  */
 export class ProductsController {
   protected products = $repository(trackedProductEntity);
@@ -21,6 +25,7 @@ export class ProductsController {
   listProducts = $action({
     method: "GET",
     path: "/products",
+    use: [$adminSession()],
     schema: {
       query: z.object({ sourceId: z.text().optional() }),
       response: z.array(trackedProductResponseSchema),
@@ -34,6 +39,7 @@ export class ProductsController {
   create = $action({
     method: "POST",
     path: "/products",
+    use: [$adminSession()],
     schema: {
       body: z.object({
         sourceId: z.text(),
@@ -43,6 +49,7 @@ export class ProductsController {
         categoryId: z.text().optional(),
         steamAppId: z.number().optional(),
         manualPrice: z.number().min(0).optional(),
+        idealoUrl: z.text().optional(),
         currency: z.text().optional(),
       }),
       response: trackedProductResponseSchema,
@@ -62,6 +69,7 @@ export class ProductsController {
   updateManualPrice = $action({
     method: "PATCH",
     path: "/products/:id/price",
+    use: [$adminSession()],
     schema: {
       params: z.object({ id: z.text() }),
       body: z.object({ manualPrice: z.number().min(0) }),
@@ -74,5 +82,30 @@ export class ProductsController {
       await this.collection.runOne(product.sourceId);
       return product;
     },
+  });
+
+  /**
+   * Sets/clears the Idealo.fr product page used as an external market
+   * reference price for scoring (see `IdealoReferenceService`). Doesn't
+   * re-run collection itself: the reference price is only (re)fetched
+   * lazily, on the next collection run for this product's source.
+   */
+  updateIdealoUrl = $action({
+    method: "PATCH",
+    path: "/products/:id/idealo",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ id: z.text() }),
+      body: z.object({ idealoUrl: z.text().optional() }),
+      response: trackedProductResponseSchema,
+    },
+    handler: async ({ params, body }) =>
+      this.products.updateById(params.id, {
+        idealoUrl: body.idealoUrl,
+        // Clearing the URL, or pointing it at a different page, voids any
+        // cached price: it belonged to whatever page was set before.
+        idealoReferencePrice: undefined,
+        idealoCheckedAt: undefined,
+      }),
   });
 }

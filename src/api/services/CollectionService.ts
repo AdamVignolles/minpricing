@@ -12,7 +12,10 @@ import { SteamCollector } from "../collectors/SteamCollector.ts";
 import { dealEntity } from "../entities/Deal.ts";
 import { sourceEntity } from "../entities/Source.ts";
 import { trackedProductEntity } from "../entities/TrackedProduct.ts";
+import { CategorizationService } from "./CategorizationService.ts";
 import { DealabsDraftService } from "./DealabsDraftService.ts";
+import { DEFAULT_MERCHANT_BY_SOURCE } from "./DealTypes.ts";
+import { IdealoReferenceService } from "./IdealoReferenceService.ts";
 import { PricingService } from "./PricingService.ts";
 import { ScoringService, type SourceReliability } from "./ScoringService.ts";
 
@@ -22,6 +25,18 @@ export interface CollectionSummary {
   created: number;
   updated: number;
   error?: string;
+}
+
+/**
+ * Splits a comma-separated env value into a list of trimmed, non-empty
+ * URLs. See {@link CollectionService.env}'s doc for why these accept
+ * several entries.
+ */
+function splitUrls(value: string): string[] {
+  return value
+    .split(",")
+    .map((url) => url.trim())
+    .filter((url) => url.length > 0);
 }
 
 /**
@@ -44,33 +59,66 @@ export class CollectionService {
   protected pricing = $inject(PricingService);
   protected scoring = $inject(ScoringService);
   protected drafts = $inject(DealabsDraftService);
+  protected categorization = $inject(CategorizationService);
+  protected idealoReference = $inject(IdealoReferenceService);
+
+  /**
+   * Fallback merchant for sources that discover offers on a single
+   * merchant's own site. Without it every auto-discovered deal landed with
+   * `merchantId = null` and the merchant filter matched nothing.
+   */
+  protected readonly defaultMerchantBySource = DEFAULT_MERCHANT_BY_SOURCE;
 
   /**
    * Deal-page URLs to auto-discover from. Overridable per environment since
    * these are real merchant pages scraped with a headless browser — see
    * {@link AmazonCollector} / {@link CdiscountCollector} for why a browser
    * is required and what happens when their markup changes.
+   *
+   * Accepts a comma-separated list: every URL is visited and its cards are
+   * merged (de-duplicated by ASIN/URL) before any product page is opened,
+   * so adding another category/listing page here is the main way to widen
+   * how many candidates a run actually considers — e.g.
+   * `AMAZON_DEALS_URL=https://www.amazon.fr/deals,https://www.amazon.fr/gp/goldbox`.
+   *
+   * `*_LIMIT` caps how many of the merged/de-duplicated candidates are
+   * actually turned into deals (Amazon opens one product page per
+   * candidate to read its price, so this is also the number of extra
+   * requests a run makes — raise it gradually and watch for an uptick in
+   * challenge/block responses rather than jumping straight to a huge
+   * number).
    */
   protected env = $env(
     z.object({
       AMAZON_DEALS_URL: z.text({
         default: "https://www.amazon.fr/deals",
       }),
+      AMAZON_DEALS_LIMIT: z.number().default(40),
       CDISCOUNT_HOME_URL: z.text({
-        default: "https://www.cdiscount.com/",
+        // Homepage's "Bons plans" carousel is thin (~8 static cards,
+        // confirmed not virtualized — scrolling never grows it) so the
+        // dedicated soldes/promos listing page is included by default
+        // too: it lazy-loads a bigger batch (~32 cards) on first scroll.
+        // No further pagination was found for it (no `?page=` support,
+        // no "next" control, no facet links) — 32 is its real ceiling.
+        default:
+          "https://www.cdiscount.com/,https://www.cdiscount.com/soldes-promotions/v-14107-14107.html",
       }),
+      CDISCOUNT_DEALS_LIMIT: z.number().default(60),
     }),
   );
 
   protected readonly collectorsById: Record<string, DealSource> = {
     manual: new ManualCollector(),
     steam: new SteamCollector(),
-    amazon: new AmazonCollector(this.env.AMAZON_DEALS_URL, undefined, () =>
-      this.cloudflareBrowserBinding(),
+    amazon: new AmazonCollector(
+      splitUrls(this.env.AMAZON_DEALS_URL),
+      this.env.AMAZON_DEALS_LIMIT,
+      () => this.cloudflareBrowserBinding(),
     ),
     cdiscount: new CdiscountCollector(
-      this.env.CDISCOUNT_HOME_URL,
-      undefined,
+      splitUrls(this.env.CDISCOUNT_HOME_URL),
+      this.env.CDISCOUNT_DEALS_LIMIT,
       () => this.cloudflareBrowserBinding(),
     ),
   };
@@ -184,6 +232,33 @@ export class CollectionService {
   }
 
   /**
+   * Looks up the tracked product behind this offer (only set for
+   * `collect()`-sourced deals — manual/Steam, not Amazon/Cdiscount's
+   * auto-discovery, which never had one to begin with) and, if it has an
+   * `idealoUrl` configured, its external market reference price alongside
+   * that URL (denormalized onto `Deal.idealoUrl` so the detail page can
+   * fetch the full history on demand without a reverse lookup).
+   */
+  protected async resolveIdealoReference(
+    productId?: string,
+  ): Promise<{ referencePrice?: number; idealoUrl?: string }> {
+    if (!productId) {
+      return {};
+    }
+    const product = await this.trackedProducts.findOne({
+      where: { id: { eq: productId } },
+    });
+    if (!product) {
+      return {};
+    }
+    const referencePrice = await this.idealoReference.getReferencePrice(
+      product,
+      () => this.cloudflareBrowserBinding(),
+    );
+    return { referencePrice, idealoUrl: product.idealoUrl };
+  }
+
+  /**
    * @returns true if a new deal was created, false if an existing one was updated.
    */
   protected async upsertDeal(
@@ -202,13 +277,25 @@ export class CollectionService {
       },
     });
 
-    const discountPercentage =
-      existing && existing.currentPrice > 0
-        ? Math.round(
-            ((existing.currentPrice - rawDeal.price) / existing.currentPrice) *
-              100,
-          )
+    // The merchant's own reference price is what a shopper compares
+    // against, so that is what drives the badge. `oldPrice` (the price we
+    // saw on the previous run) is kept as a separate signal: it is almost
+    // always equal to the current one, which is exactly why using it here
+    // made every deal render as "-0%".
+    const listPrice =
+      rawDeal.listPrice !== undefined && rawDeal.listPrice > rawDeal.price
+        ? rawDeal.listPrice
         : undefined;
+
+    const discountPercentage =
+      listPrice !== undefined
+        ? Math.round(((listPrice - rawDeal.price) / listPrice) * 100)
+        : undefined;
+
+    const merchantId =
+      rawDeal.merchantId ?? this.defaultMerchantBySource[sourceId];
+    const categoryId =
+      rawDeal.categoryId ?? this.categorization.classify(rawDeal.title);
 
     const dealId = existing
       ? existing.id
@@ -219,9 +306,12 @@ export class CollectionService {
             title: rawDeal.title,
             url: rawDeal.url,
             imageUrl: rawDeal.imageUrl,
-            merchantId: rawDeal.merchantId,
-            categoryId: rawDeal.categoryId,
+            description: rawDeal.description,
+            merchantId,
+            categoryId,
             currentPrice: rawDeal.price,
+            listPrice,
+            discountPercentage,
             currency: rawDeal.currency,
             availability: rawDeal.availability ?? "unknown",
             firstSeenAt: now,
@@ -235,7 +325,14 @@ export class CollectionService {
         title: rawDeal.title,
         url: rawDeal.url,
         imageUrl: rawDeal.imageUrl,
+        // Keep the last description we managed to scrape rather than
+        // blanking it out on a run that couldn't get one (e.g. the
+        // product page briefly failed to load).
+        description: rawDeal.description ?? existing.description,
+        merchantId,
+        categoryId,
         currentPrice: rawDeal.price,
+        listPrice,
         oldPrice: existing.currentPrice,
         currency: rawDeal.currency,
         discountPercentage,
@@ -252,9 +349,16 @@ export class CollectionService {
       sourceId,
     );
 
-    const stats = await this.pricing.getStats(dealId, rawDeal.price);
+    const { referencePrice, idealoUrl } = await this.resolveIdealoReference(
+      rawDeal.productId,
+    );
+    const stats = await this.pricing.getStats(
+      dealId,
+      rawDeal.price,
+      referencePrice,
+    );
     const score = this.scoring.computeScore(stats, sourceType);
-    await this.deals.updateById(dealId, { score });
+    await this.deals.updateById(dealId, { score, referencePrice, idealoUrl });
 
     const deal = await this.deals.getById(dealId);
     await this.drafts.maybeGenerateDraft(deal, stats);
