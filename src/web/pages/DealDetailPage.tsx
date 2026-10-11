@@ -27,7 +27,10 @@ import { type FC, useEffect, useMemo, useState } from "react";
 
 import type { DealsController } from "../../api/controllers/DealsController.ts";
 import type { DraftsController } from "../../api/controllers/DraftsController.ts";
+import DealabsConnection from "../components/deals/DealabsConnection.tsx";
+import DealAnalysis from "../components/deals/DealAnalysis.tsx";
 import DealImage from "../components/deals/DealImage.tsx";
+import PriceHistoryPanel from "../components/deals/PriceHistoryPanel.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
 import { EmptyState } from "../components/ui/States.tsx";
@@ -67,41 +70,57 @@ const CLASSIFICATION: Record<
 };
 
 /**
- * Turns the price statistics into a sentence.
+ * Turns the price analysis into a sentence.
  *
  * The chart below shows *what* happened; this says *whether it is a good
  * time to buy*, which is the only question the user actually has. Every
  * branch is derived from observed data — when there is not enough history we
  * say that, rather than reaching for a reassuring phrase.
  *
- * When an external market reference price is available (Idealo's lowest
- * listed price across merchants), the comparison is made against that
- * instead of our own history — a thin history of one product can't always
- * tell a real deal from a product that simply never moves, while Idealo
- * reflects the wider market.
+ * Uses the very reference and alternative the score was computed from
+ * ({@link PriceStats.analysis}): being more expensive elsewhere trumps
+ * everything, then the real discount vs the product's normal price, and
+ * only then our own history.
  */
 const verdict = (
   stats: PriceStats,
   currency: string,
 ): { tone: "good" | "neutral" | "warn"; text: string } => {
   const tone = CLASSIFICATION[stats.classification].tone;
+  const { reference, bestAlternative } = stats.analysis;
 
-  if (stats.referencePrice !== null && stats.referencePrice > 0) {
-    const marketDiffPercentage = Math.round(
-      ((stats.currentPrice - stats.referencePrice) / stats.referencePrice) *
+  if (bestAlternative && stats.currentPrice > bestAlternative.price * 1.03) {
+    const gap = Math.round(
+      ((stats.currentPrice - bestAlternative.price) / bestAlternative.price) *
         100,
     );
-    const referencePriceLabel = f.price(stats.referencePrice, currency);
+    return {
+      tone,
+      text: `Moins cher ailleurs : ${f.price(bestAlternative.price, currency)} chez ${bestAlternative.label}, soit ${gap} % de moins. Ce n'est pas le meilleur prix du moment.`,
+    };
+  }
 
-    if (marketDiffPercentage <= 0) {
+  if (reference) {
+    const refLabel = `${reference.label}, ${f.price(reference.price, currency)}`;
+    const caveat =
+      reference.trust < 0.8
+        ? " Attention : cette référence est fixée par le marchand lui-même et n'a peut-être jamais été pratiquée."
+        : "";
+    if (reference.discountPercentage > 0) {
       return {
         tone,
-        text: `Prix inférieur de ${Math.abs(marketDiffPercentage)} % au meilleur prix du marché relevé sur Idealo (${referencePriceLabel}).`,
+        text: `Vraie baisse de ${reference.discountPercentage} % par rapport au ${refLabel}.${
+          !bestAlternative
+            ? ""
+            : bestAlternative.price < stats.currentPrice
+              ? ` Une offre à peine moins chère existe (${f.price(bestAlternative.price, currency)} chez ${bestAlternative.label}).`
+              : " Aucune offre comparable moins chère trouvée."
+        }${caveat}`,
       };
     }
     return {
       tone,
-      text: `Prix supérieur de ${marketDiffPercentage} % au meilleur prix du marché relevé sur Idealo (${referencePriceLabel}) : ${marketDiffPercentage <= 3 ? "c'est à peu près le prix normal actuellement." : "ce n'est pas un bon plan pour l'instant."}`,
+      text: `Pas de vraie baisse : le prix est ${reference.discountPercentage < 0 ? `supérieur de ${Math.abs(reference.discountPercentage)} % au` : "identique au"} ${refLabel}.${caveat}`,
     };
   }
 
@@ -153,6 +172,10 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
   );
   const [verifying, setVerifying] = useState(false);
   const [autoPublishing, setAutoPublishing] = useState(false);
+  /** Unknown until the connection row has loaded: don't block meanwhile. */
+  const [dealabsConnected, setDealabsConnected] = useState<boolean | null>(
+    null,
+  );
 
   /**
    * Idealo's own price-history chart, fetched live the moment this page
@@ -375,10 +398,27 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
         icon: <Icon name="alert" size={16} />,
         autoClose: 10000,
       });
+      // The failed attempt is recorded server-side: reload the draft so
+      // the "already tried" notice shows it right away.
+      const refreshed = await drafts
+        .byDeal({ params: { id: deal.id } })
+        .catch(() => null);
+      if (refreshed) setCurrent(refreshed as Draft);
     } finally {
       setAutoPublishing(false);
     }
   };
+
+  const publishAttemptNotice =
+    current?.lastPublishResult && current.lastPublishResult !== "success"
+      ? {
+          title:
+            current.lastPublishResult === "duplicate"
+              ? "Déjà présent sur Dealabs"
+              : "Publication automatique déjà tentée, sans succès",
+          text: `${current.publishAttempts ?? 1} tentative${(current.publishAttempts ?? 1) > 1 ? "s" : ""}${current.lastPublishAttemptAt ? `, la dernière le ${f.dateTime(current.lastPublishAttemptAt)}` : ""}.${current.lastPublishError ? ` Raison : ${current.lastPublishError}` : ""}`,
+        }
+      : null;
 
   /**
    * Plain `href="/deals"` always landed back on page 1 with every filter
@@ -540,6 +580,19 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
               {assessment.text}
             </Alert>
 
+            {publishAttemptNotice ? (
+              <Alert
+                variant="light"
+                color="red"
+                icon={<Icon name="alert" size={18} />}
+                title={publishAttemptNotice.title}
+              >
+                {publishAttemptNotice.text}
+              </Alert>
+            ) : null}
+
+            <DealAnalysis deal={deal} analysis={stats.analysis} />
+
             <Group gap="sm">
               <Button
                 component="a"
@@ -555,10 +608,6 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
 
             <Table variant="vertical" withTableBorder={false} fz="sm">
               <Table.Tbody>
-                <Table.Tr>
-                  <Table.Th w={180}>Score</Table.Th>
-                  <Table.Td className="tnum">{deal.score} / 100</Table.Td>
-                </Table.Tr>
                 {stats.referencePrice !== null ? (
                   <Table.Tr>
                     <Table.Th>Prix de référence marché</Table.Th>
@@ -572,7 +621,7 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                   </Table.Tr>
                 ) : null}
                 <Table.Tr>
-                  <Table.Th>Disponibilité</Table.Th>
+                  <Table.Th w={180}>Disponibilité</Table.Th>
                   <Table.Td>{f.titleize(deal.availability)}</Table.Td>
                 </Table.Tr>
                 <Table.Tr>
@@ -690,6 +739,8 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
             />
           )}
         </Paper>
+
+        <PriceHistoryPanel deal={deal} />
 
         {deal.idealoUrl ? (
           <Paper p="md">
@@ -863,6 +914,10 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                     setCurrent({ ...current, body: event.currentTarget.value })
                   }
                 />
+                <DealabsConnection
+                  onStatus={(status) => setDealabsConnected(status.connected)}
+                />
+
                 <Group gap="sm">
                   <Button
                     loading={saving}
@@ -892,7 +947,10 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                       variant="filled"
                       color="signal"
                       loading={autoPublishing}
-                      disabled={current.status === "posted"}
+                      disabled={
+                        current.status === "posted" ||
+                        dealabsConnected === false
+                      }
                       rightSection={<Icon name="bolt" size={16} />}
                       onClick={() => void autoPublish()}
                     >
@@ -900,6 +958,12 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                     </Button>
                   </Tooltip>
                 </Group>
+
+                {publishAttemptNotice && !autoPublishing ? (
+                  <Text size="xs" c="red">
+                    {publishAttemptNotice.title} — {publishAttemptNotice.text}
+                  </Text>
+                ) : null}
 
                 {autoPublishing && (
                   <Text size="xs" c="dimmed">

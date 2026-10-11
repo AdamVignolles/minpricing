@@ -59,4 +59,6 @@ test("admin endpoints require a signed session cookie set via login", async () =
   ).rejects.toMatchObject({ status: 401 });
 
   await alepha.stop();
-});
+  // Boots AdminController's whole dependency graph (collection job,
+  // progress, collectors): well over the 5 s default on a busy machine.
+}, 20_000);

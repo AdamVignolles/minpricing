@@ -27,6 +27,18 @@ export const dealabsDraftEntity = $entity({
     dealabsUrl: z.text({ maxLength: 500 }).optional(),
     /** Set once {@link dealabsUrl} has been confirmed to be a live post. */
     verifiedAt: z.datetime().optional(),
+    /**
+     * Auto-publish history, so a deal that already failed to post says so
+     * instead of looking untouched: how many attempts, when the last one
+     * ran, how it ended, and why it failed.
+     */
+    publishAttempts: z.number().optional(),
+    lastPublishAttemptAt: z.datetime().optional(),
+    lastPublishResult: z
+      .enum(["success", "failed", "duplicate"])
+      .meta({ mode: "text" })
+      .optional(),
+    lastPublishError: z.text({ size: "rich" }).optional(),
     generatedAt: z.datetime(),
     createdAt: db.createdAt(),
     updatedAt: db.updatedAt(),

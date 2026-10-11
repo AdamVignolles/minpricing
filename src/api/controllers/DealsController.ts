@@ -6,12 +6,51 @@ import { $action } from "alepha/server";
 import type { CloudflareBrowserBinding } from "../collectors/browser.ts";
 import { dealEntity } from "../entities/Deal.ts";
 import { priceHistoryEntity } from "../entities/PriceHistory.ts";
+import { sourceEntity } from "../entities/Source.ts";
 import { $adminSession } from "../services/AdminAuth.ts";
+import type { StoredDealabsDeal } from "../services/DealabsHistoryService.ts";
 import { IdealoReferenceService } from "../services/IdealoReferenceService.ts";
+import { ItadService } from "../services/ItadService.ts";
 import { PricingService } from "../services/PricingService.ts";
 import { ScoringService } from "../services/ScoringService.ts";
 
 const dealResponseSchema = dealEntity.schema;
+
+const priceReferenceSchema = z.object({
+  kind: z.enum(["lowest30d", "history", "regular", "rrp", "listed"]),
+  label: z.text(),
+  price: z.number(),
+  trust: z.number(),
+});
+
+/** Wire shape of {@link ScoringService.evaluate}'s result. */
+const analysisSchema = z.object({
+  score: z.number(),
+  verdict: z.enum(["excellent", "good", "fair", "weak"]),
+  criteria: z.array(
+    z.object({
+      key: z.enum([
+        "discount",
+        "competition",
+        "seller",
+        "product",
+        "history",
+        "confidence",
+      ]),
+      label: z.text(),
+      points: z.number(),
+      max: z.number(),
+      status: z.enum(["good", "neutral", "bad", "unknown"]),
+      detail: z.text({ size: "rich" }),
+    }),
+  ),
+  reference: priceReferenceSchema
+    .extend({ discountPercentage: z.number() })
+    .optional(),
+  references: z.array(priceReferenceSchema),
+  bestAlternative: z.object({ label: z.text(), price: z.number() }).optional(),
+  warnings: z.array(z.text({ size: "rich" })),
+});
 
 /** Sort keys the UI offers, mapped to the repository's sort syntax. */
 const SORTS: Record<string, string> = {
@@ -25,9 +64,11 @@ const SORTS: Record<string, string> = {
 export class DealsController {
   protected deals = $repository(dealEntity);
   protected history = $repository(priceHistoryEntity);
+  protected sources = $repository(sourceEntity);
   protected pricing = $inject(PricingService);
   protected scoring = $inject(ScoringService);
   protected idealoReference = $inject(IdealoReferenceService);
+  protected itad = $inject(ItadService);
   protected alepha = $inject(Alepha);
 
   /** Same binding resolution as `CollectionService` — see `browser.ts`. */
@@ -242,6 +283,13 @@ export class DealsController {
           "overpriced",
           "unknown",
         ]),
+        /**
+         * The score explained criterion by criterion, recomputed from the
+         * stored deal with the same {@link ScoringService.evaluate} the
+         * collection pipeline uses — so it always adds up to `deal.score`
+         * as of the last collection.
+         */
+        analysis: analysisSchema,
       }),
     },
     handler: async ({ params }) => {
@@ -251,11 +299,28 @@ export class DealsController {
         deal.currentPrice,
         deal.referencePrice,
       );
+      const source = await this.sources.findOne({
+        where: { id: { eq: deal.sourceId } },
+      });
+      const analysis = this.scoring.evaluate(
+        deal,
+        stats,
+        source?.type ?? "scrape",
+      );
 
       return {
         ...stats,
         referencePrice: stats.referencePrice ?? null,
-        classification: this.scoring.classifyDeal(stats),
+        classification: analysis.classification,
+        analysis: {
+          score: analysis.score,
+          verdict: analysis.verdict,
+          criteria: analysis.criteria,
+          reference: analysis.reference,
+          references: analysis.references,
+          bestAlternative: analysis.bestAlternative,
+          warnings: analysis.warnings,
+        },
         vsAveragePercentage:
           stats.historyPoints > 1 && stats.avgPrice > 0
             ? Math.round(
@@ -298,6 +363,55 @@ export class DealsController {
         available: !!points && points.length > 0,
         points: points ?? [],
       };
+    },
+  });
+
+  /**
+   * The product's price history from outside sources, for the detail
+   * page's chart: past Dealabs deals for the same product (stored by the
+   * collection run), plus — for Steam games, when `ITAD_API_KEY` is set —
+   * the Steam price curve from IsThereAnyDeal, fetched live.
+   */
+  priceHistory = $action({
+    method: "GET",
+    path: "/deals/:id/price-history",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ id: z.text() }),
+      response: z.object({
+        dealabs: z.array(
+          z.object({
+            title: z.text(),
+            price: z.number(),
+            publishedAt: z.text(),
+            temperature: z.number(),
+            isHot: z.boolean(),
+            merchant: z.text().optional(),
+            url: z.text(),
+          }),
+        ),
+        steam: z.array(
+          z.object({
+            date: z.text(),
+            price: z.number(),
+            regular: z.number().optional(),
+          }),
+        ),
+      }),
+    },
+    handler: async ({ params }) => {
+      const deal = await this.deals.getById(params.id);
+      let dealabs: StoredDealabsDeal[] = [];
+      try {
+        dealabs = deal.dealabsHistory ? JSON.parse(deal.dealabsHistory) : [];
+      } catch {
+        dealabs = [];
+      }
+      const steam =
+        deal.itadId && this.itad.enabled
+          ? await this.itad.history(deal.itadId).catch(() => [])
+          : [];
+      return { dealabs, steam };
     },
   });
 }

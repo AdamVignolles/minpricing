@@ -24,6 +24,15 @@ export interface RawDeal {
   merchantId?: string;
   categoryId?: string;
   /**
+   * The merchant's own classification of the offer, as found while
+   * collecting it: "amazon:toys" (the deals collection it was listed in),
+   * "cdiscount:juniors/…" (its URL path), "amazon-crumb:Jeux et Jouets"
+   * (product page breadcrumb). Mapped to a category by
+   * `CategorizationService.fromHint` — far more reliable than guessing
+   * from the title, which stays the fallback.
+   */
+  categoryHint?: string;
+  /**
    * The {@link TrackedProduct} this offer was collected for, when the
    * collector worked off an explicit tracked product rather than
    * auto-discovering it (manual/Steam, not Amazon/Cdiscount `discover()`).
@@ -39,6 +48,75 @@ export interface RawDeal {
    * Optional: not every source can get one without extra requests.
    */
   description?: string;
+  /**
+   * Seller/product/reference signals read from the offer's own page, used
+   * to judge whether the deal is really worth it (see `ScoringService`).
+   * Absent when the collector skipped the detail fetch this run because
+   * the deal was enriched recently (see {@link DiscoverContext}) — the
+   * pipeline then keeps the previously stored values instead of blanking
+   * them.
+   */
+  details?: DealDetails;
+}
+
+/**
+ * Everything a collector could learn about an offer beyond its price.
+ * Every field is optional: each source exposes a different subset, and a
+ * missing signal is scored as "unknown" (neutral), never as "bad".
+ */
+export interface DealDetails {
+  /** Who actually sells it (e.g. "Amazon", "Cdiscount", "MIGANG"). */
+  sellerName?: string;
+  /** Sold by the platform itself rather than a marketplace seller. */
+  soldByMerchant?: boolean;
+  /** Shipped/fulfilled by the platform (e.g. "Expédié par Cdiscount"). */
+  shippedByMerchant?: boolean;
+  /** Marketplace seller rating, out of 5. */
+  sellerRating?: number;
+  /** Marketplace seller's sales count, as shown by the platform. */
+  sellerSalesCount?: number;
+  /** How many offers exist for this product on the platform. */
+  offersCount?: number;
+  /** Cheapest *other* offer on the same platform, when one is listed. */
+  bestOtherOfferPrice?: number;
+  /** Product rating, out of 5. */
+  productRating?: number;
+  productReviewCount?: number;
+  /** "Plus de 5 k achetés au cours du mois dernier" → 5000. */
+  recentPurchases?: number;
+  condition?: "new" | "refurbished" | "used";
+  /** EAN/GTIN, when the page exposes one — the key for cross-merchant checks. */
+  ean?: string;
+  /**
+   * The lowest price the merchant itself charged over the last 30 days,
+   * which EU rules (Omnibus directive) require it to display next to any
+   * announced price reduction. The most trustworthy reference there is:
+   * it's the merchant's own legally-binding figure, not a "prix conseillé".
+   */
+  lowestRecentPrice?: number;
+  /**
+   * What {@link RawDeal.listPrice} actually is, when the page says so:
+   * "regular" for a real former selling price (Steam's normal price), "rrp"
+   * for a manufacturer's suggested price ("Prix conseillé" — often never
+   * actually charged, so trusted much less).
+   */
+  listPriceKind?: "regular" | "rrp";
+}
+
+/**
+ * Passed to {@link DealSource.discover} so a collector can skip expensive
+ * per-offer detail fetches (an extra product page or two per deal) for
+ * offers that were already enriched recently. Seller ratings and reviews
+ * don't move every 30 minutes; re-reading them every run would multiply
+ * page loads — and bot-detection risk — for nothing.
+ */
+export interface DiscoverContext {
+  needsDetails(externalId: string): boolean;
+  /**
+   * Reports where the collector is ("Pages bons plans", 3 of 14) for the
+   * console's live progress sidebar. Cheap to call often.
+   */
+  progress?(step: string, done?: number, total?: number): void;
 }
 
 /**
@@ -54,6 +132,9 @@ export interface RawDeal {
 export interface DealSource {
   id: string;
   name: string;
-  collect?(products: TrackedProduct[]): Promise<RawDeal[]>;
-  discover?(): Promise<RawDeal[]>;
+  collect?(
+    products: TrackedProduct[],
+    context?: DiscoverContext,
+  ): Promise<RawDeal[]>;
+  discover?(context?: DiscoverContext): Promise<RawDeal[]>;
 }

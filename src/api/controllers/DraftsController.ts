@@ -11,8 +11,22 @@ import {
   DealabsDuplicateError,
   DealabsPublisherService,
 } from "../services/DealabsPublisherService.ts";
+import { DealabsSessionService } from "../services/DealabsSessionService.ts";
 
 const draftResponseSchema = dealabsDraftEntity.schema;
+
+const sessionStatusSchema = z.object({
+  available: z.boolean(),
+  connected: z.boolean(),
+  savedAt: z.text().optional(),
+  login: z
+    .object({
+      state: z.enum(["waiting", "saved", "failed", "cancelled"]),
+      startedAt: z.text(),
+      message: z.text({ size: "rich" }).optional(),
+    })
+    .optional(),
+});
 
 export class DraftsController {
   protected drafts = $repository(dealabsDraftEntity);
@@ -20,6 +34,47 @@ export class DraftsController {
   protected draftService = $inject(DealabsDraftService);
   protected publisher = $inject(DealabsPublisherService);
   protected dateTime = $inject(DateTimeProvider);
+  protected dealabsSession = $inject(DealabsSessionService);
+
+  /** Is a Dealabs session saved for auto-publish, and is a login running? */
+  dealabsSessionStatus = $action({
+    method: "GET",
+    path: "/dealabs/session",
+    use: [$adminSession()],
+    schema: { response: sessionStatusSchema },
+    handler: () => this.dealabsSession.status(),
+  });
+
+  /**
+   * Opens a visible Dealabs login window on this machine; the session is
+   * saved automatically once you're logged in there. Poll
+   * {@link dealabsSessionStatus} to follow it.
+   */
+  dealabsLogin = $action({
+    method: "POST",
+    path: "/dealabs/session/login",
+    use: [$adminSession()],
+    schema: { response: sessionStatusSchema },
+    handler: () => {
+      try {
+        return this.dealabsSession.startLogin();
+      } catch (error) {
+        throw new HttpError({
+          status: 400,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+  });
+
+  /** Forgets the saved Dealabs session. */
+  dealabsLogout = $action({
+    method: "DELETE",
+    path: "/dealabs/session",
+    use: [$adminSession()],
+    schema: { response: sessionStatusSchema },
+    handler: () => this.dealabsSession.disconnect(),
+  });
 
   /**
    * Every deal should be able to show a "Publier sur Dealabs" button, even
@@ -125,6 +180,10 @@ export class DraftsController {
         matched = false;
       }
 
+      // Not confirmed (page gone, moderated, unreachable, or another
+      // post): the draft goes back to "to review" so auto-publish is
+      // available again. A real duplicate is still caught by Dealabs' own
+      // "already posted?" check during auto-publish.
       const draft = matched
         ? await this.drafts.updateById(existing.id, {
             status: "posted",
@@ -132,6 +191,7 @@ export class DraftsController {
             verifiedAt: new Date().toISOString(),
           })
         : await this.drafts.updateById(existing.id, {
+            status: "draft",
             dealabsUrl: body.dealabsUrl,
           });
 
@@ -179,15 +239,38 @@ export class DraftsController {
       }
 
       const deal = await this.deals.getById(params.id);
+      // A draft generated while the deal had no description has an empty
+      // one: rebuild it from the deal now (never empty, see render()).
+      if (!existing.description?.trim()) {
+        await this.draftService.maybeGenerateDraft(deal);
+        Object.assign(
+          existing,
+          await this.drafts.findOne({ where: { dealId: { eq: params.id } } }),
+        );
+      }
+      const attempt = {
+        publishAttempts: (existing.publishAttempts ?? 0) + 1,
+        lastPublishAttemptAt: this.dateTime.nowISOString(),
+      };
 
       try {
         const { dealabsUrl } = await this.publisher.publish(deal, existing);
         return this.drafts.updateById(existing.id, {
+          ...attempt,
+          lastPublishResult: "success",
+          lastPublishError: undefined,
           status: "posted",
           dealabsUrl,
           verifiedAt: this.dateTime.nowISOString(),
         });
       } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        await this.drafts.updateById(existing.id, {
+          ...attempt,
+          lastPublishResult:
+            error instanceof DealabsDuplicateError ? "duplicate" : "failed",
+          lastPublishError: reason.slice(0, 2000),
+        });
         if (error instanceof DealabsDuplicateError) {
           throw new HttpError({
             status: 409,

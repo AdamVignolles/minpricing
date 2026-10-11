@@ -1,4 +1,10 @@
-import type { DealSource, RawDeal, TrackedProduct } from "./DealSource.ts";
+import type {
+  DealDetails,
+  DealSource,
+  DiscoverContext,
+  RawDeal,
+  TrackedProduct,
+} from "./DealSource.ts";
 
 /**
  * Steam's store API rejects requests whose headers look non-browser-like
@@ -121,6 +127,237 @@ function parseSearchResultRow(row: string): SteamFeaturedItem | null {
 }
 
 /**
+ * Steam always sells its own games, and the struck price on a Steam
+ * special is the game's actual regular price — not a "prix conseillé" —
+ * so it is a trustworthy reference (see `ScoringService`).
+ */
+const STEAM_DETAILS: DealDetails = {
+  sellerName: "Steam",
+  soldByMerchant: true,
+  shippedByMerchant: true,
+  condition: "new",
+  listPriceKind: "regular",
+};
+
+interface SteamReviewSummaryResponse {
+  success?: number;
+  query_summary?: { total_positive?: number; total_reviews?: number };
+}
+
+/**
+ * Steam's public review summary for one game (same unauthenticated
+ * endpoint the store page itself uses). The positive ratio is mapped onto
+ * a 0-5 scale so it can be scored like any merchant's star rating.
+ */
+async function fetchReviewSummary(
+  appId: string,
+): Promise<Pick<DealDetails, "productRating" | "productReviewCount">> {
+  try {
+    const response = await fetch(
+      `https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`,
+      { headers: STEAM_REQUEST_HEADERS },
+    );
+    if (!response.ok) {
+      return {};
+    }
+    const json = (await response.json()) as SteamReviewSummaryResponse;
+    const total = json.query_summary?.total_reviews ?? 0;
+    const positive = json.query_summary?.total_positive ?? 0;
+    if (!json.success || total === 0) {
+      return {};
+    }
+    return {
+      productRating: Math.round((positive / total) * 50) / 10,
+      productReviewCount: total,
+    };
+  } catch {
+    return {};
+  }
+}
+
+/** Runs `fn` over `items`, at most `limit` at a time. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await fn(items[index]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+interface SteamStoreFacts {
+  summary?: string;
+  genres: string[];
+  developers: string[];
+  publishers: string[];
+  releaseDate?: string;
+  metacritic?: number;
+}
+
+/**
+ * The game's store-page facts, in French (`l=french`). One app per call:
+ * the endpoint only batches several appids with `filters=price_overview`.
+ */
+async function fetchStoreFacts(
+  appId: string,
+): Promise<SteamStoreFacts | undefined> {
+  try {
+    const response = await fetch(
+      `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=fr&l=french`,
+      { headers: STEAM_REQUEST_HEADERS },
+    );
+    if (!response.ok) {
+      return undefined;
+    }
+    const json = (await response.json()) as Record<
+      string,
+      {
+        success: boolean;
+        data?: {
+          short_description?: string;
+          genres?: Array<{ description: string }>;
+          developers?: string[];
+          publishers?: string[];
+          release_date?: { date?: string; coming_soon?: boolean };
+          metacritic?: { score?: number };
+        };
+      }
+    >;
+    const data = json[appId]?.data;
+    if (!json[appId]?.success || !data) {
+      return undefined;
+    }
+    return {
+      summary: stripHtml(data.short_description),
+      genres: (data.genres ?? []).map((genre) => genre.description),
+      developers: (data.developers ?? []).slice(0, 2),
+      // Publishers often lists regional entries ("FromSoftware (Japan)",
+      // "方块游戏 (Asia)"): the first one is the main publisher.
+      publishers: (data.publishers ?? [])
+        .slice(0, 1)
+        .map((name) => name.replace(/\s*\([^)]*\)\s*$/, "")),
+      releaseDate: data.release_date?.date || undefined,
+      metacritic: data.metacritic?.score,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A factual French description for the deal page and the Dealabs post:
+ * Steam's own summary, then one line per fact Steam gave us. Nothing is
+ * written that Steam didn't state.
+ */
+export function buildSteamDescription(
+  facts: SteamStoreFacts,
+  reviews: Pick<DealDetails, "productRating" | "productReviewCount">,
+): string | undefined {
+  const lines: string[] = [];
+  if (facts.genres.length) {
+    lines.push(`- Genres : ${facts.genres.join(", ")}`);
+  }
+  const studio = [
+    facts.developers.length
+      ? `Développeur : ${facts.developers.join(", ")}`
+      : null,
+    facts.publishers.length &&
+    facts.publishers.join() !== facts.developers.join()
+      ? `Éditeur : ${facts.publishers.join(", ")}`
+      : null,
+  ].filter(Boolean);
+  if (studio.length) {
+    lines.push(`- ${studio.join(" · ")}`);
+  }
+  if (facts.releaseDate) {
+    lines.push(`- Sortie : ${facts.releaseDate}`);
+  }
+  if (reviews.productRating !== undefined && reviews.productReviewCount) {
+    lines.push(
+      `- Avis Steam : ${Math.round((reviews.productRating / 5) * 100)} % positifs sur ${reviews.productReviewCount.toLocaleString("fr-FR")} avis`,
+    );
+  }
+  if (facts.metacritic) {
+    lines.push(`- Metacritic : ${facts.metacritic}/100`);
+  }
+
+  const text = [facts.summary, lines.join("\n")].filter(Boolean).join("\n\n");
+  return text || undefined;
+}
+
+/**
+ * How many games get their store facts fetched per run. Steam's store API
+ * starts answering 429 past roughly one request per second; games beyond
+ * the cap simply stay "stale" and are picked up by the next run.
+ */
+const STORE_FACTS_PER_RUN = 40;
+const STORE_FACTS_SPACING_MS = 1_100;
+
+/**
+ * Attaches Steam's fixed details, review stats and a store-page
+ * description — only for games whose details are stale (24h), see
+ * `DiscoverContext`.
+ */
+async function withSteamDetails(
+  deals: RawDeal[],
+  context?: DiscoverContext,
+): Promise<RawDeal[]> {
+  const stale = deals
+    .filter((deal) => !context || context.needsDetails(deal.externalId))
+    .slice(0, STORE_FACTS_PER_RUN);
+
+  const facts = new Map<string, SteamStoreFacts | undefined>();
+  for (const [index, deal] of stale.entries()) {
+    context?.progress?.(
+      "Fiches des jeux (description, avis)",
+      index + 1,
+      stale.length,
+    );
+    if (index > 0) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, STORE_FACTS_SPACING_MS),
+      );
+    }
+    facts.set(deal.externalId, await fetchStoreFacts(deal.externalId));
+  }
+  // The review endpoint is a different, more lenient one: parallel is fine.
+  const reviews = new Map(
+    await mapLimit(
+      stale,
+      8,
+      async (deal) =>
+        [deal.externalId, await fetchReviewSummary(deal.externalId)] as const,
+    ),
+  );
+
+  return deals.map((deal) => {
+    if (!facts.has(deal.externalId)) {
+      return deal;
+    }
+    const gameReviews = reviews.get(deal.externalId) ?? {};
+    const gameFacts = facts.get(deal.externalId);
+    return {
+      ...deal,
+      description:
+        (gameFacts && buildSteamDescription(gameFacts, gameReviews)) ??
+        deal.description,
+      details: { ...STEAM_DETAILS, ...gameReviews },
+    };
+  });
+}
+
+/**
  * Collector for video games, using Steam's official (no auth required)
  * store API: https://store.steampowered.com/api/appdetails
  */
@@ -128,7 +365,16 @@ export class SteamCollector implements DealSource {
   id = "steam";
   name = "Steam";
 
-  async collect(products: TrackedProduct[]): Promise<RawDeal[]> {
+  async collect(
+    products: TrackedProduct[],
+    context?: DiscoverContext,
+  ): Promise<RawDeal[]> {
+    return withSteamDetails(await this.collectPrices(products), context);
+  }
+
+  protected async collectPrices(
+    products: TrackedProduct[],
+  ): Promise<RawDeal[]> {
     const deals: RawDeal[] = [];
 
     for (const product of products) {
@@ -259,7 +505,12 @@ export class SteamCollector implements DealSource {
    * `fetchAllSpecials()` pages through the store's full specials listing
    * so the curated shelves aren't the volume ceiling.
    */
-  async discover(): Promise<RawDeal[]> {
+  async discover(context?: DiscoverContext): Promise<RawDeal[]> {
+    context?.progress?.("Liste des promotions Steam");
+    return withSteamDetails(await this.discoverPrices(), context);
+  }
+
+  protected async discoverPrices(): Promise<RawDeal[]> {
     const response = await fetch(
       "https://store.steampowered.com/api/featuredcategories?cc=fr&l=french",
       { headers: STEAM_REQUEST_HEADERS },

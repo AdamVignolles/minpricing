@@ -220,6 +220,28 @@ function adaptCloudflarePage(
 }
 
 /**
+ * Round-robin over several lists (first of each, then second of each…),
+ * dropping duplicates by key — so every listing page gets its share of a
+ * global cap instead of the first pages taking it all.
+ */
+export function interleave<T>(lists: T[][], keyOf: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  const longest = Math.max(0, ...lists.map((list) => list.length));
+  for (let i = 0; i < longest; i++) {
+    for (const list of lists) {
+      const item = list[i];
+      if (item === undefined) continue;
+      const key = keyOf(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+/**
  * Parses a French-formatted price string (e.g. "49,99 €", "1 299,00€") into
  * a plain number. Returns undefined if no price could be found.
  */

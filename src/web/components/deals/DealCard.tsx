@@ -129,7 +129,27 @@ const DealCard: FC<DealCardProps> = ({
             <Icon name="store" size={13} aria-hidden />
             <Text fz="xs" c="dimmed" truncate>
               {merchant}
+              {deal.sellerName && !deal.soldByMerchant
+                ? ` · vendu par ${deal.sellerName}`
+                : ""}
             </Text>
+            <Tooltip label="Note du deal (prix réel, vendeur, avis)" withArrow>
+              <Badge
+                size="sm"
+                variant="light"
+                color={
+                  deal.score >= 60
+                    ? "teal"
+                    : deal.score >= 45
+                      ? "yellow"
+                      : "gray"
+                }
+                className="tnum"
+                style={{ flexShrink: 0 }}
+              >
+                {deal.score}/100
+              </Badge>
+            </Tooltip>
           </Group>
           {seen ? (
             <Tooltip

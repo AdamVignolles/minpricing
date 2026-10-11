@@ -10,9 +10,13 @@ import { SourcesController } from "./controllers/SourcesController.ts";
 import { StatsController } from "./controllers/StatsController.ts";
 import { CollectDealsJob } from "./jobs/CollectDealsJob.ts";
 import { CategorizationService } from "./services/CategorizationService.ts";
+import { CollectionProgressService } from "./services/CollectionProgressService.ts";
 import { CollectionService } from "./services/CollectionService.ts";
 import { DealabsDraftService } from "./services/DealabsDraftService.ts";
+import { DealabsHistoryService } from "./services/DealabsHistoryService.ts";
 import { IdealoReferenceService } from "./services/IdealoReferenceService.ts";
+import { ItadService } from "./services/ItadService.ts";
+import { MarketReferenceService } from "./services/MarketReferenceService.ts";
 import { PricingService } from "./services/PricingService.ts";
 import { ScoringService } from "./services/ScoringService.ts";
 import { SeedService } from "./services/SeedService.ts";
@@ -33,11 +37,15 @@ export const ApiModule = $module({
     CollectDealsJob,
     // services
     CollectionService,
+    CollectionProgressService,
     PricingService,
     ScoringService,
     CategorizationService,
     DealabsDraftService,
     IdealoReferenceService,
+    MarketReferenceService,
+    DealabsHistoryService,
+    ItadService,
     SeedService,
   ],
 });

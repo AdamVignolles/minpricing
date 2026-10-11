@@ -1,11 +1,27 @@
-import type { CloudflareBrowserBinding } from "./browser.ts";
+import type { CloudflareBrowserBinding, DealsPage } from "./browser.ts";
 import {
+  interleave,
   parsePriceFr,
   scrollAndCollect,
   withBrowser,
   withPage,
 } from "./browser.ts";
-import type { DealSource, RawDeal } from "./DealSource.ts";
+import {
+  buildCdiscountDescription,
+  cheapestCredibleOffer,
+  isCdiscount,
+  parseCdiscountOffersLayer,
+  parseComparisonPrice,
+  parseCondition,
+  parseOffersSummary,
+  parseSellerLine,
+} from "./cdiscountOffers.ts";
+import type {
+  DealDetails,
+  DealSource,
+  DiscoverContext,
+  RawDeal,
+} from "./DealSource.ts";
 
 /**
  * Auto-discovers current Cdiscount deals from one or more listing pages
@@ -34,20 +50,27 @@ export class CdiscountCollector implements DealSource {
     this.homeUrls = Array.isArray(homeUrls) ? homeUrls : [homeUrls];
   }
 
-  async discover(): Promise<RawDeal[]> {
+  async discover(context?: DiscoverContext): Promise<RawDeal[]> {
     return withBrowser(async (browser) => {
-      const cardsByUrl = new Map<
-        string,
-        {
-          url: string;
-          title: string;
-          priceText: string;
-          listPriceText: string | null;
-          imageUrl: string | null;
-        }
-      >();
+      type Card = {
+        url: string;
+        title: string;
+        priceText: string;
+        listPriceText: string | null;
+        imageUrl: string | null;
+      };
+      // One list per listing page, interleaved below: the category hubs
+      // are visited after the general promo pages, and a plain "first come
+      // first served" cap let those general pages fill the whole limit —
+      // which is why nearly every deal used to be high-tech.
+      const cardsPerPage: Card[][] = [];
 
-      for (const homeUrl of this.homeUrls) {
+      for (const [pageIndex, homeUrl] of this.homeUrls.entries()) {
+        context?.progress?.(
+          "Lecture des pages promos et catégories",
+          pageIndex + 1,
+          this.homeUrls.length,
+        );
         try {
           const cards = await withPage(browser, async (page) => {
             const response = await page.goto(homeUrl, {
@@ -106,34 +129,49 @@ export class CdiscountCollector implements DealSource {
                     const img = el.querySelector(
                       "img",
                     ) as HTMLImageElement | null;
+                    const text = el.textContent ?? "";
                     return {
                       url: link?.href ?? null,
                       title,
                       priceText,
                       listPriceText,
                       imageUrl: img?.src || null,
+                      // Category hubs mix promotions with regular-priced
+                      // bestsellers: only cards Cdiscount itself marks as
+                      // a promotion are deal candidates.
+                      promo:
+                        /Prix de comparaison|-\s?\d+\s?%|Promo|Bon plan|Soldes|Prix choc|Vente flash|Déstockage/i.test(
+                          text,
+                        ),
+                      sponsored: /Sponsoris/i.test(text),
                     };
                   }),
                 ),
               (card) => card.url?.split("#")[0],
+              // Hubs show their promotions near the top: a few scroll
+              // steps are enough, and keep ten pages from taking minutes.
+              { rounds: 8 },
             );
           });
 
-          for (const card of cards) {
-            if (!card.url || !card.title || !card.priceText) {
-              continue;
-            }
-            const url = card.url.split("#")[0];
-            if (!cardsByUrl.has(url)) {
-              cardsByUrl.set(url, {
-                url,
-                title: card.title,
-                priceText: card.priceText,
+          cardsPerPage.push(
+            cards
+              .filter(
+                (card) =>
+                  card.url &&
+                  card.title &&
+                  card.priceText &&
+                  card.promo &&
+                  !card.sponsored,
+              )
+              .map((card) => ({
+                url: (card.url as string).split("#")[0],
+                title: card.title as string,
+                priceText: card.priceText as string,
                 listPriceText: card.listPriceText,
                 imageUrl: card.imageUrl,
-              });
-            }
-          }
+              })),
+          );
         } catch {
           // One listing page failing must not block the other entry
           // points from contributing cards.
@@ -141,7 +179,15 @@ export class CdiscountCollector implements DealSource {
       }
 
       const deals: RawDeal[] = [];
-      for (const card of Array.from(cardsByUrl.values()).slice(0, this.limit)) {
+      const candidates = interleave(cardsPerPage, (card) => card.url).slice(
+        0,
+        this.limit,
+      );
+      const toEnrich = candidates.filter(
+        (card) => !context || context.needsDetails(card.url),
+      ).length;
+      let enriched = 0;
+      for (const card of candidates) {
         const price = parsePriceFr(card.priceText);
         if (price === undefined) {
           continue;
@@ -151,23 +197,315 @@ export class CdiscountCollector implements DealSource {
           ? parsePriceFr(card.listPriceText)
           : undefined;
 
+        // The product page is where the seller, the competing offers and
+        // the reviews live — the listing card shows none of them. Only
+        // opened when this deal's details are stale (see DiscoverContext):
+        // one extra page per new deal, not one per deal per run.
+        let fetched: CdiscountProductPage | undefined;
+        if (!context || context.needsDetails(card.url)) {
+          enriched++;
+          context?.progress?.(
+            "Fiches produits (vendeur, offres, avis)",
+            enriched,
+            toEnrich,
+          );
+          try {
+            fetched = await withPage(browser, (page) =>
+              this.fetchDetails(page, card.url, price),
+            );
+          } catch {
+            // Product page failed (timeout, layout change): keep the deal,
+            // just without details this run — it'll be retried next run.
+          }
+        }
+
+        // Listing cards rarely carry the struck price; the product page's
+        // "Prix de comparaison" does.
+        const referencePrice = fetched?.comparisonPrice ?? listPrice;
+        const struck =
+          referencePrice !== undefined && referencePrice > price
+            ? referencePrice
+            : undefined;
+
         deals.push({
           externalId: card.url,
           title: card.title,
           url: card.url,
           imageUrl: card.imageUrl ?? undefined,
           price,
-          listPrice:
-            listPrice !== undefined && listPrice > price
-              ? listPrice
-              : undefined,
+          listPrice: struck,
+          description: fetched?.description,
           currency: "EUR",
           availability: "in_stock",
           merchantId: "cdiscount",
+          categoryHint: cdiscountCategoryHint(card.url),
+          details: fetched
+            ? {
+                ...fetched.details,
+                // Cdiscount's struck price is a "Prix de comparaison" it
+                // chooses itself, not a former selling price.
+                listPriceKind: struck !== undefined ? "rrp" : undefined,
+              }
+            : undefined,
         });
       }
 
       return deals;
     }, this.getCloudflareBinding?.());
   }
+
+  /**
+   * Reads, from one product page: the schema.org JSON-LD block (EAN,
+   * rating, condition — far more stable than any CSS hook), the "Vendu
+   * par X et expédié par Y" line, and — when several sellers compete —
+   * the offers layer behind the "N offres à partir de X €" button, which
+   * is the only place the seller's rating and sales count are shown.
+   */
+  protected async fetchDetails(
+    page: DealsPage,
+    url: string,
+    price: number,
+  ): Promise<CdiscountProductPage | undefined> {
+    const response = await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    if (!response || !response.ok()) {
+      return undefined;
+    }
+
+    await page
+      .waitForSelector('[data-e2e="title"], [data-e2e="price"]', {
+        timeout: 10_000,
+      })
+      .catch(() => {
+        // Page shell without product markup: the evaluate() below just
+        // finds nothing and the deal ships without details.
+      });
+
+    const onPage = await page.evaluate(() => {
+      let ean: string | undefined;
+      let rating: number | undefined;
+      let reviewCount: number | undefined;
+      let condition: string | undefined;
+      for (const script of Array.from(
+        document.querySelectorAll('script[type="application/ld+json"]'),
+      )) {
+        try {
+          const json = JSON.parse(script.textContent ?? "null");
+          if (!/product/i.test(String(json?.["@type"] ?? ""))) continue;
+          ean = json.gtin ?? json.gtin13 ?? json.ean ?? ean;
+          rating = json.aggregateRating?.ratingValue ?? rating;
+          reviewCount =
+            json.aggregateRating?.ratingCount ??
+            json.aggregateRating?.reviewCount ??
+            reviewCount;
+          condition = json.offers?.itemCondition ?? condition;
+        } catch {
+          // Not valid JSON-LD: try the next script tag.
+        }
+      }
+
+      // Scoped to the delivery block first: product descriptions can
+      // contain "Vendu par lot de 4…", which is not a seller.
+      const scope =
+        document.querySelector('[data-e2e="product-shipping"]') ??
+        document.body;
+      const sellerEl = Array.from(scope.querySelectorAll("*"))
+        .filter(
+          (el) =>
+            /^\s*Vendu (et expédié )?par/i.test(el.textContent ?? "") &&
+            (el.textContent ?? "").length < 200,
+        )
+        .sort(
+          (a, b) => (a.textContent ?? "").length - (b.textContent ?? "").length,
+        )[0];
+
+      // innerText of the block around the price, where Cdiscount prints
+      // "Prix de comparaison 499,99 € 279 €99".
+      let priceArea = document.querySelector('[data-e2e="price"]');
+      for (let i = 0; i < 3 && priceArea?.parentElement; i++) {
+        priceArea = priceArea.parentElement;
+      }
+
+      // Product sheet: "Points forts" lines and the technical table's
+      // label/value rows (two cells each).
+      const strengths = (
+        (
+          document.querySelector(
+            '[data-e2e="product-strengths"]',
+          ) as HTMLElement | null
+        )?.innerText ?? ""
+      ).split("\n");
+      const specs = Array.from(
+        document.querySelectorAll('[data-e2e="product-description-block"] tr'),
+      )
+        .map((row) => Array.from(row.children) as HTMLElement[])
+        .filter((cells) => cells.length >= 2)
+        .map(
+          (cells) =>
+            [cells[0].innerText.trim(), cells[1].innerText.trim()] as [
+              string,
+              string,
+            ],
+        );
+
+      return {
+        strengths,
+        specs,
+        priceAreaText: (priceArea as HTMLElement | null)?.innerText ?? "",
+        ean: ean ? String(ean) : undefined,
+        rating: rating !== undefined ? Number(rating) : undefined,
+        reviewCount:
+          reviewCount !== undefined ? Number(reviewCount) : undefined,
+        condition,
+        title: document.querySelector('[data-e2e="title"]')?.textContent ?? "",
+        sellerText: sellerEl?.textContent ?? "",
+        offersText:
+          document.querySelector('[data-e2e="offers-list"]')?.textContent ?? "",
+      };
+    });
+
+    const seller = parseSellerLine(onPage.sellerText);
+    const summary = parseOffersSummary(onPage.offersText);
+    // JSON-LD says "NewCondition" even for refurbished phones; the title
+    // ("… - Reconditionné - Excellent état") is the honest signal.
+    const condition =
+      parseCondition(onPage.title) ??
+      (/Refurbished/i.test(onPage.condition ?? "")
+        ? "refurbished"
+        : /Used/i.test(onPage.condition ?? "")
+          ? "used"
+          : "new");
+
+    const soldByCdiscount = seller.sellerName
+      ? isCdiscount(seller.sellerName)
+      : undefined;
+    const details: DealDetails = {
+      ean: onPage.ean && /^\d{8,14}$/.test(onPage.ean) ? onPage.ean : undefined,
+      productRating: onPage.rating,
+      productReviewCount: onPage.reviewCount,
+      condition,
+      sellerName: seller.sellerName,
+      soldByMerchant: soldByCdiscount,
+      // "Vendu par Cdiscount" with no shipper named: Cdiscount ships it.
+      shippedByMerchant: seller.shipper
+        ? isCdiscount(seller.shipper)
+        : soldByCdiscount || undefined,
+      offersCount: summary.offersCount,
+    };
+    const comparisonPrice = parseComparisonPrice(onPage.priceAreaText);
+    const specValue = (label: RegExp) =>
+      onPage.specs.find(([name]) => label.test(name))?.[1];
+    const description = buildCdiscountDescription({
+      summary:
+        specValue(/^Description du produit/i) ?? specValue(/^Plus produit/i),
+      strengths: onPage.strengths,
+      specs: onPage.specs,
+    });
+
+    // Only one offer: nothing to compare against, and no layer to open.
+    if (!summary.offersCount || summary.offersCount < 2) {
+      return { details, comparisonPrice, description };
+    }
+
+    const lines = await page.evaluate(
+      (timeoutMs) =>
+        new Promise<string[]>((resolve) => {
+          // The button is server-rendered, but its click handler only
+          // exists once React has hydrated — a click sent too early is
+          // silently lost. So keep clicking until the layer shows up.
+          let lastClick = 0;
+          const click = () => {
+            lastClick = Date.now();
+            (
+              document.querySelector(
+                '[data-e2e="offers-list"] button',
+              ) as HTMLButtonElement | null
+            )?.click();
+          };
+          click();
+          const started = Date.now();
+          const read = () =>
+            (
+              (document.querySelector(".layer-content") as HTMLElement | null)
+                ?.innerText ?? ""
+            )
+              .split("\n")
+              .map((line) => line.trim())
+              .filter(Boolean);
+          const poll = () => {
+            const text = read().join("\n");
+            // Done once the competing offers have rendered (each ends with
+            // "Voir l'offre"), not just the current one ("Chargement…").
+            const loaded =
+              /Voir l.offre/i.test(text) &&
+              !/Chargement des offres/i.test(text);
+            if (loaded || Date.now() - started > timeoutMs) {
+              resolve(read());
+              return;
+            }
+            if (
+              !document.querySelector(".layer-content") &&
+              Date.now() - lastClick > 1_000
+            ) {
+              click();
+            }
+            setTimeout(poll, 250);
+          };
+          poll();
+        }),
+      12_000,
+    );
+
+    const layer = parseCdiscountOffersLayer(lines);
+    const current = layer.current;
+    if (current) {
+      details.sellerName = current.sellerName ?? details.sellerName;
+      details.soldByMerchant = isCdiscount(details.sellerName);
+      details.shippedByMerchant = current.shipper
+        ? isCdiscount(current.shipper)
+        : details.shippedByMerchant;
+      details.sellerRating = current.sellerRating;
+      details.sellerSalesCount = current.sellerSalesCount;
+    }
+
+    const cheapest = cheapestCredibleOffer(layer.others, condition);
+    if (cheapest) {
+      details.bestOtherOfferPrice = cheapest.price;
+    } else if (
+      layer.others.length === 0 &&
+      summary.fromPrice !== undefined &&
+      summary.fromPrice < price
+    ) {
+      // The layer didn't render, but the summary alone proves a cheaper
+      // offer exists (seller unknown, so it can't be vetted — still worth
+      // knowing).
+      details.bestOtherOfferPrice = summary.fromPrice;
+    }
+
+    return { details, comparisonPrice, description };
+  }
+}
+
+/**
+ * Cdiscount product URLs start with their catalogue section —
+ * `/maison/…`, `/le-sport/…`, `/pret-a-porter/bebe-puericulture/…` — which
+ * is the merchant's own category for the product.
+ */
+export function cdiscountCategoryHint(url: string): string | undefined {
+  try {
+    const [section, sub] = new URL(url).pathname.split("/").filter(Boolean);
+    return section ? `cdiscount:${section}${sub ? `/${sub}` : ""}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+interface CdiscountProductPage {
+  details: DealDetails;
+  /** The page's "Prix de comparaison", when it shows one. */
+  comparisonPrice?: number;
+  /** Built from the product sheet, see `buildCdiscountDescription`. */
+  description?: string;
 }

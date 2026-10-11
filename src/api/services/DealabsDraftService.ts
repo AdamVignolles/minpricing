@@ -5,7 +5,6 @@ import { $repository } from "alepha/orm";
 import { dealEntity } from "../entities/Deal.ts";
 import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import type { Deal } from "./DealTypes.ts";
-import { PricingService, type PriceStats } from "./PricingService.ts";
 
 /**
  * Generates (and regenerates) a Dealabs post draft for every deal — no
@@ -17,10 +16,9 @@ import { PricingService, type PriceStats } from "./PricingService.ts";
 export class DealabsDraftService {
   protected drafts = $repository(dealabsDraftEntity);
   protected deals = $repository(dealEntity);
-  protected pricing = $inject(PricingService);
   protected dateTime = $inject(DateTimeProvider);
 
-  async maybeGenerateDraft(deal: Deal, stats: PriceStats): Promise<void> {
+  async maybeGenerateDraft(deal: Deal): Promise<void> {
     const existing = await this.drafts.findOne({
       where: { dealId: { eq: deal.id } },
     });
@@ -30,7 +28,7 @@ export class DealabsDraftService {
       return;
     }
 
-    const { title, body, description } = this.render(deal, stats);
+    const { title, body, description } = this.render(deal);
 
     if (existing) {
       await this.drafts.updateById(existing.id, {
@@ -65,89 +63,54 @@ export class DealabsDraftService {
     }
 
     const deal = await this.deals.getById(dealId);
-    const stats = await this.pricing.getStats(deal.id, deal.currentPrice);
-    await this.maybeGenerateDraft(deal, stats);
+    await this.maybeGenerateDraft(deal);
 
     return this.drafts.findOne({ where: { dealId: { eq: dealId } } });
   }
 
-  protected render(
-    deal: Deal,
-    stats: PriceStats,
-  ): { title: string; body: string; description: string } {
-    const discount =
-      stats.avgPrice > 0
-        ? Math.round(
-            ((stats.avgPrice - deal.currentPrice) / stats.avgPrice) * 100,
-          )
-        : 0;
-
-    const title = `${deal.title} à ${deal.currentPrice.toFixed(2)} ${deal.currency}${
-      discount > 0 ? ` (-${discount}% vs prix moyen)` : ""
-    }`;
-
-    // Real, merchant-sourced product info (Amazon feature bullets, Steam's
-    // short description, ...) when a collector managed to get one — this is
-    // what actually tells a Dealabs reader what the product *is*, instead
-    // of DealRadar's own internal bookkeeping.
-    const productBlock = deal.description?.trim() || undefined;
-
-    const priceSentence = this.buildPriceSentence(deal, stats);
-
-    // Standalone text for Dealabs' own "Description" field — no title or
-    // price repeated, since Dealabs already has dedicated fields for those
-    // and shows them next to this text.
-    const description = [productBlock, priceSentence]
-      .filter((line): line is string => !!line)
-      .join("\n\n");
-
+  /**
+   * The post text. No price anywhere — not the current one, not an
+   * average, not "lowest since we started tracking": Dealabs has its own
+   * price fields and shows them next to the post, and our internal
+   * statistics (a handful of observations) mean nothing to a reader. What
+   * goes in is what the product *is*: the merchant's own description
+   * (Amazon feature bullets, Cdiscount strengths and specs, Steam store
+   * facts).
+   */
+  protected render(deal: Deal): {
+    title: string;
+    body: string;
+    description: string;
+  } {
+    // Dealabs requires a description. Without a merchant one (product page
+    // not read yet), the title itself is factual product info: merchant
+    // titles list the specs ("… - Moteur 900 W - Batterie 48 V - …").
+    const description =
+      deal.description?.trim() || describeFromTitle(deal.title);
     const bodyLines = [
       `**${deal.title}**`,
       "",
-      `Prix actuel : ${deal.currentPrice.toFixed(2)} ${deal.currency}`,
-      "",
-      ...(productBlock ? [productBlock, ""] : []),
-      ...(priceSentence ? [priceSentence, ""] : []),
+      ...(description ? [description, ""] : []),
       `Lien : ${deal.url}`,
     ];
-
-    return { title, body: bodyLines.join("\n"), description };
+    return { title: deal.title, body: bodyLines.join("\n"), description };
   }
+}
 
-  /**
-   * One natural-language sentence about where the current price sits in
-   * the deal's own history — the only "DealRadar-computed" fact worth
-   * telling a reader, phrased as a plain claim instead of an internal
-   * metric. Omitted entirely when there isn't enough history yet to say
-   * anything meaningful.
-   */
-  protected buildPriceSentence(
-    deal: Deal,
-    stats: PriceStats,
-  ): string | undefined {
-    if (stats.historyPoints === 0) {
-      return undefined;
-    }
-
-    const avg = stats.avgPrice.toFixed(2);
-    const max = stats.maxPrice.toFixed(2);
-    const currency = deal.currency;
-
-    if (stats.isNewHistoricalMin) {
-      return `C'est le prix le plus bas observé depuis le début du suivi (moyenne : ${avg} ${currency}, plus haut relevé : ${max} ${currency}).`;
-    }
-
-    const discount =
-      stats.avgPrice > 0
-        ? Math.round(
-            ((stats.avgPrice - deal.currentPrice) / stats.avgPrice) * 100,
-          )
-        : 0;
-
-    if (discount > 0) {
-      return `Environ ${discount}% sous le prix moyen observé (${avg} ${currency}), sans être le plus bas jamais vu (déjà descendu à ${stats.minPrice.toFixed(2)} ${currency}).`;
-    }
-
-    return `Prix proche de la moyenne observée (${avg} ${currency}) sur ce produit.`;
+/**
+ * Turns a spec-laden merchant title into a short description: the product
+ * name, then one bullet per spec. "OOTD T10 - Trottinette électrique
+ * pliable - Moteur 900 W - Batterie 48 V" →
+ * "OOTD T10 - Trottinette électrique pliable\n- Moteur 900 W\n- Batterie 48 V".
+ */
+export function describeFromTitle(title: string): string {
+  const parts = title
+    .split(/\s[-–—|]\s|,\s/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length <= 2) {
+    return title.trim();
   }
+  const [brand, name, ...specs] = parts;
+  return [`${brand} - ${name}`, ...specs.map((spec) => `- ${spec}`)].join("\n");
 }

@@ -1,0 +1,139 @@
+import { existsSync, statSync, unlinkSync } from "node:fs";
+
+import { $inject, Alepha } from "alepha";
+import { $logger } from "alepha/logger";
+
+import { isDealabsLoggedOut, SESSION_PATH } from "./DealabsPublisherService.ts";
+
+/** How long the login window waits for you before giving up. */
+const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
+const POLL_MS = 2_000;
+
+export interface DealabsSessionStatus {
+  /** False on the serverless deployment: no local browser to open there. */
+  available: boolean;
+  connected: boolean;
+  /** When the saved session was last written. */
+  savedAt?: string;
+  login?: {
+    state: "waiting" | "saved" | "failed" | "cancelled";
+    startedAt: string;
+    message?: string;
+  };
+}
+
+/**
+ * Logs into Dealabs from the console, without any terminal command.
+ *
+ * « Se connecter à Dealabs » opens a real, visible browser window on this
+ * machine at Dealabs' login. You log in there yourself — password, 2FA,
+ * captcha, whatever Dealabs asks — and the window notices on its own once
+ * you're in, saves the session to `.dealabs-session.json` and closes.
+ * Auto-publish then reuses that session. The app never sees your password.
+ *
+ * Why a separate window rather than the browser tab you're using: a web
+ * page can't read another site's cookies (they're httpOnly, and the
+ * browser isolates them per site), so a login made in your own tab can't
+ * be handed over to the server. Same local-only constraint as auto-publish.
+ */
+export class DealabsSessionService {
+  protected log = $logger();
+  protected alepha = $inject(Alepha);
+  protected login?: DealabsSessionStatus["login"];
+
+  status(): DealabsSessionStatus {
+    const connected = existsSync(SESSION_PATH);
+    return {
+      available: !this.alepha.isServerless(),
+      connected,
+      savedAt: connected
+        ? statSync(SESSION_PATH).mtime.toISOString()
+        : undefined,
+      login: this.login,
+    };
+  }
+
+  /** Opens the login window (no-op if one is already open). */
+  startLogin(): DealabsSessionStatus {
+    if (this.alepha.isServerless()) {
+      throw new Error(
+        "La connexion Dealabs ouvre une fenêtre de navigateur sur la machine : disponible uniquement avec le serveur local.",
+      );
+    }
+    if (this.login?.state !== "waiting") {
+      this.login = { state: "waiting", startedAt: new Date().toISOString() };
+      void this.runLogin().catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.log.warn(`Dealabs login failed: ${message}`);
+        this.login = { ...this.login!, state: "failed", message };
+      });
+    }
+    return this.status();
+  }
+
+  disconnect(): DealabsSessionStatus {
+    if (existsSync(SESSION_PATH)) {
+      unlinkSync(SESSION_PATH);
+    }
+    this.login = undefined;
+    return this.status();
+  }
+
+  protected async runLogin(): Promise<void> {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({ headless: false });
+    try {
+      const context = await browser.newContext({
+        locale: "fr-FR",
+        // Start from the current session when there is one: if it's still
+        // valid, there's nothing to do and the window closes right away.
+        ...(existsSync(SESSION_PATH) ? { storageState: SESSION_PATH } : {}),
+      });
+      const page = await context.newPage();
+      await page.goto("https://www.dealabs.com/", {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+      // Open the login dialog for you (best effort: if the button moved,
+      // the page is still there to click it yourself).
+      await page
+        .getByText("Connexion ou inscription", { exact: false })
+        .first()
+        .click({ timeout: 5_000 })
+        .catch(() => undefined);
+
+      const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+      let loggedInChecks = 0;
+      while (Date.now() < deadline) {
+        if (page.isClosed()) {
+          this.login = {
+            ...this.login!,
+            state: "cancelled",
+            message: "Fenêtre fermée avant la connexion.",
+          };
+          return;
+        }
+        await page.waitForTimeout(POLL_MS);
+        const loggedOut = await isDealabsLoggedOut(page).catch(() => true);
+        const ready = await page
+          .evaluate(() => document.readyState === "complete")
+          .catch(() => false);
+        // Two checks in a row: a page mid-navigation also briefly lacks
+        // the login button.
+        loggedInChecks = !loggedOut && ready ? loggedInChecks + 1 : 0;
+        if (loggedInChecks >= 2) {
+          await context.storageState({ path: SESSION_PATH });
+          this.login = { ...this.login!, state: "saved" };
+          return;
+        }
+      }
+      this.login = {
+        ...this.login!,
+        state: "failed",
+        message: "Délai dépassé (10 minutes) sans connexion.",
+      };
+    } finally {
+      await browser.close().catch(() => undefined);
+    }
+  }
+}

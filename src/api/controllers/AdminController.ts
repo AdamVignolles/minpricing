@@ -1,6 +1,7 @@
 import { z } from "alepha";
 import { $inject } from "alepha";
 import { jobExecutionEntity } from "alepha/api/jobs";
+import { $logger } from "alepha/logger";
 import { $repository } from "alepha/orm";
 import { $action } from "alepha/server";
 
@@ -9,7 +10,9 @@ import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { priceHistoryEntity } from "../entities/PriceHistory.ts";
 import { sourceEntity } from "../entities/Source.ts";
 import { trackedProductEntity } from "../entities/TrackedProduct.ts";
+import { CollectDealsJob } from "../jobs/CollectDealsJob.ts";
 import { $adminSession } from "../services/AdminAuth.ts";
+import { CollectionProgressService } from "../services/CollectionProgressService.ts";
 import { CollectionService } from "../services/CollectionService.ts";
 
 export class AdminController {
@@ -19,7 +22,10 @@ export class AdminController {
   protected history = $repository(priceHistoryEntity);
   protected products = $repository(trackedProductEntity);
   protected jobs = $repository(jobExecutionEntity);
+  protected log = $logger();
   protected collection = $inject(CollectionService);
+  protected collectJob = $inject(CollectDealsJob);
+  protected progress = $inject(CollectionProgressService);
 
   stats = $action({
     method: "GET",
@@ -147,24 +153,80 @@ export class AdminController {
   });
 
   /**
-   * Runs the collection pipeline right now, for every enabled source, so
-   * you don't have to wait for the next cron tick when testing/demoing.
+   * Starts a collection run right now, without waiting for the next cron
+   * tick. Returns immediately: the run takes many minutes (hundreds of
+   * pages), so the console follows it through {@link collectProgress}
+   * instead of holding an HTTP request open. Goes through the job itself,
+   * so it shows up in the run history and never overlaps a cron run.
    */
   collectNow = $action({
     method: "POST",
     path: "/admin/collect",
     use: [$adminSession()],
     schema: {
-      response: z.array(
-        z.object({
-          sourceId: z.text(),
-          collected: z.number(),
-          created: z.number(),
-          updated: z.number(),
-          error: z.text().optional(),
-        }),
-      ),
+      response: z.object({
+        started: z.boolean(),
+        message: z.text(),
+      }),
     },
-    handler: async () => this.collection.runAll(),
+    handler: async () => {
+      if (await this.progress.isRunning()) {
+        return {
+          started: false,
+          message: "Une collecte est déjà en cours.",
+        };
+      }
+      void this.collectJob.run.trigger().catch((error: unknown) => {
+        this.log.error("Manual collection failed", error);
+      });
+      return { started: true, message: "Collecte lancée." };
+    },
+  });
+
+  /**
+   * Live state of the current (or last) collection run, polled by the
+   * console's progress sidebar. `null` until a first run has started.
+   */
+  collectProgress = $action({
+    method: "GET",
+    path: "/admin/collect/progress",
+    use: [$adminSession()],
+    schema: {
+      response: z
+        .object({
+          runId: z.text(),
+          status: z.enum(["running", "done", "failed"]),
+          startedAt: z.text(),
+          finishedAt: z.text().optional(),
+          updatedAt: z.text(),
+          currentSourceId: z.text().optional(),
+          sources: z.array(
+            z.object({
+              id: z.text(),
+              name: z.text(),
+              status: z.enum(["pending", "running", "done", "failed"]),
+              step: z.text().optional(),
+              done: z.number().optional(),
+              total: z.number().optional(),
+              collected: z.number().optional(),
+              created: z.number().optional(),
+              updated: z.number().optional(),
+              error: z.text().optional(),
+              startedAt: z.text().optional(),
+              finishedAt: z.text().optional(),
+            }),
+          ),
+          events: z.array(
+            z.object({
+              at: z.text(),
+              sourceId: z.text().optional(),
+              level: z.enum(["info", "warn"]),
+              message: z.text({ size: "rich" }),
+            }),
+          ),
+        })
+        .nullable(),
+    },
+    handler: async () => (await this.progress.get()) ?? null,
   });
 }

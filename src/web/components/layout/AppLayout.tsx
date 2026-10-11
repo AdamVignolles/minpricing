@@ -21,6 +21,10 @@ import type { FC } from "react";
 import type { AuthController } from "../../../api/controllers/AuthController.ts";
 import { theme } from "../../theme.ts";
 import Icon, { type IconName } from "../ui/Icon.tsx";
+import CollectionProgressAside, {
+  CollectionRunningChip,
+  useCollectionProgress,
+} from "./CollectionProgressAside.tsx";
 
 /**
  * The five places the application can be. Keeping them in one array is what
@@ -128,6 +132,9 @@ const ColorSchemeToggle: FC = () => {
  */
 const AppLayout: FC = () => {
   const [opened, { toggle, close }] = useDisclosure(false);
+  const collection = useCollectionProgress();
+  // On small screens the progress panel only opens on demand (header chip).
+  const [asideOnMobile, { toggle: toggleAside }] = useDisclosure(false);
 
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
@@ -138,6 +145,14 @@ const AppLayout: FC = () => {
           width: 240,
           breakpoint: "sm",
           collapsed: { mobile: !opened },
+        }}
+        aside={{
+          width: 300,
+          breakpoint: "md",
+          collapsed: {
+            desktop: !collection.visible,
+            mobile: !(collection.visible && asideOnMobile),
+          },
         }}
         padding={{ base: "md", sm: "lg" }}
       >
@@ -181,6 +196,10 @@ const AppLayout: FC = () => {
               </Box>
             </Group>
             <Group gap="xs" wrap="nowrap">
+              <CollectionRunningChip
+                progress={collection.progress}
+                onClick={toggleAside}
+              />
               <ColorSchemeToggle />
               <LogoutButton />
             </Group>
@@ -205,6 +224,15 @@ const AppLayout: FC = () => {
         <AppShell.Main>
           <NestedView />
         </AppShell.Main>
+
+        {collection.progress && collection.visible ? (
+          <AppShell.Aside p="md">
+            <CollectionProgressAside
+              progress={collection.progress}
+              onClose={collection.dismiss}
+            />
+          </AppShell.Aside>
+        ) : null}
       </AppShell>
     </MantineProvider>
   );

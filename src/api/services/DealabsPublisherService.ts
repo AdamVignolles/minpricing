@@ -8,8 +8,20 @@ import { DateTimeProvider } from "alepha/datetime";
 import type { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import type { Deal } from "./DealTypes.ts";
 
-const SESSION_PATH = join(process.cwd(), ".dealabs-session.json");
+export const SESSION_PATH = join(process.cwd(), ".dealabs-session.json");
 const DEBUG_DIR = join(process.cwd(), ".dealabs-debug");
+
+/** "Essentiel" step fields, in lookup order. */
+const TITLE_SELECTORS = [
+  'input[name="title"]',
+  'input[name="dealTitle"]',
+  'input[placeholder*="itre" i]',
+];
+const PRICE_SELECTORS = [
+  'input[name="price"]',
+  'input[name="temp_price"]',
+  'input[placeholder*="prix" i]',
+];
 
 type Draft = Infer<typeof dealabsDraftEntity.schema>;
 
@@ -37,9 +49,10 @@ export class DealabsDuplicateError extends Error {
  * Drives a real, logged-in browser to submit a deal to Dealabs on your
  * behalf — login + fill + submit, no manual click.
  *
- * This only runs against a session you created yourself:
- * `npm run dealabs:login` opens a visible browser for you to log in by
- * hand once, then saves cookies/local storage to `.dealabs-session.json`
+ * This only runs against a session you created yourself: the console's
+ * « Se connecter à Dealabs » button (see `DealabsSessionService`, or the
+ * older `npm run dealabs:login`) opens a visible browser for you to log in
+ * by hand once, then saves cookies/local storage to `.dealabs-session.json`
  * (gitignored, never leaves this machine). This service only ever reuses
  * that file; it never sees or stores your Dealabs password.
  *
@@ -66,7 +79,7 @@ export class DealabsPublisherService {
 
     if (!existsSync(SESSION_PATH)) {
       throw new Error(
-        'No Dealabs session found. Run "npm run dealabs:login" once to log in, then try again.',
+        "Pas de session Dealabs : cliquez sur « Se connecter à Dealabs », connectez-vous dans la fenêtre qui s'ouvre, puis réessayez.",
       );
     }
 
@@ -107,7 +120,7 @@ export class DealabsPublisherService {
 
         if (await this.isLoggedOut(page)) {
           throw new Error(
-            'Dealabs session has expired. Run "npm run dealabs:login" again.',
+            "La session Dealabs a expiré : cliquez sur « Se connecter à Dealabs » pour vous reconnecter.",
           );
         }
 
@@ -233,13 +246,8 @@ export class DealabsPublisherService {
     }
   }
 
-  protected async isLoggedOut(
-    page: import("playwright").Page,
-  ): Promise<boolean> {
-    const loginButton = page.getByText("Connexion ou inscription", {
-      exact: false,
-    });
-    return (await loginButton.count()) > 0;
+  protected isLoggedOut(page: import("playwright").Page): Promise<boolean> {
+    return isDealabsLoggedOut(page);
   }
 
   /**
@@ -289,8 +297,16 @@ export class DealabsPublisherService {
     await continueWithLink.click({ timeout: 15_000 });
 
     // Dealabs auto-fetches title/image/price from the link and this is
-    // also when it would warn about a duplicate thread.
-    await page.waitForTimeout(3_000);
+    // also when it would warn about a duplicate thread. That fetch takes a
+    // variable few seconds, during which the "Essentiel" panel is blank: a
+    // fixed pause was sometimes too short and the title field didn't exist
+    // yet (captured: empty panel). Wait for whichever shows up first — the
+    // step's fields or the duplicate warning.
+    await this.waitForAny(
+      page,
+      [...TITLE_SELECTORS, ...PRICE_SELECTORS, '[data-t="threadDuplicates"]'],
+      30_000,
+    );
     await this.rejectIfDuplicateWarning(page);
 
     // Step: Essentiel — Dealabs usually auto-fills title/price from the
@@ -299,29 +315,16 @@ export class DealabsPublisherService {
     // value doesn't actually stick, that's exactly the "looks finished
     // but a field is wrong/empty" failure mode — better to abort loudly
     // here than post something incomplete.
-    await this.fillFirstMatch(
-      page,
-      [
-        'input[name="title"]',
-        'input[name="dealTitle"]',
-        'input[placeholder*="itre" i]',
-      ],
-      draft.title,
-      {
-        clearFirst: true,
-        byLabel: /titre/i,
-        required: true,
-        fieldName: "Titre",
-      },
-    );
+    await this.fillFirstMatch(page, TITLE_SELECTORS, draft.title, {
+      clearFirst: true,
+      byLabel: /titre/i,
+      required: true,
+      fieldName: "Titre",
+    });
 
     await this.fillFirstMatch(
       page,
-      [
-        'input[name="price"]',
-        'input[name="temp_price"]',
-        'input[placeholder*="prix" i]',
-      ],
+      PRICE_SELECTORS,
       deal.currentPrice.toFixed(2),
       {
         clearFirst: true,
@@ -362,7 +365,7 @@ export class DealabsPublisherService {
         'textarea[name="description"]',
         "textarea",
       ],
-      draft.description ?? draft.body,
+      draft.description?.trim() || draft.body,
       {
         clearFirst: true,
         byLabel: /description/i,
@@ -483,6 +486,27 @@ export class DealabsPublisherService {
     );
   }
 
+  /**
+   * Resolves once any of `selectors` (or a field labelled `byLabel`) is
+   * visible, or after `timeoutMs` — never throws: the caller's own lookup
+   * then reports precisely what's missing.
+   */
+  protected async waitForAny(
+    page: import("playwright").Page,
+    selectors: string[],
+    timeoutMs: number,
+    byLabel?: RegExp,
+  ): Promise<void> {
+    let target = page.locator(selectors.join(", "));
+    if (byLabel) {
+      target = target.or(page.getByLabel(byLabel));
+    }
+    await target
+      .first()
+      .waitFor({ state: "visible", timeout: timeoutMs })
+      .catch(() => undefined);
+  }
+
   protected async fillFirstMatch(
     page: import("playwright").Page,
     selectors: string[],
@@ -494,6 +518,20 @@ export class DealabsPublisherService {
       fieldName?: string;
     },
   ): Promise<boolean> {
+    // Nothing to type is our problem, not a changed Dealabs form: say so.
+    if (options?.required && !value.trim()) {
+      throw new Error(
+        `Le champ "${options.fieldName ?? "?"}" est vide dans le brouillon : rien à saisir sur Dealabs.`,
+      );
+    }
+
+    // Each wizard step renders its fields a moment after the previous
+    // "Suivant" click: give a required field time to appear instead of
+    // declaring it missing on the first look.
+    if (options?.required) {
+      await this.waitForAny(page, selectors, 15_000, options.byLabel);
+    }
+
     for (const selector of selectors) {
       const locator = page.locator(selector).first();
       if ((await locator.count()) === 0) {
@@ -609,4 +647,14 @@ export class DealabsPublisherService {
     await page.waitForURL(/dealabs\.com\/.+/, { timeout: 30_000 });
     return page.url();
   }
+}
+
+/** Dealabs shows "Connexion ou inscription" only to logged-out visitors. */
+export async function isDealabsLoggedOut(
+  page: import("playwright").Page,
+): Promise<boolean> {
+  const loginButton = page.getByText("Connexion ou inscription", {
+    exact: false,
+  });
+  return (await loginButton.count()) > 0;
 }

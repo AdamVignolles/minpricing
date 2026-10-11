@@ -17,10 +17,14 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useClient } from "alepha/react";
-import { Fragment, type FC, type FormEvent, useState } from "react";
+import { Fragment, type FC, type FormEvent, useEffect, useState } from "react";
 
 import type { AdminController } from "../../api/controllers/AdminController.ts";
 import type { ProductsController } from "../../api/controllers/ProductsController.ts";
+import {
+  COLLECTION_FINISHED_EVENT,
+  COLLECTION_STARTED_EVENT,
+} from "../components/layout/CollectionProgressAside.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
 import Section from "../components/ui/Section.tsx";
@@ -127,53 +131,50 @@ const AdminPage: FC<AdminPageProps> = ({
     idealoUrl: "",
   });
 
+  /** Reloads the figures below once a run has finished. */
+  const refresh = async () => {
+    const [nextStats, nextProducts, nextRuns] = await Promise.all([
+      admin.stats({}),
+      productsClient.listProducts({ query: {} }),
+      admin.runs({ query: { size: 20 } }),
+    ]);
+    setStats(nextStats as AdminStats);
+    setProducts(nextProducts as TrackedProduct[]);
+    setRuns(nextRuns as CollectionRun[]);
+  };
+
+  // The progress sidebar announces the end of a run (see
+  // CollectionProgressAside): refresh the stats and run history then.
+  useEffect(() => {
+    const onFinished = () => void refresh().catch(() => undefined);
+    window.addEventListener(COLLECTION_FINISHED_EVENT, onFinished);
+    return () =>
+      window.removeEventListener(COLLECTION_FINISHED_EVENT, onFinished);
+  });
+
+  /**
+   * Starts a run and hands over to the progress sidebar: a run takes many
+   * minutes, far too long for a spinner in a toast.
+   */
   const runCollectNow = async () => {
     setRunning(true);
-    const id = notifications.show({
-      loading: true,
-      title: "Collecte en cours",
-      message: "Interrogation de toutes les sources actives…",
-      autoClose: false,
-      withCloseButton: false,
-    });
     try {
-      const results = await admin.collectNow({});
-      const collected = results.reduce((sum, row) => sum + row.collected, 0);
-      const created = results.reduce((sum, row) => sum + row.created, 0);
-      const failures = results.filter((row) => row.error);
-
-      const [nextStats, nextProducts, nextRuns] = await Promise.all([
-        admin.stats({}),
-        productsClient.listProducts({ query: {} }),
-        admin.runs({ query: { size: 20 } }),
-      ]);
-      setStats(nextStats as AdminStats);
-      setProducts(nextProducts as TrackedProduct[]);
-      setRuns(nextRuns as CollectionRun[]);
-
-      notifications.update({
-        id,
-        loading: false,
-        autoClose: 6000,
-        withCloseButton: true,
-        color: failures.length > 0 ? "orange" : "signal",
-        icon: <Icon name={failures.length > 0 ? "alert" : "check"} size={16} />,
-        title:
-          failures.length > 0
-            ? `Collecte terminée avec ${failures.length} erreur(s)`
-            : "Collecte terminée",
-        message: `${collected} offres récupérées, ${created} nouvelles.`,
+      const { started, message } = await admin.collectNow({});
+      notifications.show({
+        color: started ? "signal" : "orange",
+        icon: <Icon name={started ? "check" : "alert"} size={16} />,
+        title: message,
+        message: "Suivez l'avancement dans le panneau de droite.",
+        autoClose: 5000,
       });
+      window.dispatchEvent(new Event(COLLECTION_STARTED_EVENT));
     } catch {
-      notifications.update({
-        id,
-        loading: false,
-        autoClose: 8000,
-        withCloseButton: true,
+      notifications.show({
         color: "red",
         icon: <Icon name="alert" size={16} />,
-        title: "La collecte a échoué",
+        title: "Impossible de lancer la collecte",
         message: "Consultez les journaux du serveur pour le détail.",
+        autoClose: 8000,
       });
     } finally {
       setRunning(false);

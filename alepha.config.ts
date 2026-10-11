@@ -2,12 +2,16 @@ import { defineConfig } from "alepha/cli/config";
 import { cloudflare, platform } from "alepha/cli/platform";
 
 export default defineConfig({
-  //
-  // entry: {
-  //   server: "src/main.server.ts",
-  //   browser: "src/main.browser.ts",
-  //   style: "src/main.css",
-  // },
+  // Only the stylesheet is set explicitly (with forward slashes): an
+  // auto-detected entry is joined with the OS separator, and on Windows
+  // `src\main.css` ends up inside an inline `import "/src\main.css"` script
+  // where `\m` collapses to `m` — the browser then requests /srcmain.css (404)
+  // and the app is unstyled. Server/browser entries stay auto-detected:
+  // overriding `server` too broke dev hot reload ("Alepha instance not found
+  // after loading entry module") on Windows.
+  entry: {
+    style: "src/main.css",
+  },
   //
   // How `alepha build` packages dist/. Unset, you get "bare": the plain
   // Node server you run with `node dist/index.node.js` (or `node dist`).

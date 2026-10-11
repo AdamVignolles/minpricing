@@ -1,11 +1,18 @@
+import { type AmazonPageText, parseAmazonSignals } from "./amazonSignals.ts";
 import type { CloudflareBrowserBinding, DealsPage } from "./browser.ts";
 import {
+  interleave,
   parsePriceFr,
   scrollAndCollect,
   withBrowser,
   withPage,
 } from "./browser.ts";
-import type { DealSource, RawDeal } from "./DealSource.ts";
+import type {
+  DealDetails,
+  DealSource,
+  DiscoverContext,
+  RawDeal,
+} from "./DealSource.ts";
 
 /**
  * Amazon buybox price elements in priority order. There is no single
@@ -78,14 +85,29 @@ export class AmazonCollector implements DealSource {
     this.dealsUrls = Array.isArray(dealsUrls) ? dealsUrls : [dealsUrls];
   }
 
-  async discover(): Promise<RawDeal[]> {
+  async discover(context?: DiscoverContext): Promise<RawDeal[]> {
     return withBrowser(async (browser) => {
-      const cardsByAsin = new Map<
-        string,
-        { asin: string; url: string; title: string; imageUrl: string | null }
-      >();
+      type Card = {
+        asin: string;
+        url: string;
+        title: string;
+        imageUrl: string | null;
+        categoryHint?: string;
+      };
+      // One list per collection page, interleaved below so every category
+      // gets its share of `limit` (see `interleave`).
+      const cardsPerPage: Card[][] = [];
 
-      for (const dealsUrl of this.dealsUrls) {
+      for (const [pageIndex, dealsUrl] of this.dealsUrls.entries()) {
+        context?.progress?.(
+          "Lecture des pages bons plans",
+          pageIndex + 1,
+          this.dealsUrls.length,
+        );
+        // `/deals?bubble-id=deals-collection-toys` → "amazon:toys": the
+        // collection is Amazon's own category for every card on it.
+        const collection = dealsUrl.match(/deals-collection-([a-z0-9-]+)/)?.[1];
+        const categoryHint = collection ? `amazon:${collection}` : undefined;
         try {
           const cards = await withPage(browser, async (page) => {
             const response = await page.goto(dealsUrl, {
@@ -133,24 +155,23 @@ export class AmazonCollector implements DealSource {
                   }),
                 ),
               (card) => card.asin,
+              // Only the top of each collection is ever used (the cap is
+              // shared across ~15 collections), so a few scroll steps do.
+              { rounds: 6 },
             );
           });
 
-          for (const card of cards) {
-            if (
-              card.asin &&
-              card.url &&
-              card.title &&
-              !cardsByAsin.has(card.asin)
-            ) {
-              cardsByAsin.set(card.asin, {
-                asin: card.asin,
-                url: card.url,
-                title: card.title,
+          cardsPerPage.push(
+            cards
+              .filter((card) => card.asin && card.url && card.title)
+              .map((card) => ({
+                asin: card.asin as string,
+                url: card.url as string,
+                title: card.title as string,
                 imageUrl: card.imageUrl,
-              });
-            }
-          }
+                categoryHint,
+              })),
+          );
         } catch {
           // One listing page failing (challenge, layout change, timeout)
           // must not block the other entry points from contributing cards.
@@ -158,10 +179,16 @@ export class AmazonCollector implements DealSource {
       }
 
       const deals: RawDeal[] = [];
-      for (const card of Array.from(cardsByAsin.values()).slice(
+      const candidates = interleave(cardsPerPage, (card) => card.asin).slice(
         0,
         this.limit,
-      )) {
+      );
+      for (const [index, card] of candidates.entries()) {
+        context?.progress?.(
+          "Fiches produits (prix, vendeur, avis)",
+          index + 1,
+          candidates.length,
+        );
         try {
           // Each product page is fetched in its own browser context: Amazon
           // fingerprints sessions, and reusing cookies/context across
@@ -185,6 +212,16 @@ export class AmazonCollector implements DealSource {
             currency: "EUR",
             availability: "in_stock",
             merchantId: "amazon",
+            // Collection first; the product page breadcrumb covers cards
+            // only found in generic lists (all deals, lightning deals).
+            categoryHint:
+              card.categoryHint ??
+              (priced.breadcrumb
+                ? `amazon-crumb:${priced.breadcrumb}`
+                : undefined),
+            // Read on the product page we open anyway for the price: no
+            // extra request, so always fresh (no DiscoverContext needed).
+            details: priced.details,
           });
         } catch {
           // One product page failing (challenge, layout change, timeout)
@@ -200,7 +237,15 @@ export class AmazonCollector implements DealSource {
     page: DealsPage,
     url: string,
   ): Promise<
-    { price: number; listPrice?: number; description?: string } | undefined
+    | {
+        price: number;
+        listPrice?: number;
+        description?: string;
+        details?: DealDetails;
+        /** Root of the product's breadcrumb, e.g. "Cuisine et Maison". */
+        breadcrumb?: string;
+      }
+    | undefined
   > {
     const response = await page.goto(url, {
       waitUntil: "domcontentloaded",
@@ -217,7 +262,7 @@ export class AmazonCollector implements DealSource {
         // undefined and this candidate is simply skipped.
       });
 
-    const [texts, bullets] = await Promise.all([
+    const [texts, bullets, pageText] = await Promise.all([
       page.evaluate(
         (selectorGroups) =>
           selectorGroups.map((selectors) => {
@@ -236,6 +281,7 @@ export class AmazonCollector implements DealSource {
         [PRICE_SELECTORS, LIST_PRICE_SELECTORS],
       ),
       this.fetchFeatureBullets(page),
+      this.fetchPageText(page),
     ]);
 
     const [priceText, listPriceText] = texts;
@@ -255,52 +301,61 @@ export class AmazonCollector implements DealSource {
       listPrice:
         listPrice !== undefined && listPrice > price ? listPrice : undefined,
       description: bullets,
+      details: parseAmazonSignals(pageText, price),
+      breadcrumb: await page.evaluate(
+        () =>
+          document
+            .querySelector("#wayfinding-breadcrumbs_feature_div li a")
+            ?.textContent?.replace(/\s+/g, " ")
+            .trim() || undefined,
+      ),
     };
   }
 
   /**
-   * Amazon's "À propos de cet article" bullet list (`#feature-bullets`) is
-   * real, merchant-written product info — what the item actually is and
-   * does — as opposed to anything DealRadar would have to invent. Hidden
-   * bullets (`.aok-hidden`, used for SEO-only filler text Amazon doesn't
-   * actually display) are skipped. Falls back to the short product
-   * description paragraph when there's no bullet list at all. Capped at a
-   * handful of bullets / a few hundred characters: this ends up pasted
-   * into a Dealabs post, not reproduced in full.
+   * The raw strings behind {@link parseAmazonSignals}: seller/shipper,
+   * rating, review count, "other sellers" line, purchases last month, and
+   * the price column's text — which carries the "Prix le plus bas des 30
+   * derniers jours" Amazon must display next to any announced reduction.
+   * `innerText`, not `textContent`: the price column embeds `<style>`
+   * blocks whose CSS would otherwise pollute every regex.
    */
-  protected async fetchFeatureBullets(
-    page: DealsPage,
-  ): Promise<string | undefined> {
-    const bullets = await page.evaluate(() => {
-      const items = Array.from(
-        document.querySelectorAll(
-          "#feature-bullets ul.a-unordered-list li:not(.aok-hidden) span.a-list-item",
+  protected fetchPageText(page: DealsPage): Promise<AmazonPageText> {
+    return page.evaluate(() => {
+      const text = (selector: string) =>
+        (document.querySelector(selector) as HTMLElement | null)?.innerText
+          ?.replace(/\s+/g, " ")
+          .trim() || undefined;
+      return {
+        title: text("#productTitle") ?? document.title,
+        priceArea:
+          text("#apex_desktop") ??
+          text("#corePriceDisplay_desktop_feature_div") ??
+          text("#corePrice_feature_div") ??
+          "",
+        ratingText:
+          document.querySelector("#acrPopover")?.getAttribute("title") ??
+          text("#acrPopover"),
+        reviewsText: text("#acrCustomerReviewText"),
+        sellerText: text(
+          "#merchantInfoFeature_feature_div .offer-display-feature-text-message",
         ),
-      )
-        .map((el) => el.textContent?.replace(/\s+/g, " ").trim())
-        .filter((text): text is string => !!text && text.length > 3);
-
-      if (items.length > 0) {
-        return items;
-      }
-
-      const fallback = document
-        .querySelector("#productDescription p, #productDescription")
-        ?.textContent?.replace(/\s+/g, " ")
-        .trim();
-      return fallback ? [fallback] : [];
+        shipperText: text(
+          "#fulfillerInfoFeature_feature_div .offer-display-feature-text-message",
+        ),
+        buyBoxText: text("#offerDisplayFeatures_desktop"),
+        otherSellersText:
+          text("#dynamic-aod-ingress-box") ??
+          text("#olpLinkWidget_feature_div"),
+        boughtText: text("#social-proofing-faceout-title-tk_bought"),
+        basisText: text(".basisPrice"),
+      };
     });
+  }
 
-    if (bullets.length === 0) {
-      return undefined;
-    }
-
-    const text = bullets
-      .slice(0, 5)
-      .map((line) => `- ${line}`)
-      .join("\n");
-
-    return text.length > 600 ? `${text.slice(0, 600)}…` : text;
+  /** See {@link readAmazonBullets}. */
+  protected fetchFeatureBullets(page: DealsPage): Promise<string | undefined> {
+    return readAmazonBullets(page);
   }
 }
 
@@ -316,4 +371,48 @@ export function upscaleAmazonImage(url?: string): string | undefined {
     return url;
   }
   return url.replace(/\._[A-Z0-9_,]+_\.(jpg|png|jpeg)/i, "._AC_SL800_.$1");
+}
+
+/**
+ * Amazon's "À propos de cet article" bullet list (`#feature-bullets`) is
+ * real, merchant-written product info — what the item actually is and
+ * does. Hidden bullets (`.aok-hidden`, SEO-only filler Amazon doesn't
+ * display) are skipped; falls back to the short product description
+ * paragraph. Capped to a few bullets: it ends up in a Dealabs post. Shared
+ * with `MarketReferenceService`, which borrows it to describe a Cdiscount
+ * product matched on Amazon by EAN.
+ */
+export async function readAmazonBullets(
+  page: DealsPage,
+): Promise<string | undefined> {
+  const bullets = await page.evaluate(() => {
+    const items = Array.from(
+      document.querySelectorAll(
+        "#feature-bullets ul.a-unordered-list li:not(.aok-hidden) span.a-list-item",
+      ),
+    )
+      .map((el) => el.textContent?.replace(/\s+/g, " ").trim())
+      .filter((text): text is string => !!text && text.length > 3);
+
+    if (items.length > 0) {
+      return items;
+    }
+
+    const fallback = document
+      .querySelector("#productDescription p, #productDescription")
+      ?.textContent?.replace(/\s+/g, " ")
+      .trim();
+    return fallback ? [fallback] : [];
+  });
+
+  if (bullets.length === 0) {
+    return undefined;
+  }
+
+  const text = bullets
+    .slice(0, 5)
+    .map((line) => `- ${line}`)
+    .join("\n");
+
+  return text.length > 600 ? `${text.slice(0, 600)}…` : text;
 }

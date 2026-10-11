@@ -66,7 +66,12 @@ export class SeedService {
       { id: "audio", name: "Audio", slug: "audio" },
       { id: "tv-photo", name: "TV & Photo", slug: "tv-photo" },
       { id: "appliances", name: "Électroménager", slug: "appliances" },
-      { id: "home", name: "Maison & Jardin", slug: "home" },
+      { id: "home", name: "Maison & Cuisine", slug: "home" },
+      { id: "diy", name: "Bricolage & Jardin", slug: "diy" },
+      { id: "kids", name: "Jouets & Bébé", slug: "kids" },
+      { id: "sport", name: "Sport & Loisirs", slug: "sport" },
+      { id: "food", name: "Épicerie & Boissons", slug: "food" },
+      { id: "pets", name: "Animalerie", slug: "pets" },
       { id: "fashion", name: "Mode", slug: "fashion" },
       { id: "beauty-health", name: "Beauté & Santé", slug: "beauty-health" },
       { id: "auto", name: "Auto & Mobilité", slug: "auto" },
@@ -77,6 +82,10 @@ export class SeedService {
       const existing = await this.categories.findById(category.id);
       if (!existing) {
         await this.categories.create(category);
+      } else if (existing.name !== category.name) {
+        // Seeded names are owned by the app (e.g. "Maison & Jardin" became
+        // "Maison & Cuisine" when garden moved to "Bricolage & Jardin").
+        await this.categories.updateById(category.id, { name: category.name });
       }
     }
   }
