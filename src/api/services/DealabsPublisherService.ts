@@ -6,6 +6,7 @@ import type { Infer } from "alepha";
 import { DateTimeProvider } from "alepha/datetime";
 
 import type { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
+import { dealabsTitle } from "./DealabsDraftService.ts";
 import type { Deal } from "./DealTypes.ts";
 
 export const SESSION_PATH = join(process.cwd(), ".dealabs-session.json");
@@ -315,12 +316,18 @@ export class DealabsPublisherService {
     // value doesn't actually stick, that's exactly the "looks finished
     // but a field is wrong/empty" failure mode — better to abort loudly
     // here than post something incomplete.
-    await this.fillFirstMatch(page, TITLE_SELECTORS, draft.title, {
-      clearFirst: true,
-      byLabel: /titre/i,
-      required: true,
-      fieldName: "Titre",
-    });
+    // A title edited by hand may exceed Dealabs' limit: fit it here too.
+    await this.fillFirstMatch(
+      page,
+      TITLE_SELECTORS,
+      dealabsTitle(draft.title),
+      {
+        clearFirst: true,
+        byLabel: /titre/i,
+        required: true,
+        fieldName: "Titre",
+      },
+    );
 
     await this.fillFirstMatch(
       page,

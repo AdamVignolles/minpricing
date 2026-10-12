@@ -87,6 +87,26 @@ controllers → React console → Dealabs draft / auto-publish.
   recorded on the draft (`publishAttempts`, `lastPublishResult`,
   `lastPublishError`); a "Vérifier" that doesn't confirm puts the draft back
   to `draft`. Draft texts never contain prices.
+- **Auto-publish**: `AutoPublishService.publishDeal()` is the single publish
+  path (button and run). At the end of `runAll()`, `publishBestDeals()` posts
+  deals seen in that run with score ≥ `AUTO_PUBLISH_MIN_SCORE` (65), draft
+  still `draft` and never attempted, best first, max
+  `AUTO_PUBLISH_MAX_PER_RUN` (3); skipped when serverless or no Dealabs
+  session. `AUTO_PUBLISH=false` turns it off.
+- **Other sources**: `AliExpressCollector` ("Deal du Jour" listing plus
+  phone/PC/tablet searches with `shipFromCountry=FR`; product page only for
+  new/stale deals; parsing in `collectors/aliexpressSignals.ts`). Branded
+  AliExpress products are cross-searched by model on Amazon and Cdiscount
+  (`MarketReferenceService.refreshAliExpress`, matching rules in
+  `services/crossSearch.ts`: model words, variant right after the model,
+  storage, no accessories); matches go to `Deal.marketComparisons` (the
+  deal page's comparison table), the cheapest to `marketPrice`.
+  `TelecomCollectors.ts` (Orange, Free, Bouygues/B&YOU, RED by SFR): mobile
+  plans and boxes via plain `fetch` of each operator's page or public API
+  (parsers in `collectors/telecomOffers.ts`); `billingPeriod: "month"`,
+  category `telecom`. Phones sold with a plan and offers reserved to box
+  customers are deliberately excluded. Dealabs titles are capped at 140
+  characters by `dealabsTitle()`.
 - **Categories**: collectors set `RawDeal.categoryHint` from the merchant's
   own classification (Amazon `deals?bubble-id=deals-collection-<x>`, the
   Amazon breadcrumb, the Cdiscount URL path); `CategorizationService.fromHint`

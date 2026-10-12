@@ -32,6 +32,8 @@ export interface RawDeal {
    * from the title, which stays the fallback.
    */
   categoryHint?: string;
+  /** Set for recurring prices (mobile plans, boxes): the price is per month. */
+  billingPeriod?: "month";
   /**
    * The {@link TrackedProduct} this offer was collected for, when the
    * collector worked off an explicit tracked product rather than
@@ -101,6 +103,14 @@ export interface DealDetails {
    * actually charged, so trusted much less).
    */
   listPriceKind?: "regular" | "rrp";
+  /** Country the item ships from ("FR", "CN"), when the source says. */
+  shipsFrom?: string;
+  /**
+   * A platform's own "lowest price in N days" claim (AliExpress badge):
+   * stored as a historical low with its source.
+   */
+  historicalLowPrice?: number;
+  historicalLowSource?: string;
 }
 
 /**

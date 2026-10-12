@@ -1,11 +1,16 @@
 import {
   ActionIcon,
+  Anchor,
   Badge,
   Box,
+  Button,
+  Divider,
   Group,
   Loader,
   Progress,
   ScrollArea,
+  SegmentedControl,
+  SimpleGrid,
   Stack,
   Text,
   Title,
@@ -25,14 +30,17 @@ export const COLLECTION_STARTED_EVENT = "dealradar:collection-started";
 export const COLLECTION_FINISHED_EVENT = "dealradar:collection-finished";
 
 type Progress = CollectionProgress;
+type SourceProgress = Progress["sources"][number];
 
 const POLL_RUNNING_MS = 2_000;
 const POLL_IDLE_MS = 20_000;
 /** A finished run stays on screen this long (unless closed). */
 const SHOW_AFTER_FINISH_MS = 10 * 60 * 1000;
+/** Not a marketplace: the publishing step that ends a run. */
+const PUBLISH_STEP = "dealabs-publish";
 
 const STATUS: Record<
-  Progress["sources"][number]["status"],
+  SourceProgress["status"],
   { label: string; color: string }
 > = {
   pending: { label: "En attente", color: "gray" },
@@ -41,14 +49,25 @@ const STATUS: Record<
   failed: { label: "Échec", color: "red" },
 };
 
+const time = (iso: string, withSeconds = false) =>
+  new Date(iso).toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(withSeconds ? { second: "2-digit" } : {}),
+  });
+
 /**
  * Polls the collection progress. Exposed as a hook so the layout can both
- * render the sidebar and decide whether the AppShell aside is open.
+ * render the sidebar and decide whether the AppShell aside is open: on its
+ * own while a run is going (and for a while after), or whenever the user
+ * opens it from the header.
  */
 export function useCollectionProgress() {
   const admin = useClient<AdminController>();
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [nextRunAt, setNextRunAt] = useState<string | null>(null);
   const [dismissedRunId, setDismissedRunId] = useState<string | null>(null);
+  const [pinned, setPinned] = useState(false);
   // Clock sampled at each poll (render must stay pure: no Date.now there).
   const [polledAt, setPolledAt] = useState(0);
 
@@ -61,7 +80,9 @@ export function useCollectionProgress() {
       clearTimeout(timer);
       let next: Progress | null = null;
       try {
-        next = (await admin.collectProgress({})) as Progress | null;
+        const response = await admin.collectProgress({});
+        next = response.progress as Progress | null;
+        if (!cancelled) setNextRunAt(response.nextRunAt);
       } catch {
         // Not logged in (login page) or server restarting: retry later.
       }
@@ -95,108 +116,331 @@ export function useCollectionProgress() {
   const recentlyFinished =
     !!progress?.finishedAt &&
     polledAt - new Date(progress.finishedAt).getTime() < SHOW_AFTER_FINISH_MS;
-  const visible =
+  const automatic =
     !!progress &&
     progress.runId !== dismissedRunId &&
     (progress.status === "running" || recentlyFinished);
 
   return {
     progress,
-    visible,
+    nextRunAt,
+    polledAt,
+    visible: pinned || automatic,
     running: progress?.status === "running",
-    dismiss: () => setDismissedRunId(progress?.runId ?? null),
+    toggle: () => {
+      if (pinned || automatic) {
+        setPinned(false);
+        setDismissedRunId(progress?.runId ?? null);
+      } else {
+        setPinned(true);
+      }
+    },
+    close: () => {
+      setPinned(false);
+      setDismissedRunId(progress?.runId ?? null);
+    },
   };
 }
 
-/** Header chip: visible on every width while a run is going. */
-export const CollectionRunningChip: FC<{
+/**
+ * Header button: always there, so the last run and the next one can be
+ * checked at any time; shows live progress while a run is going.
+ */
+export const CollectionHeaderButton: FC<{
   progress: Progress | null;
+  open: boolean;
   onClick: () => void;
-}> = ({ progress, onClick }) => {
-  if (progress?.status !== "running") return null;
-  const done = progress.sources.filter(
-    (s) => s.status === "done" || s.status === "failed",
-  ).length;
+}> = ({ progress, open, onClick }) => {
+  const running = progress?.status === "running";
+  const done =
+    progress?.sources.filter(
+      (s) => s.status === "done" || s.status === "failed",
+    ).length ?? 0;
   return (
-    <Badge
-      component="button"
-      type="button"
+    <Button
+      size="xs"
+      variant={open ? "light" : "subtle"}
+      color={running ? "blue" : "gray"}
       onClick={onClick}
-      variant="light"
-      color="blue"
-      leftSection={<Loader size={10} color="blue" />}
-      style={{ cursor: "pointer" }}
+      leftSection={
+        running ? (
+          <Loader size={12} color="blue" />
+        ) : (
+          <Icon name="refresh" size={14} />
+        )
+      }
       className="tnum"
+      aria-pressed={open}
     >
-      Collecte en cours · {done}/{progress.sources.length}
-    </Badge>
+      {running ? `Collecte ${done}/${progress?.sources.length}` : "Collecte"}
+    </Button>
+  );
+};
+
+/** One key figure of the run. */
+const Figure: FC<{ label: string; value: number; color?: string }> = ({
+  label,
+  value,
+  color,
+}) => (
+  <Box>
+    <Text fz="lg" fw={700} lh={1.1} className="tnum" c={color}>
+      {value.toLocaleString("fr-FR")}
+    </Text>
+    <Text fz="xs" c="dimmed">
+      {label}
+    </Text>
+  </Box>
+);
+
+const SourceCard: FC<{ source: SourceProgress; now: number }> = ({
+  source,
+  now,
+}) => {
+  const started = source.startedAt ? new Date(source.startedAt).getTime() : 0;
+  const ended = source.finishedAt ? new Date(source.finishedAt).getTime() : now;
+  const percent = source.total
+    ? Math.round(((source.done ?? 0) / source.total) * 100)
+    : undefined;
+  return (
+    <Box
+      p="xs"
+      style={{
+        borderRadius: 8,
+        border: "1px solid var(--mantine-color-default-border)",
+        background:
+          source.status === "running" ? "var(--app-surface-muted)" : undefined,
+      }}
+    >
+      <Group justify="space-between" wrap="nowrap" gap="xs">
+        <Text fz="sm" fw={600} lineClamp={2} title={source.name}>
+          {source.name}
+        </Text>
+        <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
+          {started ? (
+            <Text fz="xs" c="dimmed" className="tnum">
+              {f.duration(ended - started)}
+            </Text>
+          ) : null}
+          <Badge size="xs" variant="light" color={STATUS[source.status].color}>
+            {STATUS[source.status].label}
+          </Badge>
+        </Group>
+      </Group>
+
+      {source.status === "running" ? (
+        <Stack gap={4} mt={6}>
+          <Group justify="space-between" gap="xs" wrap="nowrap">
+            <Text fz="xs">{source.step ?? "Démarrage"}</Text>
+            {percent !== undefined ? (
+              <Text fz="xs" fw={600} className="tnum">
+                {percent} %
+              </Text>
+            ) : null}
+          </Group>
+          {source.total ? (
+            <>
+              <Progress
+                value={percent ?? 0}
+                size="sm"
+                color="blue"
+                aria-label={`${source.done ?? 0} sur ${source.total}`}
+              />
+              <Text fz="xs" c="dimmed" className="tnum">
+                {source.done ?? 0} / {source.total}
+              </Text>
+            </>
+          ) : (
+            <Progress value={100} size="sm" color="blue" animated striped />
+          )}
+        </Stack>
+      ) : null}
+
+      {source.status === "done" ? (
+        <Text fz="xs" c="dimmed" mt={4} className="tnum">
+          {source.summary ??
+            `${source.collected ?? 0} offres · ${source.created ?? 0} nouvelles · ${source.updated ?? 0} mises à jour`}
+        </Text>
+      ) : null}
+
+      {source.status === "failed" && source.error ? (
+        <Text fz="xs" c="red" mt={4} lineClamp={4}>
+          {source.error}
+        </Text>
+      ) : null}
+
+      {source.skipped || source.warnings ? (
+        <Group gap={6} mt={6}>
+          {source.skipped ? (
+            <Badge size="xs" variant="light" color="orange">
+              {source.skipped} offre(s) ignorée(s)
+            </Badge>
+          ) : null}
+          {source.warnings ? (
+            <Badge size="xs" variant="light" color="orange">
+              {source.warnings} alerte(s)
+            </Badge>
+          ) : null}
+        </Group>
+      ) : null}
+
+      {source.links?.length ? (
+        <Stack gap={2} mt={6}>
+          {source.links.map((link) => (
+            <Anchor
+              key={link.url}
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              fz="xs"
+              lineClamp={1}
+            >
+              {link.label}
+            </Anchor>
+          ))}
+        </Stack>
+      ) : null}
+    </Box>
   );
 };
 
 /**
- * What the collection is doing right now: which marketplace, which step,
- * how far into it, and what has happened so far — instead of a spinner
- * that says nothing for twenty minutes.
+ * What the collection is doing right now — or did last time, and when it
+ * runs next: per marketplace, which step, how far, how long, what was
+ * collected, what went wrong; the deals published on Dealabs; the full
+ * journal. Scrolls as a whole, so nothing gets cut off.
  */
 const CollectionProgressAside: FC<{
-  progress: Progress;
+  progress: Progress | null;
+  nextRunAt: string | null;
+  /** When the progress was last fetched (the clock between ticks). */
+  polledAt: number;
   onClose: () => void;
-}> = ({ progress, onClose }) => {
+}> = ({ progress, nextRunAt, polledAt, onClose }) => {
+  const running = progress?.status === "running";
+  const [filter, setFilter] = useState<"all" | "warn">("all");
+  // Live clock while running (elapsed time, durations); sampled in an
+  // effect, not during render.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setTick(Date.now()), 1_000);
+    return () => clearInterval(id);
+  }, [running]);
+  const now = Math.max(polledAt, tick);
+
+  const header = (
+    <Group justify="space-between" wrap="nowrap" align="flex-start">
+      <Title order={2} fz="md">
+        Collecte
+      </Title>
+      <Tooltip label="Masquer">
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          onClick={onClose}
+          aria-label="Masquer le suivi de collecte"
+        >
+          <Icon name="close" size={16} />
+        </ActionIcon>
+      </Tooltip>
+    </Group>
+  );
+
+  const nextRun = nextRunAt ? (
+    <Group gap={6}>
+      <Icon name="clock" size={14} aria-hidden />
+      <Text fz="xs" c="dimmed">
+        Prochaine collecte planifiée : {time(nextRunAt)}
+        <Text component="span" fz="xs" c="dimmed">
+          {" "}
+          (toutes les heures de 8 h à 23 h, puis 2 h et 5 h)
+        </Text>
+      </Text>
+    </Group>
+  ) : null;
+
+  if (!progress) {
+    return (
+      <Stack gap="md">
+        {header}
+        <Text fz="sm" c="dimmed">
+          Aucune collecte enregistrée pour l'instant.
+        </Text>
+        {nextRun}
+      </Stack>
+    );
+  }
+
+  const markets = progress.sources.filter((s) => s.id !== PUBLISH_STEP);
   const finished = progress.sources.filter(
     (s) => s.status === "done" || s.status === "failed",
   ).length;
-  const running = progress.status === "running";
-  const elapsedMs =
-    new Date(progress.finishedAt ?? progress.updatedAt).getTime() -
-    new Date(progress.startedAt).getTime();
+  const started = new Date(progress.startedAt).getTime();
+  const end = progress.finishedAt
+    ? new Date(progress.finishedAt).getTime()
+    : Math.max(now, new Date(progress.updatedAt).getTime());
+  const estimatedEnd =
+    running && progress.previousDurationMs
+      ? started + progress.previousDurationMs
+      : undefined;
+  const totals = markets.reduce(
+    (sum, s) => ({
+      collected: sum.collected + (s.collected ?? 0),
+      created: sum.created + (s.created ?? 0),
+      updated: sum.updated + (s.updated ?? 0),
+    }),
+    { collected: 0, created: 0, updated: 0 },
+  );
+  const warnings = progress.events.filter((e) => e.level === "warn").length;
   const namesById = Object.fromEntries(
     progress.sources.map((s) => [s.id, s.name]),
   );
+  const events = [...progress.events]
+    .reverse()
+    .filter((event) => filter === "all" || event.level === "warn");
 
   return (
-    <Stack gap="md" h="100%">
-      <Group justify="space-between" wrap="nowrap" align="flex-start">
-        <Stack gap={4}>
-          <Title order={2} fz="md">
-            Collecte
-          </Title>
-          <Group gap={6}>
-            <Badge
-              variant="light"
-              color={
-                running ? "blue" : progress.status === "failed" ? "red" : "teal"
-              }
-              leftSection={running ? <Loader size={10} color="blue" /> : null}
-            >
-              {running
-                ? "En cours"
-                : progress.status === "failed"
-                  ? "Interrompue"
-                  : "Terminée"}
-            </Badge>
-            <Text fz="xs" c="dimmed" className="tnum">
-              {f.duration(elapsedMs)}
-            </Text>
-          </Group>
-        </Stack>
-        {!running ? (
-          <Tooltip label="Masquer">
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              onClick={onClose}
-              aria-label="Masquer le suivi de collecte"
-            >
-              <Icon name="close" size={16} />
-            </ActionIcon>
-          </Tooltip>
+    <Stack gap="md">
+      {header}
+
+      <Stack gap={6}>
+        <Group gap={6}>
+          <Badge
+            variant="light"
+            color={
+              running ? "blue" : progress.status === "failed" ? "red" : "teal"
+            }
+            leftSection={running ? <Loader size={10} color="blue" /> : null}
+          >
+            {running
+              ? "En cours"
+              : progress.status === "failed"
+                ? "Interrompue"
+                : "Terminée"}
+          </Badge>
+          <Badge variant="outline" color="gray">
+            {progress.trigger === "manual" ? "Manuelle" : "Planifiée"}
+          </Badge>
+        </Group>
+        <Text fz="xs" c="dimmed" className="tnum">
+          Démarrée à {time(progress.startedAt)} ·{" "}
+          {running ? "en cours depuis" : "durée"} {f.duration(end - started)}
+          {progress.finishedAt ? ` · finie à ${time(progress.finishedAt)}` : ""}
+        </Text>
+        {estimatedEnd ? (
+          <Text fz="xs" c="dimmed" className="tnum">
+            {estimatedEnd > now
+              ? `Fin estimée vers ${time(new Date(estimatedEnd).toISOString())} (durée de la précédente : ${f.duration(progress.previousDurationMs ?? 0)})`
+              : "Plus longue que la précédente collecte."}
+          </Text>
         ) : null}
-      </Group>
+      </Stack>
 
       <Box>
         <Group justify="space-between" mb={4}>
           <Text fz="xs" c="dimmed">
-            Sources traitées
+            Étapes terminées
           </Text>
           <Text fz="xs" fw={600} className="tnum">
             {finished} / {progress.sources.length}
@@ -206,112 +450,87 @@ const CollectionProgressAside: FC<{
           value={(finished / Math.max(progress.sources.length, 1)) * 100}
           size="sm"
           color="blue"
-          aria-label={`${finished} sources traitées sur ${progress.sources.length}`}
+          aria-label={`${finished} étapes terminées sur ${progress.sources.length}`}
         />
       </Box>
 
-      <Stack gap="sm">
+      <SimpleGrid cols={4} spacing="xs">
+        <Figure label="offres" value={totals.collected} />
+        <Figure label="nouvelles" value={totals.created} />
+        <Figure label="mises à jour" value={totals.updated} />
+        <Figure
+          label="alertes"
+          value={warnings}
+          color={warnings ? "orange" : undefined}
+        />
+      </SimpleGrid>
+
+      <Stack gap="xs">
         {progress.sources.map((source) => (
-          <Box
-            key={source.id}
-            p="xs"
-            style={{
-              borderRadius: 8,
-              background:
-                source.status === "running"
-                  ? "var(--app-surface-muted)"
-                  : undefined,
-            }}
-          >
-            <Group justify="space-between" wrap="nowrap" gap="xs">
-              <Text fz="sm" fw={600} truncate>
-                {source.name}
-              </Text>
-              <Badge
-                size="xs"
-                variant="light"
-                color={STATUS[source.status].color}
-                style={{ flexShrink: 0 }}
-              >
-                {STATUS[source.status].label}
-              </Badge>
-            </Group>
-
-            {source.status === "running" ? (
-              <Stack gap={4} mt={6}>
-                <Text fz="xs">{source.step ?? "Démarrage"}</Text>
-                {source.total ? (
-                  <>
-                    <Progress
-                      value={((source.done ?? 0) / source.total) * 100}
-                      size="xs"
-                      color="blue"
-                      aria-label={`${source.done ?? 0} sur ${source.total}`}
-                    />
-                    <Text fz="xs" c="dimmed" className="tnum">
-                      {source.done ?? 0} / {source.total}
-                    </Text>
-                  </>
-                ) : null}
-              </Stack>
-            ) : null}
-
-            {source.status === "done" ? (
-              <Text fz="xs" c="dimmed" mt={4} className="tnum">
-                {source.collected ?? 0} offres · {source.created ?? 0} nouvelles
-                · {source.updated ?? 0} mises à jour
-              </Text>
-            ) : null}
-
-            {source.status === "failed" && source.error ? (
-              <Text fz="xs" c="red" mt={4} lineClamp={3}>
-                {source.error}
-              </Text>
-            ) : null}
-          </Box>
+          <SourceCard key={source.id} source={source} now={now} />
         ))}
       </Stack>
 
-      <Stack gap={6} style={{ flex: 1, minHeight: 0 }}>
-        <Text fz="xs" fw={700} c="dimmed" tt="uppercase">
-          Journal
-        </Text>
-        <ScrollArea style={{ flex: 1 }}>
-          <Stack gap={6}>
-            {[...progress.events].reverse().map((event, index) => (
-              <Group
-                key={`${event.at}-${index}`}
-                gap={6}
-                wrap="nowrap"
-                align="flex-start"
-              >
-                <Text
-                  fz="xs"
-                  c="dimmed"
-                  className="tnum"
-                  style={{ flexShrink: 0 }}
-                >
-                  {new Date(event.at).toLocaleTimeString("fr-FR", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                  })}
+      {nextRun}
+
+      <Divider />
+
+      <Stack gap="xs">
+        <Group justify="space-between" gap="xs">
+          <Text fz="xs" fw={700} c="dimmed" tt="uppercase">
+            Journal ({progress.events.length})
+          </Text>
+          <SegmentedControl
+            size="xs"
+            value={filter}
+            onChange={(value) => setFilter(value as "all" | "warn")}
+            data={[
+              { value: "all", label: "Tout" },
+              { value: "warn", label: `Alertes (${warnings})` },
+            ]}
+          />
+        </Group>
+        {events.length === 0 ? (
+          <Text fz="xs" c="dimmed">
+            Rien à afficher.
+          </Text>
+        ) : null}
+        {events.map((event, index) => (
+          <Group
+            key={`${event.at}-${index}`}
+            gap={6}
+            wrap="nowrap"
+            align="flex-start"
+          >
+            <Text fz="xs" c="dimmed" className="tnum" style={{ flexShrink: 0 }}>
+              {time(event.at, true)}
+            </Text>
+            <Text fz="xs" c={event.level === "warn" ? "orange" : undefined}>
+              {event.sourceId ? (
+                <Text component="span" fz="xs" fw={600}>
+                  {namesById[event.sourceId] ?? event.sourceId} ·{" "}
                 </Text>
-                <Text fz="xs" c={event.level === "warn" ? "orange" : undefined}>
-                  {event.sourceId ? (
-                    <Text component="span" fz="xs" fw={600}>
-                      {namesById[event.sourceId] ?? event.sourceId} ·{" "}
-                    </Text>
-                  ) : null}
-                  {event.message}
-                </Text>
-              </Group>
-            ))}
-          </Stack>
-        </ScrollArea>
+              ) : null}
+              {event.message}
+            </Text>
+          </Group>
+        ))}
       </Stack>
     </Stack>
   );
 };
+
+/** The aside's content in a scroll area spanning its full height. */
+export const CollectionProgressPanel: FC<{
+  progress: Progress | null;
+  nextRunAt: string | null;
+  /** When the progress was last fetched (the clock between ticks). */
+  polledAt: number;
+  onClose: () => void;
+}> = (props) => (
+  <ScrollArea h="100%" type="auto" offsetScrollbars scrollbarSize={8} p="md">
+    <CollectionProgressAside {...props} />
+  </ScrollArea>
+);
 
 export default CollectionProgressAside;

@@ -13,4 +13,9 @@ export const DEFAULT_MERCHANT_BY_SOURCE: Record<string, string> = {
   amazon: "amazon",
   cdiscount: "cdiscount",
   steam: "steam",
+  aliexpress: "aliexpress",
+  orange: "orange",
+  free: "free",
+  bouygues: "bouygues",
+  sfr: "sfr",
 };

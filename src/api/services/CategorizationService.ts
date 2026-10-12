@@ -17,6 +17,12 @@
  * under `pret-a-porter/`) come before broader ones.
  */
 const HINTS: Array<{ pattern: RegExp; categoryId: string }> = [
+  // AliExpress search pages (`/w/wholesale-<term>.html`)
+  { pattern: /^aliexpress:(smartphone|tablette)/, categoryId: "phones" },
+  {
+    pattern: /^aliexpress:(mini-pc|ordinateur-portable|laptop)/,
+    categoryId: "computing",
+  },
   // Amazon deals collections (`/deals?bubble-id=deals-collection-…`)
   { pattern: /^amazon:(toys|baby)$/, categoryId: "kids" },
   { pattern: /^amazon:(home-and-kitchen|furniture)$/, categoryId: "home" },

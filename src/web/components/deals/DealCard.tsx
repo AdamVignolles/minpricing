@@ -99,6 +99,12 @@ const DealCard: FC<DealCardProps> = ({
         <Group gap={8} align="baseline" mt="auto" wrap="wrap">
           <Text fz={compact ? "lg" : "xl"} fw={700} lh={1.1} className="tnum">
             {f.price(deal.currentPrice, deal.currency)}
+            {deal.billingPeriod === "month" ? (
+              <Text component="span" fz="sm" fw={500} c="dimmed">
+                {" "}
+                /mois
+              </Text>
+            ) : null}
           </Text>
           {deal.listPrice && deal.listPrice > deal.currentPrice ? (
             <Text fz="sm" c="dimmed" td="line-through" className="tnum">

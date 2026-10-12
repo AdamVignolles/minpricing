@@ -75,7 +75,7 @@ export function parseDealabsSearch(html: string): DealabsThread[] {
  * Words that turn one product into a different one: a "4K Plus" deal is no
  * reference for a plain "4K", a "Pro" phone none for the base model.
  */
-const VARIANT_WORDS = new Set([
+export const VARIANT_WORDS = new Set([
   // Console versions of a game are other products than the PC/Steam one
   // (and than each other). "pc"/"steam" are deliberately absent: a Steam
   // title rarely says "PC", and a PC deal must still match it.

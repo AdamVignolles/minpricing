@@ -48,6 +48,24 @@ export class SeedService {
         name: "Cdiscount (bons plans, auto)",
         type: "scrape" as const,
       },
+      {
+        id: "aliexpress",
+        name: "AliExpress (deals du jour)",
+        type: "scrape" as const,
+      },
+      // Operators: their own pages / public API, read without a browser.
+      {
+        id: "orange",
+        name: "Orange (forfaits & box)",
+        type: "scrape" as const,
+      },
+      { id: "free", name: "Free Mobile (forfaits)", type: "scrape" as const },
+      {
+        id: "bouygues",
+        name: "Bouygues Telecom & B&YOU (forfaits)",
+        type: "api" as const,
+      },
+      { id: "sfr", name: "RED by SFR (forfaits)", type: "scrape" as const },
     ];
 
     for (const source of defaults) {
@@ -75,6 +93,7 @@ export class SeedService {
       { id: "fashion", name: "Mode", slug: "fashion" },
       { id: "beauty-health", name: "Beauté & Santé", slug: "beauty-health" },
       { id: "auto", name: "Auto & Mobilité", slug: "auto" },
+      { id: "telecom", name: "Forfaits & Box", slug: "telecom" },
       { id: "other", name: "Autre", slug: "other" },
     ];
 
@@ -95,6 +114,15 @@ export class SeedService {
       { id: "amazon", name: "Amazon", domain: "amazon.fr" },
       { id: "cdiscount", name: "Cdiscount", domain: "cdiscount.com" },
       { id: "steam", name: "Steam", domain: "store.steampowered.com" },
+      { id: "aliexpress", name: "AliExpress", domain: "aliexpress.com" },
+      { id: "orange", name: "Orange", domain: "orange.fr" },
+      { id: "free", name: "Free", domain: "free.fr" },
+      {
+        id: "bouygues",
+        name: "Bouygues Telecom",
+        domain: "bouyguestelecom.fr",
+      },
+      { id: "sfr", name: "SFR / RED", domain: "sfr.fr" },
     ];
 
     for (const merchant of defaults) {

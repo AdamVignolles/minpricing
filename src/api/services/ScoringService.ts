@@ -62,6 +62,12 @@ export interface DealSignals {
   historicalLowPrice?: number;
   historicalLowAt?: string;
   historicalLowSource?: string;
+  /** For marketplace-specific checks (AliExpress phones and laptops). */
+  title?: string;
+  sourceId?: string;
+  categoryId?: string;
+  /** Country the item ships from ("FR", "CN"), when known. */
+  shipsFrom?: string;
 }
 
 export type CriterionStatus = "good" | "neutral" | "bad" | "unknown";
@@ -324,6 +330,8 @@ export class ScoringService {
       detail: `${confidenceDetail.charAt(0).toUpperCase()}${confidenceDetail.slice(1)}.`,
     };
 
+    this.marketplaceWarnings(signals, warnings);
+
     if (signals.condition === "refurbished" || signals.condition === "used") {
       warnings.push(
         signals.condition === "refurbished"
@@ -524,6 +532,41 @@ export class ScoringService {
       status: gap < 0.15 ? "neutral" : "bad",
       detail: `${percent(gap)} au-dessus du plus bas déjà vu (${lowText}).${community}`,
     };
+  }
+
+  /**
+   * What can go wrong with an AliExpress buy that the price doesn't show:
+   * shipping from abroad, a phone that isn't the international version
+   * (French 4G/5G bands), a laptop with a QWERTY keyboard.
+   */
+  protected marketplaceWarnings(
+    signals: DealSignals,
+    warnings: string[],
+  ): void {
+    if (signals.sourceId !== "aliexpress") return;
+    const title = signals.title ?? "";
+    if (signals.shipsFrom !== "FR") {
+      warnings.push(
+        "Expédié depuis l'étranger (ou origine inconnue) : délais plus longs, retours plus compliqués, droits de douane possibles.",
+      );
+    }
+    if (
+      signals.categoryId === "phones" &&
+      /smartphone|téléphone/i.test(title) &&
+      !/version globale|global version|\bglobal\b|\bEU\b|\bEEA\b/i.test(title)
+    ) {
+      warnings.push(
+        "Version du téléphone non précisée : vérifiez qu'il s'agit d'une version globale/EU (bandes 4G/5G françaises B20/B28, français).",
+      );
+    }
+    if (
+      /ordinateur portable|laptop|notebook/i.test(title) &&
+      !/azerty/i.test(title)
+    ) {
+      warnings.push(
+        "Clavier probablement QWERTY : vérifiez s'il existe en AZERTY.",
+      );
+    }
   }
 
   protected sellerCriterion(

@@ -23,6 +23,8 @@ export interface Deal {
   /** Previous price we observed ourselves. */
   oldPrice?: number;
   currency: string;
+  /** "month" for plans and boxes: prices are per month. */
+  billingPeriod?: "month";
   discountPercentage?: number;
   availability: string;
   startDate?: string;
@@ -77,6 +79,10 @@ export interface Deal {
   historicalLowSource?: string;
   itadId?: string;
   itadCheckedAt?: string;
+  /** Country the item ships from ("FR", "CN"), when known. */
+  shipsFrom?: string;
+  /** JSON array of {@link MarketComparison}: same product elsewhere. */
+  marketComparisons?: string;
 }
 
 /** Live state of a collection run (see `/admin/collect/progress`). */
@@ -86,6 +92,8 @@ export interface CollectionProgress {
   startedAt: string;
   finishedAt?: string;
   updatedAt: string;
+  trigger: "schedule" | "manual";
+  previousDurationMs?: number;
   currentSourceId?: string;
   sources: Array<{
     id: string;
@@ -98,6 +106,10 @@ export interface CollectionProgress {
     created?: number;
     updated?: number;
     error?: string;
+    summary?: string;
+    skipped?: number;
+    warnings?: number;
+    links?: Array<{ label: string; url: string }>;
     startedAt?: string;
     finishedAt?: string;
   }>;
@@ -107,6 +119,15 @@ export interface CollectionProgress {
     level: "info" | "warn";
     message: string;
   }>;
+}
+
+/** The same product at another merchant (cross-search). */
+export interface MarketComparison {
+  merchant: string;
+  title: string;
+  price: number;
+  url: string;
+  variantUnverified?: boolean;
 }
 
 /** One past Dealabs deal for the same product. */

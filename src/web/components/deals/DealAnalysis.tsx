@@ -19,6 +19,7 @@ import type {
   Deal,
   DealAnalysis as Analysis,
   DealVerdict,
+  MarketComparison,
 } from "../../types.ts";
 import * as f from "../ui/format.ts";
 import Icon from "../ui/Icon.tsx";
@@ -71,6 +72,13 @@ const stars = (value: number) => `${value.toFixed(1).replace(".", ",")} / 5`;
  */
 const DealAnalysis: FC<DealAnalysisProps> = ({ deal, analysis }) => {
   const verdict = VERDICT[analysis.verdict];
+  const comparisons: MarketComparison[] = (() => {
+    try {
+      return deal.marketComparisons ? JSON.parse(deal.marketComparisons) : [];
+    } catch {
+      return [];
+    }
+  })();
 
   const sellerRows: Array<[string, string]> = [];
   if (deal.sellerName) {
@@ -91,6 +99,12 @@ const DealAnalysis: FC<DealAnalysisProps> = ({ deal, analysis }) => {
     sellerRows.push([
       "Expédition",
       deal.shippedByMerchant ? "Par la plateforme" : "Par le vendeur",
+    ]);
+  }
+  if (deal.shipsFrom) {
+    sellerRows.push([
+      "Expédié depuis",
+      deal.shipsFrom === "FR" ? "France" : deal.shipsFrom,
     ]);
   }
   if (deal.offersCount) {
@@ -205,6 +219,75 @@ const DealAnalysis: FC<DealAnalysisProps> = ({ deal, analysis }) => {
             </Stack>
           ))}
         </Stack>
+
+        {comparisons.length > 0 ? (
+          <Stack gap={6}>
+            <Text fz="xs" fw={700} c="dimmed" tt="uppercase">
+              Comparatif des prix
+            </Text>
+            <Table.ScrollContainer minWidth={420}>
+              <Table fz="sm" verticalSpacing={4}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Marchand</Table.Th>
+                    <Table.Th>Produit trouvé</Table.Th>
+                    <Table.Th ta="right">Prix</Table.Th>
+                    <Table.Th ta="right">Écart</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  <Table.Tr>
+                    <Table.Td fw={600}>Ce deal</Table.Td>
+                    <Table.Td c="dimmed">—</Table.Td>
+                    <Table.Td ta="right" className="tnum" fw={600}>
+                      {f.price(deal.currentPrice, deal.currency)}
+                    </Table.Td>
+                    <Table.Td ta="right">—</Table.Td>
+                  </Table.Tr>
+                  {comparisons.map((other) => {
+                    const gap = Math.round(
+                      ((other.price - deal.currentPrice) / deal.currentPrice) *
+                        100,
+                    );
+                    return (
+                      <Table.Tr key={other.url}>
+                        <Table.Td>
+                          <Anchor
+                            href={other.url}
+                            target="_blank"
+                            rel="noopener noreferrer nofollow"
+                          >
+                            {other.merchant}
+                          </Anchor>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text fz="xs" lineClamp={2} title={other.title}>
+                            {other.title}
+                          </Text>
+                          {other.variantUnverified ? (
+                            <Text fz="xs" c="orange">
+                              Variante à vérifier (plusieurs capacités)
+                            </Text>
+                          ) : null}
+                        </Table.Td>
+                        <Table.Td ta="right" className="tnum">
+                          {f.price(other.price, deal.currency)}
+                        </Table.Td>
+                        <Table.Td ta="right" className="tnum">
+                          {gap > 0
+                            ? `+${gap} % (ce deal moins cher)`
+                            : gap < 0
+                              ? `${gap} % (moins cher ailleurs)`
+                              : "même prix"}
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          </Stack>
+        ) : null}
 
         <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
           <Stack gap={6}>

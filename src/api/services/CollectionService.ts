@@ -3,6 +3,7 @@ import { DateTimeProvider } from "alepha/datetime";
 import { $logger } from "alepha/logger";
 import { $repository } from "alepha/orm";
 
+import { AliExpressCollector } from "../collectors/AliExpressCollector.ts";
 import { AmazonCollector } from "../collectors/AmazonCollector.ts";
 import type { CloudflareBrowserBinding } from "../collectors/browser.ts";
 import { CdiscountCollector } from "../collectors/CdiscountCollector.ts";
@@ -13,9 +14,16 @@ import type {
 } from "../collectors/DealSource.ts";
 import { ManualCollector } from "../collectors/ManualCollector.ts";
 import { SteamCollector } from "../collectors/SteamCollector.ts";
+import {
+  BouyguesCollector,
+  FreeCollector,
+  OrangeCollector,
+  SfrCollector,
+} from "../collectors/TelecomCollectors.ts";
 import { dealEntity } from "../entities/Deal.ts";
 import { sourceEntity } from "../entities/Source.ts";
 import { trackedProductEntity } from "../entities/TrackedProduct.ts";
+import { AutoPublishService } from "./AutoPublishService.ts";
 import { CategorizationService } from "./CategorizationService.ts";
 import { CollectionProgressService } from "./CollectionProgressService.ts";
 import { DealabsDraftService } from "./DealabsDraftService.ts";
@@ -26,6 +34,24 @@ import { ItadService } from "./ItadService.ts";
 import { MarketReferenceService } from "./MarketReferenceService.ts";
 import { PricingService } from "./PricingService.ts";
 import { ScoringService, type SourceReliability } from "./ScoringService.ts";
+
+/** `Deal.title` limit (see the entity). */
+const TITLE_MAX = 300;
+
+/**
+ * Some merchants (AliExpress especially) write titles of 400+ characters
+ * stuffed with keywords: cut at a word boundary to fit the column.
+ */
+export function fitTitle(title: string, max = TITLE_MAX): string {
+  const clean = title.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:–—-]+$/, "")}…`;
+}
+
+/** Progress-sidebar id of the publishing step that ends a run. */
+const AUTO_PUBLISH_STEP = "dealabs-publish";
 
 export interface CollectionSummary {
   sourceId: string;
@@ -73,6 +99,7 @@ export class CollectionService {
   protected dealabsHistory = $inject(DealabsHistoryService);
   protected itad = $inject(ItadService);
   protected progress = $inject(CollectionProgressService);
+  protected autoPublish = $inject(AutoPublishService);
 
   /**
    * How long a deal's seller/review details are reused before the
@@ -160,6 +187,19 @@ export class CollectionService {
         ].join(","),
       }),
       CDISCOUNT_DEALS_LIMIT: z.number().default(90),
+      ALIEXPRESS_DEALS_URL: z.text({
+        // Deal du Jour, plus best-selling phones, PCs and tablets shipped
+        // from France: where AliExpress beats French retailers on branded
+        // products (Xiaomi/POCO, Chuwi…) with delivery in days, no customs.
+        default: [
+          "https://fr.aliexpress.com/ssr/300002660/Deals-HomePage?disableNav=YES&pha_manifest=ssr&_immersiveMode=true&businessCode=guide&source=superdeals",
+          ...["smartphone", "mini-pc", "ordinateur-portable", "tablette"].map(
+            (term) =>
+              `https://fr.aliexpress.com/w/wholesale-${term}.html?shipFromCountry=FR&SortType=total_tranpro_desc`,
+          ),
+        ].join(","),
+      }),
+      ALIEXPRESS_DEALS_LIMIT: z.number().default(40),
     }),
   );
 
@@ -176,6 +216,15 @@ export class CollectionService {
       this.env.CDISCOUNT_DEALS_LIMIT,
       () => this.cloudflareBrowserBinding(),
     ),
+    aliexpress: new AliExpressCollector(
+      splitUrls(this.env.ALIEXPRESS_DEALS_URL),
+      this.env.ALIEXPRESS_DEALS_LIMIT,
+      () => this.cloudflareBrowserBinding(),
+    ),
+    orange: new OrangeCollector(),
+    free: new FreeCollector(),
+    bouygues: new BouyguesCollector(),
+    sfr: new SfrCollector(),
   };
 
   /**
@@ -206,9 +255,13 @@ export class CollectionService {
     const sources = await this.sources.findMany({
       where: { enabled: { eq: true } },
     });
-    await this.progress.start(
-      sources.map((source) => ({ id: source.id, name: source.name })),
-    );
+    const runStartedAt = this.dateTime.nowISOString();
+    await this.progress.start([
+      ...sources.map((source) => ({ id: source.id, name: source.name })),
+      ...(this.autoPublish.enabled
+        ? [{ id: AUTO_PUBLISH_STEP, name: "Publication Dealabs" }]
+        : []),
+    ]);
 
     const summaries: CollectionSummary[] = [];
     try {
@@ -218,12 +271,59 @@ export class CollectionService {
         summaries.push(summary);
         await this.progress.sourceFinished(source.id, summary);
       }
+      if (this.autoPublish.enabled) {
+        await this.publishBestDeals(runStartedAt);
+      }
     } catch (error) {
       await this.progress.finish(true);
       throw error;
     }
     await this.progress.finish();
     return summaries;
+  }
+
+  /**
+   * Last step of a run: deals from this run scoring above the threshold
+   * are published to Dealabs (see `AutoPublishService` for the rules).
+   */
+  protected async publishBestDeals(runStartedAt: string): Promise<void> {
+    await this.progress.sourceStarted(AUTO_PUBLISH_STEP);
+    const outcome = await this.autoPublish.publishBestDeals(
+      runStartedAt,
+      (done, total) =>
+        this.progress.step(
+          AUTO_PUBLISH_STEP,
+          `Publication des deals ≥ ${this.autoPublish.minScore}/100`,
+          done,
+          total,
+        ),
+    );
+    for (const deal of outcome.published) {
+      if (deal.url) {
+        this.progress.link(AUTO_PUBLISH_STEP, deal.title, deal.url);
+      }
+      this.progress.note(
+        `Publié (${deal.score}/100) : ${deal.title}${deal.url ? ` → ${deal.url}` : ""}`,
+        AUTO_PUBLISH_STEP,
+      );
+    }
+    for (const deal of outcome.failed) {
+      this.progress.note(
+        `Échec (${deal.score}/100) : ${deal.title} — ${deal.reason}`,
+        AUTO_PUBLISH_STEP,
+        "warn",
+      );
+    }
+    await this.progress.sourceFinished(AUTO_PUBLISH_STEP, {
+      collected: outcome.published.length + outcome.failed.length,
+      created: outcome.published.length,
+      updated: 0,
+      summary: outcome.skipped
+        ? `Ignorée : ${outcome.skipped}.`
+        : outcome.published.length + outcome.failed.length === 0
+          ? `Aucun nouveau deal à ${this.autoPublish.minScore}/100 ou plus.`
+          : `${outcome.published.length} publié(s), ${outcome.failed.length} échec(s).`,
+    });
   }
 
   async runOne(sourceId: string): Promise<CollectionSummary> {
@@ -272,15 +372,31 @@ export class CollectionService {
           index + 1,
           rawDeals.length,
         );
-        const wasCreated = await this.upsertDeal(
-          source.id,
-          source.type,
-          rawDeal,
-        );
-        if (wasCreated) {
-          created++;
-        } else {
-          updated++;
+        // One offer that can't be saved (unexpected data from the site)
+        // is skipped and reported, instead of failing the whole source.
+        try {
+          const wasCreated = await this.upsertDeal(
+            source.id,
+            source.type,
+            rawDeal,
+          );
+          if (wasCreated) {
+            created++;
+          } else {
+            updated++;
+          }
+        } catch (error) {
+          const message = this.truncateError(
+            error instanceof Error ? error.message : String(error),
+            160,
+          );
+          this.log.warn(
+            `Skipped offer "${rawDeal.title.slice(0, 80)}" from ${source.id}: ${message}`,
+          );
+          this.progress.skipped(
+            source.id,
+            `Offre ignorée (${rawDeal.title.slice(0, 60)}…) : ${message}`,
+          );
         }
       }
 
@@ -438,6 +554,7 @@ export class CollectionService {
     rawDeal: RawDeal,
   ): Promise<boolean> {
     const now = this.dateTime.nowISOString();
+    rawDeal = { ...rawDeal, title: fitTitle(rawDeal.title) };
 
     const existing = await this.deals.findOne({
       where: {
@@ -502,6 +619,14 @@ export class CollectionService {
           ean: rawDeal.details.ean,
           lowestRecentPrice: rawDeal.details.lowestRecentPrice,
           listPriceKind: rawDeal.details.listPriceKind,
+          shipsFrom: rawDeal.details.shipsFrom,
+          ...(rawDeal.details.historicalLowPrice
+            ? {
+                historicalLowPrice: rawDeal.details.historicalLowPrice,
+                historicalLowAt: now,
+                historicalLowSource: rawDeal.details.historicalLowSource,
+              }
+            : {}),
           detailsCheckedAt: now,
         }
       : {};
@@ -523,6 +648,7 @@ export class CollectionService {
             discountPercentage,
             currency: rawDeal.currency,
             availability: rawDeal.availability ?? "unknown",
+            billingPeriod: rawDeal.billingPeriod,
             firstSeenAt: now,
             lastSeenAt: now,
             status: "active",
@@ -547,6 +673,7 @@ export class CollectionService {
         currency: rawDeal.currency,
         discountPercentage,
         availability: rawDeal.availability ?? "unknown",
+        billingPeriod: rawDeal.billingPeriod,
         lastSeenAt: now,
         status: "active",
         ...details,

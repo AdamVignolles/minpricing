@@ -10,7 +10,10 @@ import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { priceHistoryEntity } from "../entities/PriceHistory.ts";
 import { sourceEntity } from "../entities/Source.ts";
 import { trackedProductEntity } from "../entities/TrackedProduct.ts";
-import { CollectDealsJob } from "../jobs/CollectDealsJob.ts";
+import {
+  CollectDealsJob,
+  nextCollectionTime,
+} from "../jobs/CollectDealsJob.ts";
 import { $adminSession } from "../services/AdminAuth.ts";
 import { CollectionProgressService } from "../services/CollectionProgressService.ts";
 import { CollectionService } from "../services/CollectionService.ts";
@@ -176,6 +179,7 @@ export class AdminController {
           message: "Une collecte est déjà en cours.",
         };
       }
+      await this.progress.markManual();
       void this.collectJob.run.trigger().catch((error: unknown) => {
         this.log.error("Manual collection failed", error);
       });
@@ -192,41 +196,61 @@ export class AdminController {
     path: "/admin/collect/progress",
     use: [$adminSession()],
     schema: {
-      response: z
-        .object({
-          runId: z.text(),
-          status: z.enum(["running", "done", "failed"]),
-          startedAt: z.text(),
-          finishedAt: z.text().optional(),
-          updatedAt: z.text(),
-          currentSourceId: z.text().optional(),
-          sources: z.array(
-            z.object({
-              id: z.text(),
-              name: z.text(),
-              status: z.enum(["pending", "running", "done", "failed"]),
-              step: z.text().optional(),
-              done: z.number().optional(),
-              total: z.number().optional(),
-              collected: z.number().optional(),
-              created: z.number().optional(),
-              updated: z.number().optional(),
-              error: z.text().optional(),
-              startedAt: z.text().optional(),
-              finishedAt: z.text().optional(),
-            }),
-          ),
-          events: z.array(
-            z.object({
-              at: z.text(),
-              sourceId: z.text().optional(),
-              level: z.enum(["info", "warn"]),
-              message: z.text({ size: "rich" }),
-            }),
-          ),
-        })
-        .nullable(),
+      response: z.object({
+        /** Next scheduled run (hourly by day, every 3 h at night). */
+        nextRunAt: z.text(),
+        progress: z
+          .object({
+            runId: z.text(),
+            status: z.enum(["running", "done", "failed"]),
+            startedAt: z.text(),
+            finishedAt: z.text().optional(),
+            updatedAt: z.text(),
+            trigger: z.enum(["schedule", "manual"]),
+            previousDurationMs: z.number().optional(),
+            currentSourceId: z.text().optional(),
+            sources: z.array(
+              z.object({
+                id: z.text(),
+                name: z.text(),
+                status: z.enum(["pending", "running", "done", "failed"]),
+                step: z.text().optional(),
+                done: z.number().optional(),
+                total: z.number().optional(),
+                collected: z.number().optional(),
+                created: z.number().optional(),
+                updated: z.number().optional(),
+                error: z.text().optional(),
+                summary: z.text({ size: "rich" }).optional(),
+                skipped: z.number().optional(),
+                warnings: z.number().optional(),
+                links: z
+                  .array(
+                    z.object({
+                      label: z.text({ size: "rich" }),
+                      url: z.text(),
+                    }),
+                  )
+                  .optional(),
+                startedAt: z.text().optional(),
+                finishedAt: z.text().optional(),
+              }),
+            ),
+            events: z.array(
+              z.object({
+                at: z.text(),
+                sourceId: z.text().optional(),
+                level: z.enum(["info", "warn"]),
+                message: z.text({ size: "rich" }),
+              }),
+            ),
+          })
+          .nullable(),
+      }),
     },
-    handler: async () => (await this.progress.get()) ?? null,
+    handler: async () => ({
+      progress: (await this.progress.get()) ?? null,
+      nextRunAt: nextCollectionTime(new Date()).toISOString(),
+    }),
   });
 }

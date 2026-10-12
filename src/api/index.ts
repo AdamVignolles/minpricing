@@ -9,6 +9,7 @@ import { ProductsController } from "./controllers/ProductsController.ts";
 import { SourcesController } from "./controllers/SourcesController.ts";
 import { StatsController } from "./controllers/StatsController.ts";
 import { CollectDealsJob } from "./jobs/CollectDealsJob.ts";
+import { AutoPublishService } from "./services/AutoPublishService.ts";
 import { CategorizationService } from "./services/CategorizationService.ts";
 import { CollectionProgressService } from "./services/CollectionProgressService.ts";
 import { CollectionService } from "./services/CollectionService.ts";
@@ -38,6 +39,7 @@ export const ApiModule = $module({
     // services
     CollectionService,
     CollectionProgressService,
+    AutoPublishService,
     PricingService,
     ScoringService,
     CategorizationService,

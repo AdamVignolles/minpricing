@@ -21,8 +21,9 @@ import type { FC } from "react";
 import type { AuthController } from "../../../api/controllers/AuthController.ts";
 import { theme } from "../../theme.ts";
 import Icon, { type IconName } from "../ui/Icon.tsx";
-import CollectionProgressAside, {
-  CollectionRunningChip,
+import {
+  CollectionHeaderButton,
+  CollectionProgressPanel,
   useCollectionProgress,
 } from "./CollectionProgressAside.tsx";
 
@@ -134,7 +135,8 @@ const AppLayout: FC = () => {
   const [opened, { toggle, close }] = useDisclosure(false);
   const collection = useCollectionProgress();
   // On small screens the progress panel only opens on demand (header chip).
-  const [asideOnMobile, { toggle: toggleAside }] = useDisclosure(false);
+  const [asideOnMobile, { toggle: toggleAside, close: closeAside }] =
+    useDisclosure(false);
 
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
@@ -196,9 +198,13 @@ const AppLayout: FC = () => {
               </Box>
             </Group>
             <Group gap="xs" wrap="nowrap">
-              <CollectionRunningChip
+              <CollectionHeaderButton
                 progress={collection.progress}
-                onClick={toggleAside}
+                open={collection.visible}
+                onClick={() => {
+                  collection.toggle();
+                  toggleAside();
+                }}
               />
               <ColorSchemeToggle />
               <LogoutButton />
@@ -225,11 +231,16 @@ const AppLayout: FC = () => {
           <NestedView />
         </AppShell.Main>
 
-        {collection.progress && collection.visible ? (
-          <AppShell.Aside p="md">
-            <CollectionProgressAside
+        {collection.visible ? (
+          <AppShell.Aside p={0}>
+            <CollectionProgressPanel
               progress={collection.progress}
-              onClose={collection.dismiss}
+              nextRunAt={collection.nextRunAt}
+              polledAt={collection.polledAt}
+              onClose={() => {
+                collection.close();
+                closeAside();
+              }}
             />
           </AppShell.Aside>
         ) : null}

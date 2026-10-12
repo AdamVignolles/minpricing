@@ -4,7 +4,10 @@ import { interleave } from "../src/api/collectors/browser.ts";
 import { cdiscountCategoryHint } from "../src/api/collectors/CdiscountCollector.ts";
 import { buildSteamDescription } from "../src/api/collectors/SteamCollector.ts";
 import { CategorizationService } from "../src/api/services/CategorizationService.ts";
-import { describeFromTitle } from "../src/api/services/DealabsDraftService.ts";
+import {
+  dealabsTitle,
+  describeFromTitle,
+} from "../src/api/services/DealabsDraftService.ts";
 import {
   dealabsQuery,
   isSameProduct,
@@ -274,5 +277,24 @@ describe("draft description fallback", () => {
     expect(describeFromTitle("Red Dead Redemption 2")).toBe(
       "Red Dead Redemption 2",
     );
+  });
+});
+
+describe("Dealabs title", () => {
+  test("never over 140 characters, cut between segments", () => {
+    const long =
+      "SteelSeries Arctis Nova 5 Casque Gaming Sans Fil Multi-Système - Haut-parleurs magnétiques néodyme - 100+ profils audio - Batterie 60h - Bluetooth 5.3 - Micro ClearCast";
+    const title = dealabsTitle(long);
+    expect(title.length).toBeLessThanOrEqual(140);
+    expect(title).toBe(
+      "SteelSeries Arctis Nova 5 Casque Gaming Sans Fil Multi-Système - Haut-parleurs magnétiques néodyme - 100+ profils audio - Batterie 60h",
+    );
+    expect(dealabsTitle("Red Dead Redemption 2")).toBe("Red Dead Redemption 2");
+  });
+
+  test("one huge segment is cut at a word boundary", () => {
+    const title = dealabsTitle(`Produit ${"tres ".repeat(40)}long`);
+    expect(title.length).toBeLessThanOrEqual(140);
+    expect(title.endsWith("tres")).toBe(true);
   });
 });

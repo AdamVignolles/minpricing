@@ -103,7 +103,17 @@ export const dealEntity = $entity({
     historicalLowAt: z.datetime().optional(),
     historicalLowSource: z.text().optional(),
     itadId: z.text().optional(),
+    /** Country the item ships from ("FR", "CN"), when known. */
+    shipsFrom: z.text().optional(),
+    /**
+     * JSON array of the same product found at other merchants by
+     * cross-search ({ merchant, title, price, url }) — the comparison
+     * table on the deal page. `marketPrice` is the cheapest of them.
+     */
+    marketComparisons: z.text({ size: "rich" }).optional(),
     itadCheckedAt: z.datetime().optional(),
+    /** "month" for plans and boxes: `currentPrice` is a monthly price. */
+    billingPeriod: z.enum(["month"]).meta({ mode: "text" }).optional(),
     currency: db.default(z.text(), "EUR"),
     discountPercentage: z.number().optional(),
     availability: db.default(

@@ -501,6 +501,12 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
               <Group gap="md" align="baseline" wrap="wrap">
                 <Text fz="2.25rem" fw={700} lh={1} className="tnum">
                   {f.price(deal.currentPrice, deal.currency)}
+                  {deal.billingPeriod === "month" ? (
+                    <Text component="span" fz="lg" fw={500} c="dimmed">
+                      {" "}
+                      /mois
+                    </Text>
+                  ) : null}
                 </Text>
                 {deal.listPrice && deal.listPrice > deal.currentPrice ? (
                   <Text fz="lg" c="dimmed" td="line-through" className="tnum">
@@ -899,6 +905,13 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
 
                 <TextInput
                   label="Titre"
+                  description={`${current.title.length} / 140 caractères (limite Dealabs)`}
+                  maxLength={140}
+                  error={
+                    current.title.length > 140
+                      ? "Dealabs limite le titre à 140 caractères."
+                      : undefined
+                  }
                   value={current.title}
                   onChange={(event) =>
                     setCurrent({ ...current, title: event.currentTarget.value })

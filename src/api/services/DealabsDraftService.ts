@@ -93,7 +93,11 @@ export class DealabsDraftService {
       ...(description ? [description, ""] : []),
       `Lien : ${deal.url}`,
     ];
-    return { title: deal.title, body: bodyLines.join("\n"), description };
+    return {
+      title: dealabsTitle(deal.title),
+      body: bodyLines.join("\n"),
+      description,
+    };
   }
 }
 
@@ -113,4 +117,31 @@ export function describeFromTitle(title: string): string {
   }
   const [brand, name, ...specs] = parts;
   return [`${brand} - ${name}`, ...specs.map((spec) => `- ${spec}`)].join("\n");
+}
+
+/** Dealabs refuses titles longer than this. */
+export const DEALABS_TITLE_MAX = 140;
+
+/**
+ * Fits a merchant title into Dealabs' 140 characters without cutting a
+ * word in half: whole trailing segments ("…, avec prise en charge du
+ * Wi-Fi 6", "– Clavier AZERTY") are dropped first, and only a single
+ * over-long segment is cut, at a word boundary.
+ */
+export function dealabsTitle(title: string, max = DEALABS_TITLE_MAX): string {
+  const clean = title.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) {
+    return clean;
+  }
+  // Split points that end a meaningful part of a product title.
+  const cuts = [...clean.matchAll(/\s[-–—|]\s|,\s|\s\(|:\s/g)]
+    .map((match) => match.index)
+    .filter((index): index is number => index !== undefined && index <= max);
+  const lastCut = cuts.at(-1);
+  if (lastCut !== undefined && lastCut >= max * 0.4) {
+    return clean.slice(0, lastCut).trim();
+  }
+  const words = clean.slice(0, max + 1).split(" ");
+  words.pop();
+  return words.join(" ").replace(/[\s,;:–—-]+$/, "");
 }

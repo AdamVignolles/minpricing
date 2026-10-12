@@ -16,6 +16,14 @@ export interface SourceProgress {
   created?: number;
   updated?: number;
   error?: string;
+  /** Replaces the offer counts when they don't apply (publishing step). */
+  summary?: string;
+  /** Offers that couldn't be saved (bad data from the site). */
+  skipped?: number;
+  /** Alerts raised while this source ran. */
+  warnings?: number;
+  /** Things worth opening (e.g. deals published on Dealabs). */
+  links?: Array<{ label: string; url: string }>;
   startedAt?: string;
   finishedAt?: string;
 }
@@ -35,6 +43,10 @@ export interface CollectionProgress {
   finishedAt?: string;
   /** Heartbeat: a "running" run not updated for minutes has died. */
   updatedAt: string;
+  /** Who started it: the hourly schedule or the console's button. */
+  trigger: "schedule" | "manual";
+  /** How long the previous complete run took — for an end estimate. */
+  previousDurationMs?: number;
   currentSourceId?: string;
   sources: SourceProgress[];
   /** Most recent last, capped. */
@@ -45,7 +57,9 @@ export interface CollectionProgress {
 const FLUSH_INTERVAL_MS = 1_000;
 /** A run silent for this long is considered dead (crash, redeploy). */
 const STALE_AFTER_MS = 5 * 60 * 1000;
-const MAX_EVENTS = 30;
+const MAX_EVENTS = 100;
+/** A "collect now" click marks the next run as manual for this long. */
+const MANUAL_MARK_MS = 2 * 60 * 1000;
 
 /**
  * Live state of the current (or last) collection run, for the console's
@@ -61,6 +75,11 @@ export class CollectionProgressService {
   protected store = $cache<CollectionProgress>({
     name: "collection-progress",
     ttl: [12, "hours"],
+  });
+  /** Set by « Lancer une collecte » so the run it triggers says "manual". */
+  protected manualMark = $cache<{ at: string }>({
+    name: "collection-manual",
+    ttl: [5, "minutes"],
   });
 
   protected state?: CollectionProgress;
@@ -83,17 +102,43 @@ export class CollectionProgressService {
     return (await this.get())?.status === "running";
   }
 
+  /**
+   * Called by the console's « Lancer une collecte » just before triggering
+   * the job: the run that starts next is labelled "manual".
+   */
+  async markManual(): Promise<void> {
+    await this.manualMark
+      .set("next", { at: new Date().toISOString() })
+      .catch(() => undefined);
+  }
+
   async start(sources: Array<{ id: string; name: string }>): Promise<void> {
     const now = this.dateTime.nowISOString();
+    const previous = await this.store.get("current").catch(() => undefined);
+    const manual = await this.manualMark.get("next").catch(() => undefined);
+    const isManual =
+      !!manual?.at &&
+      Date.now() - new Date(manual.at).getTime() < MANUAL_MARK_MS;
+    if (isManual) {
+      await this.manualMark.invalidate("next").catch(() => undefined);
+    }
     this.state = {
       runId: `${Date.now()}`,
       status: "running",
+      trigger: isManual ? "manual" : "schedule",
       startedAt: now,
       updatedAt: now,
+      previousDurationMs:
+        previous?.status === "done" && previous.finishedAt
+          ? new Date(previous.finishedAt).getTime() -
+            new Date(previous.startedAt).getTime()
+          : previous?.previousDurationMs,
       sources: sources.map((source) => ({ ...source, status: "pending" })),
       events: [],
     };
-    this.event(`Collecte lancée sur ${sources.length} source(s).`);
+    this.event(
+      `Collecte ${isManual ? "lancée manuellement" : "planifiée"} sur ${sources.length} source(s).`,
+    );
     await this.flush();
   }
 
@@ -124,6 +169,8 @@ export class CollectionProgressService {
       created: number;
       updated: number;
       error?: string;
+      /** Custom one-line result, for steps that aren't a collection. */
+      summary?: string;
     },
   ): Promise<void> {
     this.patch(sourceId, {
@@ -135,16 +182,42 @@ export class CollectionProgressService {
       created: summary.created,
       updated: summary.updated,
       error: summary.error,
+      summary: summary.summary,
       finishedAt: this.dateTime.nowISOString(),
     });
     this.event(
       summary.error
         ? `Échec : ${summary.error}`
-        : `${summary.collected} offre(s) : ${summary.created} nouvelle(s), ${summary.updated} mise(s) à jour.`,
+        : (summary.summary ??
+            `${summary.collected} offre(s) : ${summary.created} nouvelle(s), ${summary.updated} mise(s) à jour.`),
       sourceId,
       summary.error ? "warn" : "info",
     );
     await this.flush();
+  }
+
+  /** A journal line outside any step (e.g. "Publié : …"). */
+  note(
+    message: string,
+    sourceId?: string,
+    level: ProgressEvent["level"] = "info",
+  ): void {
+    this.event(message, sourceId, level);
+    this.scheduleFlush();
+  }
+
+  /** An offer of this source couldn't be saved. */
+  skipped(sourceId: string, message: string): void {
+    const source = this.state?.sources.find((s) => s.id === sourceId);
+    if (source) source.skipped = (source.skipped ?? 0) + 1;
+    this.note(message, sourceId, "warn");
+  }
+
+  /** Something to open from the sidebar (a published deal…). */
+  link(sourceId: string, label: string, url: string): void {
+    const source = this.state?.sources.find((s) => s.id === sourceId);
+    if (source) source.links = [...(source.links ?? []), { label, url }];
+    this.scheduleFlush();
   }
 
   async finish(failed = false): Promise<void> {
@@ -167,6 +240,10 @@ export class CollectionProgressService {
     level: ProgressEvent["level"] = "info",
   ): void {
     if (!this.state) return;
+    if (level === "warn" && sourceId) {
+      const source = this.state.sources.find((s) => s.id === sourceId);
+      if (source) source.warnings = (source.warnings ?? 0) + 1;
+    }
     this.state.events.push({
       at: this.dateTime.nowISOString(),
       sourceId,

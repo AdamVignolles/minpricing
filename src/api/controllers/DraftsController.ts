@@ -1,16 +1,15 @@
 import { $inject, z } from "alepha";
-import { DateTimeProvider } from "alepha/datetime";
 import { $repository } from "alepha/orm";
 import { $action, HttpError } from "alepha/server";
 
-import { dealEntity } from "../entities/Deal.ts";
 import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { $adminSession } from "../services/AdminAuth.ts";
-import { DealabsDraftService } from "../services/DealabsDraftService.ts";
 import {
-  DealabsDuplicateError,
-  DealabsPublisherService,
-} from "../services/DealabsPublisherService.ts";
+  AutoPublishService,
+  PublishRefusedError,
+} from "../services/AutoPublishService.ts";
+import { DealabsDraftService } from "../services/DealabsDraftService.ts";
+import { DealabsDuplicateError } from "../services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../services/DealabsSessionService.ts";
 
 const draftResponseSchema = dealabsDraftEntity.schema;
@@ -30,11 +29,9 @@ const sessionStatusSchema = z.object({
 
 export class DraftsController {
   protected drafts = $repository(dealabsDraftEntity);
-  protected deals = $repository(dealEntity);
   protected draftService = $inject(DealabsDraftService);
-  protected publisher = $inject(DealabsPublisherService);
-  protected dateTime = $inject(DateTimeProvider);
   protected dealabsSession = $inject(DealabsSessionService);
+  protected autoPublisher = $inject(AutoPublishService);
 
   /** Is a Dealabs session saved for auto-publish, and is a login running? */
   dealabsSessionStatus = $action({
@@ -216,61 +213,12 @@ export class DraftsController {
       response: draftResponseSchema,
     },
     handler: async ({ params }) => {
-      const existing = await this.drafts.findOne({
-        where: { dealId: { eq: params.id } },
-      });
-      if (!existing) {
-        throw new HttpError({
-          status: 404,
-          message: `No draft for deal ${params.id}`,
-        });
-      }
-
-      // Our own record of having already posted this one — cheap, no
-      // browser needed, and the most common way "already published"
-      // would happen (a double click, a retry after a flaky run, ...).
-      if (existing.status === "posted") {
-        throw new HttpError({
-          status: 409,
-          message: existing.dealabsUrl
-            ? `Ce deal est déjà publié sur Dealabs : ${existing.dealabsUrl}`
-            : "Ce deal est déjà marqué comme publié.",
-        });
-      }
-
-      const deal = await this.deals.getById(params.id);
-      // A draft generated while the deal had no description has an empty
-      // one: rebuild it from the deal now (never empty, see render()).
-      if (!existing.description?.trim()) {
-        await this.draftService.maybeGenerateDraft(deal);
-        Object.assign(
-          existing,
-          await this.drafts.findOne({ where: { dealId: { eq: params.id } } }),
-        );
-      }
-      const attempt = {
-        publishAttempts: (existing.publishAttempts ?? 0) + 1,
-        lastPublishAttemptAt: this.dateTime.nowISOString(),
-      };
-
       try {
-        const { dealabsUrl } = await this.publisher.publish(deal, existing);
-        return this.drafts.updateById(existing.id, {
-          ...attempt,
-          lastPublishResult: "success",
-          lastPublishError: undefined,
-          status: "posted",
-          dealabsUrl,
-          verifiedAt: this.dateTime.nowISOString(),
-        });
+        return await this.autoPublisher.publishDeal(params.id);
       } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        await this.drafts.updateById(existing.id, {
-          ...attempt,
-          lastPublishResult:
-            error instanceof DealabsDuplicateError ? "duplicate" : "failed",
-          lastPublishError: reason.slice(0, 2000),
-        });
+        if (error instanceof PublishRefusedError) {
+          throw new HttpError({ status: error.status, message: error.message });
+        }
         if (error instanceof DealabsDuplicateError) {
           throw new HttpError({
             status: 409,
