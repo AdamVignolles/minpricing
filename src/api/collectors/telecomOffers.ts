@@ -312,3 +312,41 @@ export function parseRedPlans(html: string): TelecomOffer[] {
       };
     });
 }
+
+/**
+ * Sosh's plans page, as rendered text (the shop is a client-side app
+ * behind an Orange login redirect, so it is read in the browser): one
+ * block per plan, from "Forfait …" to "Voir le détail".
+ */
+export function parseSoshPlans(text: string): TelecomOffer[] {
+  const offers: TelecomOffer[] = [];
+  const blocks = text.split(/\n(?=Forfait [^\n]+\n[\d,]+\s?€ par mois)/);
+  for (const block of blocks.slice(1)) {
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const name = lines[0];
+    const price = Number(
+      lines[1]?.match(/^([\d,]+)\s?€/)?.[1]?.replace(",", "."),
+    );
+    if (!name || !Number.isFinite(price) || price <= 0) continue;
+    const end = lines.findIndex((line) => line.startsWith("Voir le détail"));
+    const facts = lines
+      .slice(2, end > 0 ? end : undefined)
+      .filter(
+        (line) => !/€ \/mois|^Sélectionner|taux 0%|Financement/i.test(line),
+      )
+      .map((line) => `- ${line}`);
+    const volume = name.match(/(\d+)\s?Go/)?.[1];
+    offers.push({
+      externalId: `sosh-${volume ?? name.toLowerCase().replace(/\W+/g, "-")}${/5G/.test(name) ? "-5g" : ""}`,
+      name: name.replace(/^Forfait\s+/, "Forfait Sosh "),
+      price,
+      url: "https://shop.sosh.fr/mobile/forfaits-mobiles",
+      description: [...facts, "- Sans engagement"].join("\n"),
+      kind: "mobile",
+    });
+  }
+  return offers;
+}

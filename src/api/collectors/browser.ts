@@ -220,6 +220,31 @@ function adaptCloudflarePage(
 }
 
 /**
+ * Runs `fn` over `items` with at most `limit` running at once, results in
+ * input order. Used to open several product pages (or run several sources)
+ * in parallel without opening hundreds of browser tabs at once.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await fn(items[index], index);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+/**
  * Round-robin over several lists (first of each, then second of each…),
  * dropping duplicates by key — so every listing page gets its share of a
  * global cap instead of the first pages taking it all.

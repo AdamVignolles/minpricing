@@ -1,0 +1,55 @@
+{
+  "$comment": "Registry of Claude cloud routines. Managed by the schedule-manager agent. Notion 'Planifications' is the on/off switch; this file is the local source of truth for config and prompts.",
+  "timezone": "Europe/Paris",
+  "notion": {
+    "hub": "https://app.notion.com/p/400e672efaf08130a1ccc3995c887d31",
+    "planifications": "collection://3d58bb03-d3ed-48f5-aaa5-813f884691e9",
+    "propositionsGmail": "collection://5144ba31-cd8f-4016-a955-554c959f6220",
+    "resumesQuotidiens": "collection://146d47a4-6682-4892-95d0-bb2a7a6200c0",
+    "evenementsDetectes": "collection://0f01f29d-540a-4f24-8b60-83e9e9c9db53",
+    "cetteSemaine": "https://app.notion.com/p/400e672efaf081328737c68fa6132595"
+  },
+  "connectors": {
+    "Google-Calendar": {
+      "connector_uuid": "5e3b5185-e096-439d-863c-544709f47c4a",
+      "url": "https://calendarmcp.googleapis.com/mcp/v1"
+    },
+    "Gmail": {
+      "connector_uuid": "622b8030-21e5-4ce4-b2e3-b78205251f74",
+      "url": "https://gmailmcp.googleapis.com/mcp/v1"
+    },
+    "Notion": {
+      "connector_uuid": "6ddca362-0262-4e2a-aea5-472151299754",
+      "url": "https://mcp.notion.com/mcp"
+    }
+  },
+  "environment_id": "env_01SxZbyKyLdp6nzzhWmdLT4Z",
+  "schedules": [
+    {
+      "name": "Tri Gmail du matin",
+      "routine_id": "trig_017BBadF1JHfLWe62iNpvkYo",
+      "routine_url": "https://claude.ai/code/routines/trig_017BBadF1JHfLWe62iNpvkYo",
+      "notion_row": "https://app.notion.com/p/400e672efaf0813c8597df55a9a9fc3e",
+      "local_time": "08:00 every day (Paris, winter time)",
+      "cron_utc": "0 7 * * *",
+      "agent": "email-manager",
+      "model": "claude-sonnet-5-5",
+      "connectors": ["Gmail", "Notion"],
+      "prompt_file": "gmail-morning.md",
+      "enabled": true
+    },
+    {
+      "name": "Agenda du matin",
+      "routine_id": "trig_01RbKUi7wx3xP53gne1PyE1S",
+      "routine_url": "https://claude.ai/code/routines/trig_01RbKUi7wx3xP53gne1PyE1S",
+      "notion_row": "https://app.notion.com/p/400e672efaf0819da348c32ca48f7bdf",
+      "local_time": "08:15 every day (Paris, winter time)",
+      "cron_utc": "15 7 * * *",
+      "agent": "calendar-manager",
+      "model": "claude-sonnet-5-5",
+      "connectors": ["Google-Calendar", "Gmail", "Notion"],
+      "prompt_file": "calendar-morning.md",
+      "enabled": true
+    }
+  ]
+}

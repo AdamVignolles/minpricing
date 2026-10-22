@@ -4,10 +4,13 @@ import { join } from "node:path";
 import { Alepha, $inject } from "alepha";
 import type { Infer } from "alepha";
 import { DateTimeProvider } from "alepha/datetime";
+import { $logger } from "alepha/logger";
 
 import type { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { dealabsTitle } from "./DealabsDraftService.ts";
+import { isSameProduct } from "./dealabsSearch.ts";
 import type { Deal } from "./DealTypes.ts";
+import { keepaChartForDeal } from "./keepa.ts";
 
 export const SESSION_PATH = join(process.cwd(), ".dealabs-session.json");
 const DEBUG_DIR = join(process.cwd(), ".dealabs-debug");
@@ -25,6 +28,95 @@ const PRICE_SELECTORS = [
 ];
 
 type Draft = Infer<typeof dealabsDraftEntity.schema>;
+
+/** A thread Dealabs' "Cette offre a-t-elle déjà été postée ?" panel lists. */
+export interface DuplicateSuggestion {
+  url: string;
+  /** The item's visible text: title, often followed by price and merchant. */
+  text: string;
+}
+
+/**
+ * Which of Dealabs' suggested threads is really our product, if any.
+ *
+ * The panel lists *possible* duplicates — for a GOG link it suggested
+ * Torchlight II for Prince of Persia. Erring on the safe side, a
+ * suggestion counts as our product when it passes the app's product match
+ * *or* shares most of our title's significant words (a URL slug loses
+ * apostrophes and accents, which the strict match needs). The title comes
+ * from the item's text, or from the URL slug when the text is empty.
+ */
+export function matchingDuplicate(
+  ourTitle: string,
+  ourPrice: number,
+  suggestions: DuplicateSuggestion[],
+): DuplicateSuggestion | undefined {
+  const ours = significantWords(ourTitle);
+  return suggestions.find((suggestion) => {
+    const slug = suggestion.url
+      .split("/")
+      .pop()
+      ?.replace(/-\d+$/, "")
+      .replace(/-/g, " ");
+    const title = suggestion.text.split("\n")[0]?.trim() || slug || "";
+    const price = suggestion.text.match(/(\d+(?:[.,]\d{1,2})?)\s*€/);
+    if (
+      isSameProduct(ourTitle, ourPrice, {
+        title,
+        price: price ? Number(price[1].replace(",", ".")) : ourPrice,
+      })
+    ) {
+      return true;
+    }
+    const theirs = significantWords(title);
+    const shared = [...ours].filter((word) => theirs.has(word)).length;
+    return ours.size > 0 && shared / ours.size >= 0.6;
+  });
+}
+
+/** Title words that name the product: no shop, platform or filler words. */
+const NOT_PRODUCT_WORDS = new Set([
+  "pc",
+  "gog",
+  "steam",
+  "epic",
+  "sans",
+  "drm",
+  "sur",
+  "pour",
+  "avec",
+  "les",
+  "des",
+  "the",
+  "and",
+  "edition",
+  "version",
+  "dematerialise",
+  "jeu",
+  "playstation",
+  "store",
+  "games",
+  "nintendo",
+  "switch",
+  "xbox",
+  "ps4",
+  "ps5",
+]);
+
+function significantWords(title: string): Set<string> {
+  return new Set(
+    title
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/['’]/g, "")
+      .split(/[^a-z0-9]+/)
+      .map((word) =>
+        word.length > 4 && word.endsWith("s") ? word.slice(0, -1) : word,
+      )
+      .filter((word) => word.length >= 3 && !NOT_PRODUCT_WORDS.has(word)),
+  );
+}
 
 export interface AutoPublishResult {
   dealabsUrl: string;
@@ -68,10 +160,19 @@ export class DealabsDuplicateError extends Error {
  * this is the one file to update if a run reports it couldn't find a field.
  */
 export class DealabsPublisherService {
+  protected log = $logger();
   protected alepha = $inject(Alepha);
   protected dateTime = $inject(DateTimeProvider);
 
-  async publish(deal: Deal, draft: Draft): Promise<AutoPublishResult> {
+  /**
+   * @param chartImageUrl price-history picture for the top of the
+   * description; Amazon deals get Keepa's when none is given.
+   */
+  async publish(
+    deal: Deal,
+    draft: Draft,
+    chartImageUrl?: string,
+  ): Promise<AutoPublishResult> {
     if (this.alepha.isServerless()) {
       throw new Error(
         "Auto-publish needs a real local browser session; it isn't available on the serverless deployment. Use the copy/paste flow there, or run the local dev server for auto-publish.",
@@ -126,7 +227,12 @@ export class DealabsPublisherService {
         }
 
         await this.openSubmissionForm(page);
-        const dealabsUrl = await this.fillFormAndSubmit(page, deal, draft);
+        const dealabsUrl = await this.fillFormAndSubmit(
+          page,
+          deal,
+          draft,
+          chartImageUrl ?? keepaChartForDeal(deal),
+        );
 
         // Refresh the saved session: Dealabs may rotate cookies on use, and
         // keeping the file current avoids forcing a re-login sooner than
@@ -286,6 +392,7 @@ export class DealabsPublisherService {
     page: import("playwright").Page,
     deal: Deal,
     draft: Draft,
+    chart?: string,
   ): Promise<string> {
     // Step: Lien
     const linkInput = page.locator('input[name="link"], #link').first();
@@ -308,7 +415,7 @@ export class DealabsPublisherService {
       [...TITLE_SELECTORS, ...PRICE_SELECTORS, '[data-t="threadDuplicates"]'],
       30_000,
     );
-    await this.rejectIfDuplicateWarning(page);
+    await this.handleDuplicateWarning(page, deal);
 
     // Step: Essentiel — Dealabs usually auto-fills title/price from the
     // link already; we overwrite with our own values to make sure they
@@ -380,6 +487,11 @@ export class DealabsPublisherService {
         fieldName: "Description",
       },
     );
+    // Price-history chart at the top of the text: Keepa for Amazon,
+    // the eShop history (QuickChart) for Nintendo — see `publish()`.
+    if (chart) {
+      await this.insertImageAtTop(page, chart);
+    }
     await this.clickNavNext(page);
 
     // Step: Derniers détails — native `type="date"` inputs named
@@ -441,6 +553,54 @@ export class DealabsPublisherService {
    * the click's own timeout error propagate turns that into a clear
    * failure instead of a silent no-op.
    */
+  /**
+   * Puts an image (by URL) at the top of the description editor, centred:
+   * the editor's « Image » button opens « Insérer une image » with an
+   * « Image depuis une URL » field (confirmed on a captured page; Dealabs
+   * then re-hosts the picture on its own CDN). Best-effort: a deal is
+   * still worth publishing without its chart, so any failure here is
+   * logged and the publish goes on.
+   */
+  protected async insertImageAtTop(
+    page: import("playwright").Page,
+    imageUrl: string,
+  ): Promise<void> {
+    try {
+      const editor = page
+        .locator('[role="textbox"][contenteditable="true"]')
+        .first();
+      const before = await editor.locator("img").count();
+      await editor.click();
+      await page.keyboard.press("Control+Home");
+      await editor
+        .locator("xpath=../../..")
+        .locator('button[aria-label="Image"]')
+        .first()
+        .click({ timeout: 5_000 });
+      await page
+        .getByPlaceholder(/URL de l.image/i)
+        .first()
+        .fill(imageUrl, { timeout: 5_000 });
+      await page
+        .getByRole("button", { name: /centrer/i })
+        .first()
+        .click({ timeout: 3_000 })
+        .catch(() => undefined);
+      await page
+        .getByRole("button", { name: /^ajouter$/i })
+        .first()
+        .click({ timeout: 5_000 });
+      // Dealabs downloads and re-hosts the image before showing it.
+      await editor.locator("img").nth(before).waitFor({ timeout: 15_000 });
+    } catch (error) {
+      this.log.warn("Price chart not added to the Dealabs description", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Leave the dialog closed so the next step can proceed.
+      await page.keyboard.press("Escape").catch(() => undefined);
+    }
+  }
+
   protected async clickNavNext(page: import("playwright").Page): Promise<void> {
     const next = page.locator('[data-t="navNext"]').first();
     if ((await next.count()) === 0) {
@@ -470,26 +630,72 @@ export class DealabsPublisherService {
   /**
    * Confirmed exact markup from a real captured duplicate: Dealabs shows
    * a `[data-t="threadDuplicates"]` panel titled "Cette offre a-t-elle
-   * déjà été postée ?", with the existing thread linked via
+   * déjà été postée ?", with the suggested threads linked via
    * `[data-t="threadDuplicatesItem"]` and a "Oui, annuler" button
-   * (`[data-t="cancel"]`). We always treat this as a hard stop — Dealabs
-   * itself is telling us this exact link was already submitted.
+   * (`[data-t="cancel"]`).
+   *
+   * The suggestions are only *possible* duplicates (other deals of the
+   * same shop show up), so we stop only when one is really our product
+   * ({@link matchingDuplicate}); otherwise we answer "no" and carry on.
+   * If that "no" button can't be found, the page is captured and we stop
+   * as before — never guess a click on a form we can't read.
    */
-  protected async rejectIfDuplicateWarning(
+  protected async handleDuplicateWarning(
     page: import("playwright").Page,
+    deal: Deal,
   ): Promise<void> {
     const panel = page.locator('[data-t="threadDuplicates"]');
     if ((await panel.count()) === 0) {
       return;
     }
 
-    const link = panel.locator('[data-t="threadDuplicatesItem"]').first();
-    const existingUrl =
-      (await link.count()) > 0 ? await link.getAttribute("href") : undefined;
+    const items = panel.locator('[data-t="threadDuplicatesItem"]');
+    const suggestions: DuplicateSuggestion[] = [];
+    for (let index = 0; index < (await items.count()); index++) {
+      const item = items.nth(index);
+      suggestions.push({
+        url: (await item.getAttribute("href")) ?? "",
+        text: (await item.innerText().catch(() => "")) ?? "",
+      });
+    }
 
-    throw new DealabsDuplicateError(
-      "Dealabs signale que ce deal existe déjà.",
-      existingUrl ?? undefined,
+    const match = matchingDuplicate(deal.title, deal.currentPrice, suggestions);
+    if (match || suggestions.length === 0) {
+      throw new DealabsDuplicateError(
+        "Dealabs signale que ce deal existe déjà.",
+        (match ?? suggestions[0])?.url || undefined,
+      );
+    }
+
+    const notDuplicate = panel
+      .locator(
+        '[data-t="continue"], [data-t="confirm"], [data-t="notDuplicate"], [data-t="submit"]',
+      )
+      .or(
+        panel.getByRole("button", {
+          name: /^non\b|continuer|poster|publier|pas un doublon/i,
+        }),
+      )
+      .first();
+    if ((await notDuplicate.count()) === 0) {
+      const debugPath = await this.captureDebug(page, deal.id);
+      throw new DealabsDuplicateError(
+        `Dealabs propose des doublons possibles (${suggestions.map((s) => s.url).join(", ")}) qui ne sont pas ce produit, mais le bouton pour continuer est introuvable (debug snapshot: ${debugPath})`,
+        suggestions[0]?.url || undefined,
+      );
+    }
+    this.log.info(
+      "Dealabs duplicate suggestions are other products, continuing",
+      {
+        dealId: deal.id,
+        suggestions: suggestions.map((suggestion) => suggestion.url),
+      },
+    );
+    await notDuplicate.click({ timeout: 10_000 });
+    await this.waitForAny(
+      page,
+      [...TITLE_SELECTORS, ...PRICE_SELECTORS],
+      20_000,
     );
   }
 
@@ -620,6 +826,13 @@ export class DealabsPublisherService {
     const normalize = (s: string) =>
       s.replace(/\s+/g, " ").trim().toLowerCase();
     if (normalize(actual) === normalize(expected)) {
+      return true;
+    }
+    // A rich-text editor's `textContent` drops the line breaks between its
+    // paragraphs ("encore.- RÉVEIL" for "encore." + blank line + "- RÉVEIL"):
+    // compare the text itself, whitespace aside.
+    const compact = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+    if (compact(expected).length > 0 && compact(actual) === compact(expected)) {
       return true;
     }
 

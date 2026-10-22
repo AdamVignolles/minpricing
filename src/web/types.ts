@@ -30,6 +30,14 @@ export interface Deal {
   startDate?: string;
   endDate?: string;
   firstSeenAt: string;
+  /**
+   * When the deal last became "new": first seen, or a real price drop.
+   * Seen again at the same price, it keeps this date.
+   */
+  freshAt?: string;
+  freshReason?: "new" | "price-drop";
+  /** Price before that drop. */
+  droppedFrom?: number;
   lastSeenAt: string;
   status: string;
   score: number;
@@ -83,6 +91,20 @@ export interface Deal {
   shipsFrom?: string;
   /** JSON array of {@link MarketComparison}: same product elsewhere. */
   marketComparisons?: string;
+  /** Estimated chance (0-100) of reaching 100° on Dealabs. */
+  hotChance?: number;
+  /** JSON list of the reasons behind {@link hotChance}. */
+  hotReasons?: string;
+  /**
+   * Already on Dealabs: our own published post, or someone else's live
+   * deal at our price or cheaper. Lists only (the card is greyed out).
+   */
+  onDealabs?: {
+    url: string;
+    price: number;
+    temperature: number;
+    mine: boolean;
+  };
 }
 
 /** Live state of a collection run (see `/admin/collect/progress`). */
@@ -104,10 +126,13 @@ export interface CollectionProgress {
     total?: number;
     collected?: number;
     created?: number;
+    /** New deals the console shows (score ≥ 40). */
+    createdVisible?: number;
     updated?: number;
     error?: string;
     summary?: string;
     skipped?: number;
+    rejected?: number;
     warnings?: number;
     links?: Array<{ label: string; url: string }>;
     startedAt?: string;
@@ -182,6 +207,17 @@ export interface PriceStats {
   referencePrice: number | null;
   classification: DealClassification;
   analysis: DealAnalysis;
+  heat: HeatPrediction;
+  /** Amazon product charted by Keepa (the deal, or the same product on Amazon). */
+  keepa: { asin: string; sameProductOnAmazon: boolean } | null;
+}
+
+export type HeatLabel = "froid" | "tiède" | "prometteur" | "chaud";
+
+export interface HeatPrediction {
+  chance: number;
+  label: HeatLabel;
+  reasons: string[];
 }
 
 export type DealVerdict = "excellent" | "good" | "fair" | "weak";

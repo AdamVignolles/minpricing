@@ -50,6 +50,7 @@ export interface DealsPageProps {
 
 const SORTS = [
   { value: "relevance", label: "Pertinence" },
+  { value: "hot", label: "Potentiel Dealabs" },
   { value: "discount", label: "Réduction décroissante" },
   { value: "price-asc", label: "Prix croissant" },
   { value: "price-desc", label: "Prix décroissant" },

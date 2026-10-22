@@ -16,7 +16,7 @@ import type { StatsController } from "../api/controllers/StatsController.ts";
 const dealListQuerySchema = z.object({
   search: z.text().optional(),
   sortBy: z
-    .enum(["relevance", "discount", "price-asc", "price-desc", "newest"])
+    .enum(["relevance", "hot", "discount", "price-asc", "price-desc", "newest"])
     .optional(),
   categoryId: z.text().optional(),
   merchantId: z.text().optional(),

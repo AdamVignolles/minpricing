@@ -5,16 +5,44 @@ import { $action } from "alepha/server";
 
 import type { CloudflareBrowserBinding } from "../collectors/browser.ts";
 import { dealEntity } from "../entities/Deal.ts";
+import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { priceHistoryEntity } from "../entities/PriceHistory.ts";
 import { sourceEntity } from "../entities/Source.ts";
 import { $adminSession } from "../services/AdminAuth.ts";
 import type { StoredDealabsDeal } from "../services/DealabsHistoryService.ts";
+import {
+  type DealabsThread,
+  isSameProduct,
+  liveOnDealabs,
+  type OnDealabs,
+} from "../services/dealabsSearch.ts";
+import { predictDealHeat } from "../services/heatPrediction.ts";
 import { IdealoReferenceService } from "../services/IdealoReferenceService.ts";
 import { ItadService } from "../services/ItadService.ts";
+import { keepaForDealPage } from "../services/keepa.ts";
+import { MyDealabsPostsService } from "../services/MyDealabsPostsService.ts";
+import { PriceSeriesService } from "../services/PriceSeriesService.ts";
 import { PricingService } from "../services/PricingService.ts";
-import { ScoringService } from "../services/ScoringService.ts";
+import { dropSameListings } from "../services/sameListing.ts";
+import {
+  MIN_VISIBLE_SCORE,
+  ScoringService,
+} from "../services/ScoringService.ts";
 
-const dealResponseSchema = dealEntity.schema;
+/**
+ * A deal as the console lists it: the stored row, plus whether it is
+ * already on Dealabs (the card is greyed out then).
+ */
+const dealResponseSchema = dealEntity.schema.extend({
+  onDealabs: z
+    .object({
+      url: z.text({ size: "rich" }),
+      price: z.number(),
+      temperature: z.number(),
+      mine: z.boolean(),
+    })
+    .optional(),
+});
 
 const priceReferenceSchema = z.object({
   kind: z.enum(["lowest30d", "history", "regular", "rrp", "listed"]),
@@ -58,14 +86,20 @@ const SORTS: Record<string, string> = {
   discount: "-discountPercentage",
   "price-asc": "currentPrice",
   "price-desc": "-currentPrice",
-  newest: "-firstSeenAt",
+  // New = first seen, or a real price drop (see freshness.ts).
+  newest: "-freshAt",
+  // Most likely to reach 100° on Dealabs first (see heatPrediction.ts).
+  hot: "-hotChance",
 };
 
 export class DealsController {
   protected deals = $repository(dealEntity);
+  protected drafts = $repository(dealabsDraftEntity);
+  protected myPosts = $inject(MyDealabsPostsService);
   protected history = $repository(priceHistoryEntity);
   protected sources = $repository(sourceEntity);
   protected pricing = $inject(PricingService);
+  protected priceSeries = $inject(PriceSeriesService);
   protected scoring = $inject(ScoringService);
   protected idealoReference = $inject(IdealoReferenceService);
   protected itad = $inject(ItadService);
@@ -98,7 +132,14 @@ export class DealsController {
         sourceId: z.text().optional(),
         search: z.text().optional(),
         sortBy: z
-          .enum(["relevance", "discount", "price-asc", "price-desc", "newest"])
+          .enum([
+            "relevance",
+            "hot",
+            "discount",
+            "price-asc",
+            "price-desc",
+            "newest",
+          ])
           .optional(),
       }),
       response: db.page(dealResponseSchema),
@@ -122,7 +163,11 @@ export class DealsController {
 
       const conditions: Record<string, unknown>[] = [];
       if (status) conditions.push({ status: { eq: status } });
-      if (minScore !== undefined) conditions.push({ score: { gte: minScore } });
+      // Under MIN_VISIBLE_SCORE a deal isn't shown at all, whatever the
+      // filter asks for.
+      conditions.push({
+        score: { gte: Math.max(minScore ?? 0, MIN_VISIBLE_SCORE) },
+      });
       if (minDiscount !== undefined) {
         conditions.push({ discountPercentage: { gte: minDiscount } });
       }
@@ -139,7 +184,7 @@ export class DealsController {
 
       const where = conditions.length > 0 ? { and: conditions } : {};
 
-      return this.deals.paginate(
+      const result = await this.deals.paginate(
         {
           page,
           size,
@@ -151,8 +196,78 @@ export class DealsController {
         { where },
         { count: true },
       );
+      // Colour variants of one product, listed side by side: show one.
+      return {
+        ...result,
+        content: await this.withDealabsStatus(dropSameListings(result.content)),
+      };
     },
   });
+
+  /**
+   * Marks the deals already on Dealabs: posted by us (published draft), or
+   * a live deal by someone else at our price or cheaper (stored history).
+   */
+  protected async withDealabsStatus<
+    T extends {
+      id: string;
+      title: string;
+      currentPrice: number;
+      dealabsHistory?: string | null;
+    },
+  >(deals: T[]): Promise<Array<T & { onDealabs?: OnDealabs }>> {
+    if (deals.length === 0) return deals;
+    const posted = await this.drafts.findMany({
+      where: {
+        and: [
+          { dealId: { inArray: deals.map((deal) => deal.id) } },
+          { status: { eq: "posted" } },
+        ],
+      },
+    });
+    const mine = new Map(posted.map((draft) => [draft.dealId, draft]));
+    // Our live posts, from our profile: found even when the title we
+    // posted differs from the merchant's.
+    const ourLivePosts = (
+      await this.myPosts.posts().catch(() => [] as DealabsThread[])
+    ).filter((post) => !post.isExpired);
+    return deals.map((deal) => {
+      const ours = ourLivePosts.find((post) =>
+        isSameProduct(deal.title, deal.currentPrice, post),
+      );
+      if (ours) {
+        return {
+          ...deal,
+          onDealabs: {
+            url: ours.url,
+            price: ours.price,
+            temperature: Math.round(ours.temperature),
+            mine: true,
+          },
+        };
+      }
+      const draft = mine.get(deal.id);
+      if (draft) {
+        return {
+          ...deal,
+          onDealabs: {
+            url: draft.dealabsUrl ?? "",
+            price: deal.currentPrice,
+            temperature: 0,
+            mine: true,
+          },
+        };
+      }
+      let history: StoredDealabsDeal[] = [];
+      try {
+        history = deal.dealabsHistory ? JSON.parse(deal.dealabsHistory) : [];
+      } catch {
+        // Unreadable history: no status.
+      }
+      const live = liveOnDealabs(history, deal.currentPrice);
+      return live ? { ...deal, onDealabs: live } : deal;
+    });
+  }
 
   /**
    * The rails the dashboard is built around, in one round-trip.
@@ -175,18 +290,23 @@ export class DealsController {
     },
     handler: async ({ query }) => {
       const size = query.size ?? 8;
-      const active = { status: { eq: "active" as const } };
+      const active = {
+        and: [
+          { status: { eq: "active" as const } },
+          { score: { gte: MIN_VISIBLE_SCORE } },
+        ],
+      };
 
       const [bestDiscounts, newest, topScored] = await Promise.all([
         this.deals.findMany({
-          where: { and: [active, { discountPercentage: { gte: 1 } }] },
+          where: { and: [...active.and, { discountPercentage: { gte: 1 } }] },
           orderBy: { column: "discountPercentage", direction: "desc" },
-          limit: size,
+          limit: size * 2,
         }),
         this.deals.findMany({
           where: active,
-          orderBy: { column: "firstSeenAt", direction: "desc" },
-          limit: size,
+          orderBy: { column: "freshAt", direction: "desc" },
+          limit: size * 2,
         }),
         this.deals.findMany({
           where: active,
@@ -196,7 +316,7 @@ export class DealsController {
       ]);
 
       const historicalLows: typeof topScored = [];
-      for (const deal of topScored) {
+      for (const deal of dropSameListings(topScored)) {
         if (historicalLows.length >= size) break;
         const stats = await this.pricing.getStats(deal.id, deal.currentPrice);
         if (stats.historyPoints > 1 && stats.isNewHistoricalMin) {
@@ -204,12 +324,52 @@ export class DealsController {
         }
       }
 
+      const best = await this.withDealabsStatus(
+        dropSameListings(bestDiscounts).slice(0, size),
+      );
+      const featured = best[0] ?? topScored[0];
       return {
-        bestDiscounts,
-        newest,
-        historicalLows,
-        featured: bestDiscounts[0] ?? topScored[0] ?? null,
+        bestDiscounts: best,
+        newest: await this.withDealabsStatus(
+          dropSameListings(newest).slice(0, size),
+        ),
+        historicalLows: await this.withDealabsStatus(historicalLows),
+        featured: featured
+          ? ((await this.withDealabsStatus([featured]))[0] ?? null)
+          : null,
       };
+    },
+  });
+
+  /**
+   * A price history from outside our collection (DekuDeals for Nintendo
+   * eShop games), for the deal page's chart. `null` when no source covers
+   * the product.
+   */
+  externalHistory = $action({
+    method: "GET",
+    path: "/deals/:id/external-history",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ id: z.text() }),
+      response: z
+        .object({
+          source: z.text(),
+          url: z.text({ size: "rich" }),
+          points: z.array(z.object({ at: z.text(), price: z.number() })),
+        })
+        .nullable(),
+    },
+    handler: async ({ params }) => {
+      const deal = await this.deals.getById(params.id);
+      const series = await this.priceSeries.seriesFor(deal);
+      return series
+        ? {
+            source: series.source,
+            url: series.url,
+            points: series.points.map(([at, price]) => ({ at, price })),
+          }
+        : null;
     },
   });
 
@@ -290,6 +450,19 @@ export class DealsController {
          * as of the last collection.
          */
         analysis: analysisSchema,
+        /**
+         * Amazon product whose Keepa price chart the page shows: the deal
+         * itself, or the same product found on Amazon by the cross-search.
+         */
+        keepa: z
+          .object({ asin: z.text(), sameProductOnAmazon: z.boolean() })
+          .nullable(),
+        /** Chance of reaching 100° on Dealabs, with its reasons. */
+        heat: z.object({
+          chance: z.number(),
+          label: z.enum(["froid", "tiède", "prometteur", "chaud"]),
+          reasons: z.array(z.text({ size: "rich" })),
+        }),
       }),
     },
     handler: async ({ params }) => {
@@ -321,6 +494,8 @@ export class DealsController {
           bestAlternative: analysis.bestAlternative,
           warnings: analysis.warnings,
         },
+        heat: predictDealHeat(deal, analysis),
+        keepa: keepaForDealPage(deal),
         vsAveragePercentage:
           stats.historyPoints > 1 && stats.avgPrice > 0
             ? Math.round(

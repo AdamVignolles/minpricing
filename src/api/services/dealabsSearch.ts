@@ -25,6 +25,8 @@ export interface DealabsThread {
   publishedAt: string;
   merchant?: string;
   url: string;
+  /** Username of whoever posted it. */
+  poster?: string;
 }
 
 function unescapeHtml(value: string): string {
@@ -60,6 +62,7 @@ export function parseDealabsSearch(html: string): DealabsThread[] {
         isExpired: !!thread.isExpired,
         publishedAt: new Date(Number(thread.publishedAt) * 1000).toISOString(),
         merchant: thread.merchant?.merchantName ?? undefined,
+        poster: thread.user?.username ?? undefined,
         url:
           thread.shareableLink ??
           `https://www.dealabs.com/bons-plans/${thread.threadId}`,
@@ -75,6 +78,9 @@ export function parseDealabsSearch(html: string): DealabsThread[] {
  * Words that turn one product into a different one: a "4K Plus" deal is no
  * reference for a plain "4K", a "Pro" phone none for the base model.
  */
+/** Console platforms among the variant words (see `isSameProduct`). */
+const PLATFORM_WORDS = new Set(["ps4", "ps5", "xbox", "switch", "nintendo"]);
+
 export const VARIANT_WORDS = new Set([
   // Console versions of a game are other products than the PC/Steam one
   // (and than each other). "pc"/"steam" are deliberately absent: a Steam
@@ -88,6 +94,10 @@ export const VARIANT_WORDS = new Set([
   "max",
   "pro",
   "lite",
+  // Sneaker variants: a "Gazelle Indoor" isn't a "Gazelle".
+  "indoor",
+  "bold",
+  "platform",
   "mini",
   "ultra",
   "select",
@@ -122,6 +132,18 @@ export function dealabsQuery(title: string): string {
 /** Deals for another country's store ("Frontalier Suisse", "[ES]"…). */
 const FOREIGN =
   /frontalier|suisse|belgique|allemagne|espagne|italie|luxembourg|\[(?:de|es|it|be|ch|uk|nl)\]/i;
+/** Threads about several products at once. */
+const MULTI_PRODUCT =
+  /humble|bundle|\bchoice\b|game pass|ps plus|abonnement|s[ée]lection de|jusqu'à -\d+ ?% sur/i;
+/** Letters and digits mixed: a model code ("tr120", "x1504va", "55t69c"). */
+const MODEL_CODE = /^(?=.*\d)(?=.*[a-z])[a-z0-9]{3,}$/;
+/** …but not a quantity ("128go", "1000w", "4k", "5g", "ps5"). */
+const UNIT =
+  /^(\d+(go|to|gb|tb|mo|mah|w|cm|mm|m|pa|kpa|hz|l|ml|g|kg|v|k|p|x)|ps\d|[45]g)$/;
+/** Baby / child sizes. */
+const KIDS =
+  /b[ée]b[ée]s?(?![a-z])|\benfants?\b|\bjunior\b|maternelle|primaire|coll[eè]ge|\bkids?\b|\(j\)|\btoddler/i;
+
 /** Merchants that are another country's store ("Amazon.es", "Amazon.de"…). */
 const FOREIGN_MERCHANT = /\.(?:es|de|it|nl|be|ch|co\.uk|com\.be)$/i;
 
@@ -139,20 +161,58 @@ export function isSameProduct(
   if (thread.merchant && FOREIGN_MERCHANT.test(thread.merchant.trim())) {
     return false;
   }
-  const ours = titleTokens(dealabsQuery(ourTitle));
+  // A bundle or a roundup ("Humble Choice - RE Village, Core Keeper, …")
+  // says nothing about one of the products it lists.
+  if (
+    MULTI_PRODUCT.test(thread.title) ||
+    (thread.title.match(/,/g)?.length ?? 0) >= 3
+  ) {
+    return false;
+  }
+  const head = dealabsQuery(ourTitle);
+  const ours = titleTokens(head);
   const ourFull = titleTokens(ourTitle);
   const theirs = titleTokens(thread.title);
   if (ours.size < 2 || FOREIGN.test(thread.title)) return false;
   for (const token of ours) {
     if (!theirs.has(token)) return false;
   }
-  // Variants must agree both ways: their "Plus" when we have none, or our
-  // "Max" when they have none, are different products.
+  // A short searched name ("Asus TUF Gaming") fits a whole range: the
+  // model code right after it ("TR120") must be there too.
+  if (ours.size < 4) {
+    const code = [...titleTokens(ourTitle.slice(head.length))]
+      .slice(0, 3)
+      .find((token) => MODEL_CODE.test(token) && !UNIT.test(token));
+    if (code && !theirs.has(code)) return false;
+  }
+  // Baby/child sizes and adult sizes are different products.
+  if (KIDS.test(ourTitle) !== KIDS.test(thread.title)) return false;
+  // Platforms: a thread listing several ("sur PS5 et Xbox Series X", "sur
+  // PS5, PC ou Switch 2") is our deal if one of them is ours.
+  const ourPlatforms = [...ourFull].filter((t) => PLATFORM_WORDS.has(t));
+  const theirPlatforms = [...theirs].filter((t) => PLATFORM_WORDS.has(t));
+  if (ourPlatforms.length || theirPlatforms.length) {
+    if (!ourPlatforms.some((platform) => theirs.has(platform))) return false;
+  }
+  // Other variants must agree both ways: their "Plus" when we have none,
+  // or our "Max" when they have none, are different products.
   for (const token of theirs) {
-    if (VARIANT_WORDS.has(token) && !ourFull.has(token)) return false;
+    if (
+      VARIANT_WORDS.has(token) &&
+      !PLATFORM_WORDS.has(token) &&
+      !ourFull.has(token)
+    ) {
+      return false;
+    }
   }
   for (const token of ourFull) {
-    if (VARIANT_WORDS.has(token) && !theirs.has(token)) return false;
+    if (
+      VARIANT_WORDS.has(token) &&
+      !PLATFORM_WORDS.has(token) &&
+      !theirs.has(token)
+    ) {
+      return false;
+    }
   }
   return thread.price >= ourPrice * 0.4 && thread.price <= ourPrice * 2.5;
 }
@@ -184,4 +244,79 @@ export function summarizeDealabsHistory(
       ? Math.max(...deals.map((deal) => deal.temperature))
       : undefined,
   };
+}
+
+/** A live deal this recent for the same product makes ours a duplicate. */
+export const DUPLICATE_WINDOW_DAYS = 30;
+
+/**
+ * Is this product already on Dealabs right now — same product (see
+ * `isSameProduct`), not expired, posted within the last 30 days, at our
+ * price or cheaper? A repost of that gets voted cold or deleted as a
+ * duplicate. A pricier earlier deal doesn't count: ours is then the news.
+ */
+export function findLiveDuplicate(
+  threads: DealabsThread[],
+  ourTitle: string,
+  ourPrice: number,
+  now = new Date(),
+): DealabsThread | undefined {
+  return threads
+    .filter(
+      (thread) =>
+        !thread.isExpired &&
+        now.getTime() - new Date(thread.publishedAt).getTime() <
+          DUPLICATE_WINDOW_DAYS * 86_400_000 &&
+        thread.price <= ourPrice * 1.02 &&
+        isSameProduct(ourTitle, ourPrice, thread),
+    )
+    .sort((a, b) => a.price - b.price)[0];
+}
+
+/** What a deal card says when the product is already on Dealabs. */
+export interface OnDealabs {
+  url: string;
+  price: number;
+  temperature: number;
+  /** Our own post (published draft), not someone else's. */
+  mine: boolean;
+}
+
+/**
+ * The live Dealabs deal for this product, from its stored history (already
+ * matched by `isSameProduct`): not expired, posted within 30 days — at
+ * any price: the product is "already on Dealabs" either way (the card
+ * shows that deal's price, so a cheaper offer of ours is still visible).
+ * Ours first, then the cheapest. History stored before expiry was
+ * recorded has no `isExpired`: such an entry counts only if posted in the
+ * last 7 days.
+ */
+export function liveOnDealabs(
+  history: Array<{
+    url: string;
+    price: number;
+    temperature: number;
+    publishedAt: string;
+    isExpired?: boolean;
+    mine?: boolean;
+  }>,
+  _currentPrice: number,
+  now = new Date(),
+): OnDealabs | undefined {
+  const age = (at: string) => now.getTime() - new Date(at).getTime();
+  return history
+    .filter(
+      (past) =>
+        age(past.publishedAt) < DUPLICATE_WINDOW_DAYS * 86_400_000 &&
+        (past.isExpired === false ||
+          (past.isExpired === undefined &&
+            age(past.publishedAt) < 7 * 86_400_000)),
+    )
+    .sort((a, b) => Number(!!b.mine) - Number(!!a.mine) || a.price - b.price)
+    .map(({ url, price, temperature, mine }) => ({
+      url,
+      price,
+      temperature: Math.round(temperature),
+      mine: !!mine,
+    }))[0];
 }

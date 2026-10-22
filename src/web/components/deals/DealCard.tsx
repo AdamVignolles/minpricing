@@ -7,6 +7,7 @@ import * as f from "../ui/format.ts";
 import Icon from "../ui/Icon.tsx";
 import { useNow } from "../ui/useNow.ts";
 import DealImage from "./DealImage.tsx";
+import { HeatBadge } from "./HeatForecast.tsx";
 
 const DAY_MS = 86_400_000;
 
@@ -46,8 +47,20 @@ const DealCard: FC<DealCardProps> = ({
   const merchant =
     labelFor(deal.merchantId, merchants) ?? f.titleize(deal.sourceId);
   // `now` is 0 until hydration: no clock, no "new" badge, no mismatch.
-  const seen = now ? f.relativeTime(deal.lastSeenAt, now) : null;
-  const isNew = now > 0 && now - new Date(deal.firstSeenAt).getTime() < DAY_MS;
+  // "New" means first seen or a real price drop — not merely seen again
+  // by the last run (that's in the tooltip).
+  const freshAt = deal.freshAt ?? deal.firstSeenAt;
+  const seen = now ? f.relativeTime(freshAt, now) : null;
+  const isFresh = now > 0 && now - new Date(freshAt).getTime() < DAY_MS;
+  const isNew = isFresh && deal.freshReason !== "price-drop";
+  const isDrop = isFresh && deal.freshReason === "price-drop";
+  // Already on Dealabs: still openable, but out of the way.
+  const posted = deal.onDealabs;
+  const postedLabel = posted
+    ? posted.mine
+      ? "Publié par vous"
+      : `Déjà sur Dealabs${posted.temperature ? ` · ${posted.temperature}°` : ""}`
+    : null;
 
   return (
     <Card
@@ -56,8 +69,25 @@ const DealCard: FC<DealCardProps> = ({
       padding={compact ? "sm" : "md"}
       className="lift"
       h="100%"
-      style={{ display: "flex", flexDirection: "column", color: "inherit" }}
+      title={
+        posted
+          ? posted.mine
+            ? "Vous avez déjà publié ce deal sur Dealabs."
+            : "Un deal pour ce produit, au même prix ou moins cher, est déjà en ligne sur Dealabs."
+          : undefined
+      }
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        color: "inherit",
+        ...(posted ? { filter: "grayscale(1)", opacity: 0.55 } : {}),
+      }}
     >
+      {postedLabel && compact ? (
+        <Badge size="xs" variant="filled" color="gray" mb={6}>
+          {postedLabel}
+        </Badge>
+      ) : null}
       {!compact ? (
         <Card.Section p="sm" pb={0} style={{ position: "relative" }}>
           <DealImage
@@ -77,7 +107,17 @@ const DealCard: FC<DealCardProps> = ({
               {f.discount(deal.discountPercentage as number)}
             </Badge>
           ) : null}
-          {isNew ? (
+          {postedLabel ? (
+            <Badge
+              size="sm"
+              variant="filled"
+              color="dark"
+              leftSection={<Icon name="check" size={11} />}
+              style={{ position: "absolute", top: 16, right: 16 }}
+            >
+              {postedLabel}
+            </Badge>
+          ) : isNew ? (
             <Badge
               size="sm"
               variant="filled"
@@ -86,6 +126,19 @@ const DealCard: FC<DealCardProps> = ({
               style={{ position: "absolute", top: 16, right: 16 }}
             >
               Nouveau
+            </Badge>
+          ) : isDrop ? (
+            <Badge
+              size="sm"
+              variant="filled"
+              color="signal"
+              className="tnum"
+              style={{ position: "absolute", top: 16, right: 16 }}
+            >
+              Prix en baisse
+              {deal.droppedFrom
+                ? ` · était ${f.price(deal.droppedFrom, deal.currency)}`
+                : ""}
             </Badge>
           ) : null}
         </Card.Section>
@@ -156,10 +209,11 @@ const DealCard: FC<DealCardProps> = ({
                 {deal.score}/100
               </Badge>
             </Tooltip>
+            <HeatBadge chance={deal.hotChance} />
           </Group>
           {seen ? (
             <Tooltip
-              label={`Dernière observation : ${f.dateTime(deal.lastSeenAt)}`}
+              label={`${deal.freshReason === "price-drop" ? "Prix en baisse" : "Nouveau"} le ${f.dateTime(freshAt)} · dernière observation : ${f.dateTime(deal.lastSeenAt)}`}
               withArrow
             >
               <Group gap={5} wrap="nowrap">

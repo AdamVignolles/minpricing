@@ -2,6 +2,7 @@ import { type AmazonPageText, parseAmazonSignals } from "./amazonSignals.ts";
 import type { CloudflareBrowserBinding, DealsPage } from "./browser.ts";
 import {
   interleave,
+  mapWithConcurrency,
   parsePriceFr,
   scrollAndCollect,
   withBrowser,
@@ -13,6 +14,18 @@ import type {
   DiscoverContext,
   RawDeal,
 } from "./DealSource.ts";
+
+/** Cards announcing less than this ("-12 %") aren't worth opening. */
+const MIN_BADGE_PERCENT = 20;
+
+/** Listing pages read at the same time. */
+const LISTING_CONCURRENCY = 2;
+
+/**
+ * Product pages opened at the same time. Higher is faster but looks less
+ * like a person browsing: 3 kept Amazon's pages intact in testing.
+ */
+const PAGE_CONCURRENCY = 3;
 
 /**
  * Amazon buybox price elements in priority order. There is no single
@@ -93,76 +106,88 @@ export class AmazonCollector implements DealSource {
         title: string;
         imageUrl: string | null;
         categoryHint?: string;
+        /** The card's "-xx %" badge, when it shows one. */
+        badgePercent?: number;
       };
       // One list per collection page, interleaved below so every category
       // gets its share of `limit` (see `interleave`).
       const cardsPerPage: Card[][] = [];
 
-      for (const [pageIndex, dealsUrl] of this.dealsUrls.entries()) {
-        context?.progress?.(
-          "Lecture des pages bons plans",
-          pageIndex + 1,
-          this.dealsUrls.length,
-        );
-        // `/deals?bubble-id=deals-collection-toys` → "amazon:toys": the
-        // collection is Amazon's own category for every card on it.
-        const collection = dealsUrl.match(/deals-collection-([a-z0-9-]+)/)?.[1];
-        const categoryHint = collection ? `amazon:${collection}` : undefined;
-        try {
-          const cards = await withPage(browser, async (page) => {
-            const response = await page.goto(dealsUrl, {
-              waitUntil: "domcontentloaded",
-              timeout: 20_000,
-            });
-            if (!response || !response.ok()) {
-              throw new Error(
-                `Amazon deals page returned ${response?.status() ?? "no response"}`,
-              );
-            }
-
-            await page
-              .waitForSelector('[data-testid="product-card"]', {
-                timeout: 10_000,
-              })
-              .catch(() => {
-                // No card showed up in time: the extract() below just
-                // finds none, and this URL simply contributes 0 cards.
+      // Listing pages a few at a time too (each in its own context).
+      let pagesRead = 0;
+      const perPage = await mapWithConcurrency(
+        this.dealsUrls,
+        LISTING_CONCURRENCY,
+        async (dealsUrl): Promise<Card[]> => {
+          context?.progress?.(
+            "Lecture des pages bons plans",
+            ++pagesRead,
+            this.dealsUrls.length,
+          );
+          // `/deals?bubble-id=deals-collection-toys` → "amazon:toys": the
+          // collection is Amazon's own category for every card on it.
+          const collection = dealsUrl.match(
+            /deals-collection-([a-z0-9-]+)/,
+          )?.[1];
+          const categoryHint = collection ? `amazon:${collection}` : undefined;
+          try {
+            const cards = await withPage(browser, async (page) => {
+              const response = await page.goto(dealsUrl, {
+                waitUntil: "domcontentloaded",
+                timeout: 20_000,
               });
+              if (!response || !response.ok()) {
+                throw new Error(
+                  `Amazon deals page returned ${response?.status() ?? "no response"}`,
+                );
+              }
 
-            // Collected across every scroll step, not read once at the
-            // end: see `scrollAndCollect`'s doc — Amazon's grid is
-            // virtualized, so a single read only ever sees whichever
-            // batch happened to be mounted at the final scroll position.
-            return scrollAndCollect(
-              page,
-              () =>
-                page.evaluate(() =>
-                  Array.from(
-                    document.querySelectorAll('[data-testid="product-card"]'),
-                  ).map((el) => {
-                    const link = el.querySelector(
-                      'a[data-testid="product-card-link"]',
-                    ) as HTMLAnchorElement | null;
-                    const img = el.querySelector(
-                      "img",
-                    ) as HTMLImageElement | null;
-                    return {
-                      asin: el.getAttribute("data-asin"),
-                      url: link?.href ?? null,
-                      title: img?.alt || null,
-                      imageUrl: img?.src || null,
-                    };
-                  }),
-                ),
-              (card) => card.asin,
-              // Only the top of each collection is ever used (the cap is
-              // shared across ~15 collections), so a few scroll steps do.
-              { rounds: 6 },
-            );
-          });
+              await page
+                .waitForSelector('[data-testid="product-card"]', {
+                  timeout: 10_000,
+                })
+                .catch(() => {
+                  // No card showed up in time: the extract() below just
+                  // finds none, and this URL simply contributes 0 cards.
+                });
 
-          cardsPerPage.push(
-            cards
+              // Collected across every scroll step, not read once at the
+              // end: see `scrollAndCollect`'s doc — Amazon's grid is
+              // virtualized, so a single read only ever sees whichever
+              // batch happened to be mounted at the final scroll position.
+              return scrollAndCollect(
+                page,
+                () =>
+                  page.evaluate(() =>
+                    Array.from(
+                      document.querySelectorAll('[data-testid="product-card"]'),
+                    ).map((el) => {
+                      const link = el.querySelector(
+                        'a[data-testid="product-card-link"]',
+                      ) as HTMLAnchorElement | null;
+                      const img = el.querySelector(
+                        "img",
+                      ) as HTMLImageElement | null;
+                      const badge = (el as HTMLElement).innerText.match(
+                        /-\s?(\d{1,2})\s?%/,
+                      );
+                      return {
+                        asin: el.getAttribute("data-asin"),
+                        url: link?.href ?? null,
+                        title: img?.alt || null,
+                        imageUrl: img?.src || null,
+                        badgePercent: badge ? Number(badge[1]) : null,
+                      };
+                    }),
+                  ),
+                (card) => card.asin,
+                // Deep enough for a 200-page cap shared across ~15
+                // collections once the "-20 %" card filter has run.
+                { rounds: 10 },
+              );
+            });
+
+            return cards
               .filter((card) => card.asin && card.url && card.title)
               .map((card) => ({
                 asin: card.asin as string,
@@ -170,70 +195,93 @@ export class AmazonCollector implements DealSource {
                 title: card.title as string,
                 imageUrl: card.imageUrl,
                 categoryHint,
-              })),
-          );
-        } catch {
-          // One listing page failing (challenge, layout change, timeout)
-          // must not block the other entry points from contributing cards.
-        }
-      }
+                badgePercent: card.badgePercent ?? undefined,
+              }));
+          } catch {
+            // One listing page failing (challenge, layout change, timeout)
+            // must not block the other entry points from contributing cards.
+            return [];
+          }
+        },
+      );
+      cardsPerPage.push(...perPage);
 
       const deals: RawDeal[] = [];
-      const candidates = interleave(cardsPerPage, (card) => card.asin).slice(
-        0,
-        this.limit,
-      );
-      for (const [index, card] of candidates.entries()) {
-        context?.progress?.(
-          "Fiches produits (prix, vendeur, avis)",
-          index + 1,
-          candidates.length,
-        );
-        try {
-          // Each product page is fetched in its own browser context: Amazon
-          // fingerprints sessions, and reusing cookies/context across
-          // several sequential product-page loads causes later ones to
-          // come back with the price element silently missing.
-          const priced = await withPage(browser, (page) =>
-            this.fetchPrice(page, card.url),
-          );
-          if (!priced) {
-            continue;
-          }
+      // Titles that already disqualify an offer (low-end laptop…) never
+      // cost a product-page load.
+      // Same for a small announced discount: the badge is measured against
+      // the struck price, which is never below the real reference, so a
+      // "-12 %" card can't turn into a real -20 % on its product page.
+      const candidates = interleave(cardsPerPage, (card) => card.asin)
+        .filter((card) => context?.worthFetching?.(card.title) ?? true)
+        .filter(
+          (card) =>
+            card.badgePercent === undefined ||
+            card.badgePercent >= MIN_BADGE_PERCENT,
+        )
+        .slice(0, this.limit);
+      // A few product pages at once (each in its own context, see
+      // below) instead of one by one: the bulk of a run's time.
+      let done = 0;
+      const found = await mapWithConcurrency(
+        candidates,
+        PAGE_CONCURRENCY,
+        async (card): Promise<RawDeal | undefined> => {
+          try {
+            // Each product page is fetched in its own browser context: Amazon
+            // fingerprints sessions, and reusing cookies/context across
+            // several sequential product-page loads causes later ones to
+            // come back with the price element silently missing.
+            const priced = await withPage(browser, (page) =>
+              this.fetchPrice(page, card.url),
+            );
+            if (!priced) {
+              return undefined;
+            }
 
-          deals.push({
-            externalId: card.asin,
-            title: card.title,
-            url: card.url.split("?")[0],
-            imageUrl: upscaleAmazonImage(card.imageUrl ?? undefined),
-            price: priced.price,
-            listPrice: priced.listPrice,
-            description: priced.description,
-            currency: "EUR",
-            availability: "in_stock",
-            merchantId: "amazon",
-            // Collection first; the product page breadcrumb covers cards
-            // only found in generic lists (all deals, lightning deals).
-            categoryHint:
-              card.categoryHint ??
-              (priced.breadcrumb
-                ? `amazon-crumb:${priced.breadcrumb}`
-                : undefined),
-            // Read on the product page we open anyway for the price: no
-            // extra request, so always fresh (no DiscoverContext needed).
-            details: priced.details,
-          });
-        } catch {
-          // One product page failing (challenge, layout change, timeout)
-          // must not block the rest of the deals found this run.
-        }
-      }
+            return {
+              externalId: card.asin,
+              title: card.title,
+              url: card.url.split("?")[0],
+              imageUrl: upscaleAmazonImage(card.imageUrl ?? undefined),
+              price: priced.price,
+              listPrice: priced.listPrice,
+              description: priced.description,
+              currency: "EUR",
+              availability: "in_stock",
+              merchantId: "amazon",
+              // Collection first; the product page breadcrumb covers cards
+              // only found in generic lists (all deals, lightning deals).
+              categoryHint:
+                card.categoryHint ??
+                (priced.breadcrumb
+                  ? `amazon-crumb:${priced.breadcrumb}`
+                  : undefined),
+              // Read on the product page we open anyway for the price: no
+              // extra request, so always fresh (no DiscoverContext needed).
+              details: priced.details,
+            };
+          } catch {
+            // One product page failing (challenge, layout change, timeout)
+            // must not block the rest of the deals found this run.
+            return undefined;
+          } finally {
+            context?.progress?.(
+              "Fiches produits (prix, vendeur, avis)",
+              ++done,
+              candidates.length,
+            );
+          }
+        },
+      );
+      deals.push(...found.filter((deal): deal is RawDeal => !!deal));
 
       return deals;
     }, this.getCloudflareBinding?.());
   }
 
-  protected async fetchPrice(
+  /** Reads one product page: price, struck price, seller, reviews… */
+  async fetchPrice(
     page: DealsPage,
     url: string,
   ): Promise<
@@ -249,14 +297,15 @@ export class AmazonCollector implements DealSource {
   > {
     const response = await page.goto(url, {
       waitUntil: "domcontentloaded",
-      timeout: 15_000,
+      // Generous: several pages load at once during a run.
+      timeout: 25_000,
     });
     if (!response || !response.ok()) {
       return undefined;
     }
 
     await page
-      .waitForSelector(PRICE_SELECTORS.join(", "), { timeout: 8_000 })
+      .waitForSelector(PRICE_SELECTORS.join(", "), { timeout: 12_000 })
       .catch(() => {
         // No price container showed up: the evaluate() below returns
         // undefined and this candidate is simply skipped.

@@ -1,0 +1,31 @@
+{
+  "$comment": "Auto-publish rules. Applied by scripts/agents/dealradar.mjs (shortlist, random plan) and the deals-select skill (judgment veto). Tuned weekly by the deals-weekly skill within `bounds` and `learning` — every change is logged in docs/publish-rules-changelog.md, the previous version is kept in config/publish-rules.previous.json for rollback.",
+  "version": 2,
+  "updatedAt": "2026-10-21",
+  "updatedBy": "Adam (random volume and times, no weekend)",
+  "publishDays": [1, 2, 3, 4, 5],
+  "perDay": { "min": 2, "max": 5 },
+  "window": { "start": "17:30", "end": "21:30" },
+  "minGapMinutes": 35,
+  "minScore": 65,
+  "minHotChance": 20,
+  "maxPerCategoryPerDay": 2,
+  "excludedSources": ["aliexpress", "itjustgood"],
+  "categoryAdjust": {},
+  "sourceAdjust": {},
+  "priceBandAdjust": { "<30": 0, "30-100": 0, "100-300": 0, ">300": 0 },
+  "bounds": {
+    "minScore": [50, 85],
+    "minHotChance": [20, 60],
+    "adjust": [-15, 15],
+    "perDayMax": [2, 5],
+    "maxPerCategoryPerDay": [1, 3]
+  },
+  "learning": {
+    "hotThreshold": 100,
+    "maturedAfterDays": 3,
+    "minMaturedPosts": 15,
+    "minGroupPosts": 4,
+    "maxStepPct": 10
+  }
+}

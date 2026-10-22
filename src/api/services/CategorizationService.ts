@@ -88,6 +88,7 @@ const HINTS: Array<{ pattern: RegExp; categoryId: string }> = [
   },
   { pattern: /^cdiscount:(jardin|bricolage)/, categoryId: "diy" },
   { pattern: /^cdiscount:electromenager/, categoryId: "appliances" },
+  { pattern: /^cdiscount:informatique/, categoryId: "computing" },
   { pattern: /^cdiscount:le-sport/, categoryId: "sport" },
   {
     pattern: /^cdiscount:(pret-a-porter|mode|chaussures|bijouterie|bagages)/,

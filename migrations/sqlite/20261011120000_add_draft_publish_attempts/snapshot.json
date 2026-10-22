@@ -1,9 +1,7 @@
 {
   "dialect": "sqlite",
   "id": "5b147cdb-3ddb-402a-b855-69f5cd99f010",
-  "prevIds": [
-    "3ec0377d-0114-44e7-b466-246a31343bf7"
-  ],
+  "prevIds": ["3ec0377d-0114-44e7-b466-246a31343bf7"],
   "version": "7",
   "ddl": [
     {
@@ -1393,81 +1391,63 @@
       "table": "job_executions"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "alepha_sequences_pk",
       "table": "alepha_sequences",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "deals_pk",
       "table": "deals",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "price_history_pk",
       "table": "price_history",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "categories_pk",
       "table": "categories",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "merchants_pk",
       "table": "merchants",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "sources_pk",
       "table": "sources",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "tracked_products_pk",
       "table": "tracked_products",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "dealabs_drafts_pk",
       "table": "dealabs_drafts",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "job_executions_pk",
       "table": "job_executions",

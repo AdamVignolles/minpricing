@@ -2,15 +2,18 @@ import { $inject, z } from "alepha";
 import { $repository } from "alepha/orm";
 import { $action, HttpError } from "alepha/server";
 
+import { dealEntity } from "../entities/Deal.ts";
 import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { $adminSession } from "../services/AdminAuth.ts";
 import {
   AutoPublishService,
+  DealNotAvailableError,
   PublishRefusedError,
 } from "../services/AutoPublishService.ts";
 import { DealabsDraftService } from "../services/DealabsDraftService.ts";
 import { DealabsDuplicateError } from "../services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../services/DealabsSessionService.ts";
+import { DealPageCheckService } from "../services/DealPageCheckService.ts";
 
 const draftResponseSchema = dealabsDraftEntity.schema;
 
@@ -32,6 +35,43 @@ export class DraftsController {
   protected draftService = $inject(DealabsDraftService);
   protected dealabsSession = $inject(DealabsSessionService);
   protected autoPublisher = $inject(AutoPublishService);
+  protected pageCheck = $inject(DealPageCheckService);
+  protected deals = $repository(dealEntity);
+
+  /**
+   * Dry run of the pre-publish check: opens the merchant page and says
+   * whether the deal could go to Dealabs now. Publishes nothing.
+   */
+  publishCheck = $action({
+    method: "GET",
+    path: "/deals/:id/publish-check",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ id: z.text() }),
+      response: z.object({
+        ok: z.boolean(),
+        reason: z.text({ size: "rich" }).optional(),
+        matchedPrice: z.number().optional(),
+        status: z.number().optional(),
+        title: z.text({ size: "rich" }).optional(),
+        prices: z.array(z.number()).optional(),
+        availability: z.text().optional(),
+      }),
+    },
+    handler: async ({ params }) => {
+      const deal = await this.deals.getById(params.id);
+      const verdict = await this.pageCheck.check(deal);
+      return {
+        ok: verdict.ok,
+        reason: verdict.ok ? undefined : verdict.reason,
+        matchedPrice: verdict.ok ? verdict.matchedPrice : undefined,
+        status: verdict.snapshot?.status,
+        title: verdict.snapshot?.title.slice(0, 200),
+        prices: verdict.snapshot?.prices,
+        availability: verdict.snapshot?.availability,
+      };
+    },
+  });
 
   /** Is a Dealabs session saved for auto-publish, and is a login running? */
   dealabsSessionStatus = $action({
@@ -219,22 +259,40 @@ export class DraftsController {
         if (error instanceof PublishRefusedError) {
           throw new HttpError({ status: error.status, message: error.message });
         }
+        if (error instanceof DealNotAvailableError) {
+          throw new HttpError({
+            status: 422,
+            message: shortError(error.message),
+          });
+        }
         if (error instanceof DealabsDuplicateError) {
           throw new HttpError({
             status: 409,
-            message: error.existingUrl
-              ? `Ce deal semble déjà publié sur Dealabs : ${error.existingUrl}`
-              : error.message,
+            message: shortError(
+              error.existingUrl && !error.message.includes(error.existingUrl)
+                ? `${error.message} : ${error.existingUrl}`
+                : error.message,
+            ),
           });
         }
         throw new HttpError({
           status: 502,
           message:
             error instanceof Error
-              ? error.message
+              ? shortError(error.message)
               : "Auto-publish failed for an unknown reason.",
         });
       }
     },
   });
+}
+
+/**
+ * Batched calls carry their error in a field capped at 255 characters: the
+ * debug-snapshot path stays in the server log and on the draft
+ * (`lastPublishError`), the console only needs the reason.
+ */
+function shortError(message: string): string {
+  const reason = message.replace(/\s*\(debug snapshot: [^)]*\)\s*$/, "");
+  return reason.length > 240 ? `${reason.slice(0, 239)}…` : reason;
 }

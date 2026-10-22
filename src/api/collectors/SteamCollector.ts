@@ -52,6 +52,9 @@ interface SteamFeaturedItem {
   final_price?: number;
   currency?: string;
   header_image?: string;
+  /** From the search row's review tooltip, when it shows one. */
+  review_count?: number;
+  review_percent?: number;
 }
 
 /**
@@ -104,8 +107,9 @@ function parseSearchResultRow(row: string): SteamFeaturedItem | null {
     return null;
   }
 
+  // `data-discount` since late 2025 (was `data-price-discount`).
   const discountPercent = Number(
-    row.match(/data-price-discount="(-?\d+)"/)?.[1] ?? 0,
+    row.match(/data-(?:price-)?discount="(-?\d+)"/)?.[1] ?? 0,
   );
   const finalPrice = Number(finalCents);
   const originalPrice =
@@ -114,6 +118,7 @@ function parseSearchResultRow(row: string): SteamFeaturedItem | null {
       : finalPrice;
   const name = row.match(/<span class="title">([^<]*)<\/span>/)?.[1]?.trim();
   const imageUrl = row.match(/<img[^>]*src="([^"]+)"/)?.[1];
+  const reviews = parseReviewTooltip(row);
 
   return {
     id: Number(appId),
@@ -123,8 +128,35 @@ function parseSearchResultRow(row: string): SteamFeaturedItem | null {
     final_price: finalPrice,
     original_price: originalPrice,
     header_image: imageUrl,
+    review_count: reviews?.count,
+    review_percent: reviews?.percent,
   };
 }
+
+/**
+ * "84 % des 6,902 évaluations…" from a search row's review tooltip (the
+ * thousands separator depends on the locale: strip everything but digits).
+ */
+export function parseReviewTooltip(
+  row: string,
+): { percent: number; count: number } | undefined {
+  const tooltip = row.match(
+    /search_review_summary[^>]*data-tooltip-html="([^"]*)"/,
+  )?.[1];
+  // `\s` covers the narrow no-break spaces some locales group digits with.
+  const match = tooltip?.match(/(\d{1,3})\s?%[^\d]*([\d.,\s]+)/);
+  if (!match) {
+    return undefined;
+  }
+  const count = Number(match[2].replace(/\D/g, ""));
+  return count > 0 ? { percent: Number(match[1]), count } : undefined;
+}
+
+/**
+ * Games with fewer reviews than this are skipped: Dealabs votes for games
+ * people know, and a -40 % on an unknown indie stays cold whatever the price.
+ */
+export const MIN_STEAM_REVIEWS = 1000;
 
 /**
  * Steam always sells its own games, and the struck price on a Steam
@@ -352,7 +384,8 @@ async function withSteamDetails(
       description:
         (gameFacts && buildSteamDescription(gameFacts, gameReviews)) ??
         deal.description,
-      details: { ...STEAM_DETAILS, ...gameReviews },
+      // Keeps the search row's review counts if the summary request failed.
+      details: { ...STEAM_DETAILS, ...deal.details, ...gameReviews },
     };
   });
 }
@@ -465,7 +498,12 @@ export class SteamCollector implements DealSource {
           break;
         }
 
-        const rows = html.split('<a class="search_result_row').slice(1);
+        // One `<a href=… class="search_result_row …">` per game (the
+        // class is no longer the first attribute: split on the anchor).
+        const rows = html
+          .split("<a ")
+          .slice(1)
+          .filter((row) => row.includes("search_result_row"));
         if (rows.length === 0) {
           break;
         }
@@ -498,12 +536,13 @@ export class SteamCollector implements DealSource {
    * The curated "Specials" shelf alone (`specials.items`) is a short,
    * hand-picked list — easily missing big titles that are discounted but
    * being featured elsewhere on the homepage instead (e.g. a popular new
-   * release on sale shows up under "Top Sellers"/"New Releases", not
-   * "Specials"). Scanning those shelves too, from the very same response,
-   * surfaces those without any extra request — they're simply filtered
-   * down to the ones that actually carry a discount. On top of that,
-   * `fetchAllSpecials()` pages through the store's full specials listing
-   * so the curated shelves aren't the volume ceiling.
+   * release on sale shows up under "Top Sellers", not "Specials").
+   * Scanning that shelf too, from the very same response, surfaces those
+   * without any extra request — filtered down to the ones that actually
+   * carry a discount. "New Releases" is left out: mostly unknown games
+   * with no reviews yet. On top of that, `fetchAllSpecials()` pages
+   * through the store's full specials listing so the curated shelves
+   * aren't the volume ceiling.
    */
   async discover(context?: DiscoverContext): Promise<RawDeal[]> {
     context?.progress?.("Liste des promotions Steam");
@@ -527,7 +566,6 @@ export class SteamCollector implements DealSource {
     for (const shelf of [
       json.specials?.items,
       json.top_sellers?.items,
-      json.new_releases?.items,
       allSpecials,
     ]) {
       for (const item of shelf ?? []) {
@@ -537,8 +575,23 @@ export class SteamCollector implements DealSource {
       }
     }
 
+    // The search rows carry review counts the shelves don't: shelf items
+    // found in the search get them too; the others are checked later
+    // (`withSteamDetails`, then the quality gate).
+    const searched = new Map(allSpecials.map((item) => [item.id, item]));
     return Array.from(itemsById.values())
+      .map((item) => ({
+        ...item,
+        review_count: item.review_count ?? searched.get(item.id)?.review_count,
+        review_percent:
+          item.review_percent ?? searched.get(item.id)?.review_percent,
+      }))
       .filter((item) => item.discounted && item.final_price !== undefined)
+      .filter(
+        (item) =>
+          item.review_count === undefined ||
+          item.review_count >= MIN_STEAM_REVIEWS,
+      )
       .map((item) => {
         const price = (item.final_price as number) / 100;
         const listPrice =
@@ -563,6 +616,14 @@ export class SteamCollector implements DealSource {
           availability: "in_stock" as const,
           categoryId: "video-games",
           merchantId: "steam",
+          details:
+            item.review_count !== undefined && item.review_percent !== undefined
+              ? {
+                  ...STEAM_DETAILS,
+                  productRating: Math.round(item.review_percent / 2) / 10,
+                  productReviewCount: item.review_count,
+                }
+              : undefined,
         };
       });
   }

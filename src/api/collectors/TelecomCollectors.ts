@@ -1,3 +1,4 @@
+import { withBrowser, withPage } from "./browser.ts";
 import type { DealSource, DiscoverContext, RawDeal } from "./DealSource.ts";
 import {
   parseBouyguesPlans,
@@ -5,6 +6,7 @@ import {
   parseFreePlans,
   parseOrangePromos,
   parseRedPlans,
+  parseSoshPlans,
   type TelecomOffer,
 } from "./telecomOffers.ts";
 
@@ -153,5 +155,37 @@ export class SfrCollector extends TelecomCollector {
     return parseRedPlans(
       await fetchText("https://www.red-by-sfr.fr/forfaits-mobiles/"),
     );
+  }
+}
+
+/**
+ * Sosh (Orange's no-frills brand). Its shop is a client-side app that
+ * first bounces through an Orange login cookie check, so — unlike the
+ * other operators — it is read in the (local) browser.
+ */
+export class SoshCollector extends TelecomCollector {
+  id = "sosh";
+  name = "Sosh (forfaits)";
+  protected brand = "Sosh";
+
+  protected async fetchOffers() {
+    const text = await withBrowser((browser) =>
+      withPage(browser, async (page) => {
+        await page.goto("https://shop.sosh.fr/mobile/forfaits-mobiles", {
+          waitUntil: "domcontentloaded",
+          timeout: 40_000,
+        });
+        // Plans render client-side: wait for them (Playwright's `text=`
+        // selectors don't exist on the Workers browser).
+        return page.evaluate(async () => {
+          for (let i = 0; i < 40; i++) {
+            if (document.body.innerText.includes("par mois")) break;
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+          return document.body.innerText;
+        });
+      }),
+    );
+    return parseSoshPlans(text);
   }
 }

@@ -1,3 +1,4 @@
+import { isComputer, parsePcSpecs, pcWarnings } from "./pcSpecs.ts";
 import type { PriceStats } from "./PricingService.ts";
 
 export type SourceReliability = "api" | "manual" | "scrape";
@@ -64,6 +65,8 @@ export interface DealSignals {
   historicalLowSource?: string;
   /** For marketplace-specific checks (AliExpress phones and laptops). */
   title?: string;
+  /** Spec sheet of computers, when the merchant gives one there. */
+  description?: string | null;
   sourceId?: string;
   categoryId?: string;
   /** Country the item ships from ("FR", "CN"), when known. */
@@ -116,6 +119,12 @@ export interface DealEvaluation {
   warnings: string[];
 }
 
+/**
+ * Below this score a deal isn't worth anyone's time: hidden from the
+ * console, no Dealabs draft, never published.
+ */
+export const MIN_VISIBLE_SCORE = 40;
+
 /** Points per criterion. They add up to exactly 100. */
 const MAX = {
   discount: 30,
@@ -150,6 +159,13 @@ const FULL_DISCOUNT = 0.4;
 const ZERO_COMPETITION_GAP = 0.1;
 /** Within 3 % of the cheapest alternative still counts as "the same price". */
 const SAME_PRICE_TOLERANCE = 0.03;
+
+/** Real drop vs a trusted normal price that makes a deal worth showing. */
+const QUALIFYING_DISCOUNT = 0.2;
+/** Same, when the only reference is a "prix conseillé" (often inflated). */
+const QUALIFYING_RRP_DISCOUNT = 0.4;
+/** Or: this much cheaper than the best competing offer right now. */
+const QUALIFYING_COMPETITION_GAP = 0.1;
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const round1 = (value: number) => Math.round(value * 10) / 10;
@@ -331,6 +347,14 @@ export class ScoringService {
     };
 
     this.marketplaceWarnings(signals, warnings);
+    if (signals.title && isComputer(signals.title)) {
+      warnings.push(
+        ...pcWarnings(
+          parsePcSpecs(`${signals.title}\n${signals.description ?? ""}`),
+          price,
+        ),
+      );
+    }
 
     if (signals.condition === "refurbished" || signals.condition === "used") {
       warnings.push(
@@ -348,7 +372,7 @@ export class ScoringService {
       history,
       confidence,
     ].map((criterion) => ({ ...criterion, points: round1(criterion.points) }));
-    const score = Math.round(
+    const total = Math.round(
       Math.max(
         0,
         Math.min(
@@ -357,6 +381,26 @@ export class ScoringService {
         ),
       ),
     );
+
+    // Seller, reviews and data confidence alone add up to ~50 points: a
+    // well-rated product from a good seller at its usual price would pass.
+    // It isn't a deal, so without a real price argument the score stays
+    // under the visibility bar.
+    const priceArgument = this.priceArgument(
+      signals,
+      reference,
+      realDiscount,
+      bestAlternative,
+      history,
+    );
+    if (!priceArgument && total >= MIN_VISIBLE_SCORE) {
+      warnings.unshift(
+        `Pas d'argument prix : ni baisse réelle d'au moins ${percent(QUALIFYING_DISCOUNT)}, ni prix nettement sous la concurrence, ni plus bas historique — note plafonnée à ${MIN_VISIBLE_SCORE - 1}.`,
+      );
+    }
+    const score = priceArgument
+      ? total
+      : Math.min(total, MIN_VISIBLE_SCORE - 1);
 
     return {
       score,
@@ -387,6 +431,46 @@ export class ScoringService {
       bestAlternative,
       warnings,
     };
+  }
+
+  /**
+   * What makes this price worth posting, or `undefined` when nothing does:
+   * a real drop vs a trusted normal price, a big drop vs a "prix conseillé"
+   * on a well-reviewed product, clearly cheaper than everyone else, or the
+   * lowest price ever seen.
+   */
+  protected priceArgument(
+    signals: DealSignals,
+    reference: PriceReference | undefined,
+    realDiscount: number | undefined,
+    bestAlternative: PriceAlternative | undefined,
+    history: ScoreCriterion,
+  ): string | undefined {
+    if (reference && realDiscount !== undefined) {
+      if (reference.trust >= 0.8 && realDiscount >= QUALIFYING_DISCOUNT) {
+        return "real-discount";
+      }
+      if (
+        realDiscount >= QUALIFYING_RRP_DISCOUNT &&
+        (signals.productRating ?? 0) >= 4 &&
+        (signals.productReviewCount ?? 0) >= 20
+      ) {
+        return "rrp-discount";
+      }
+    }
+    if (
+      bestAlternative &&
+      signals.currentPrice <=
+        bestAlternative.price * (1 - QUALIFYING_COMPETITION_GAP)
+    ) {
+      return "cheaper-than-market";
+    }
+    // Matching the lowest price ever seen only counts if it is a drop at
+    // all: a product always sold at 19,99 € "matches its low" every day.
+    if (history.status === "good" && (realDiscount ?? 0) > 0.05) {
+      return "historical-low";
+    }
+    return undefined;
   }
 
   /** Every "normal price" reference available, most trusted first. */
@@ -424,7 +508,14 @@ export class ScoringService {
     }
     // Our own history only becomes a reference once it says something:
     // with 1-2 points the "average" is just today's price.
-    if (stats.historyPoints >= 3 && stats.avgPrice > 0) {
+    // …and only if it has seen another price: readings all taken during
+    // the promotion say nothing about the normal price (it scored real
+    // -55 % drops as "-0 %").
+    if (
+      stats.historyPoints >= 3 &&
+      stats.avgPrice > 0 &&
+      stats.maxPrice > signals.currentPrice * 1.02
+    ) {
       refs.push({
         kind: "history",
         label: `moyenne de nos ${stats.historyPoints} relevés`,

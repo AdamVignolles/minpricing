@@ -127,6 +127,12 @@ export interface DiscoverContext {
    * console's live progress sidebar. Cheap to call often.
    */
   progress?(step: string, done?: number, total?: number): void;
+  /**
+   * False when the title alone already disqualifies the offer (no-name
+   * AliExpress product, low-end laptop…, see `qualityIssue`): skip it
+   * before spending a product-page load on it.
+   */
+  worthFetching?(title: string): boolean;
 }
 
 /**

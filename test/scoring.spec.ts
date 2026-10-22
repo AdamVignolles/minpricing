@@ -150,4 +150,69 @@ describe("ScoringService.evaluate", () => {
     expect(result.reference?.kind).toBe("history");
     expect(result.reference?.discountPercentage).toBeLessThan(5);
   });
+
+  describe("price argument", () => {
+    const solid = {
+      sellerName: "Amazon",
+      soldByMerchant: true,
+      productRating: 4.6,
+      productReviewCount: 12000,
+    };
+
+    test("a great product at a small discount is capped under the bar", () => {
+      const result = scoring.evaluate(
+        { ...solid, currentPrice: 90, lowestRecentPrice: 100 },
+        firstSeen(90),
+        "scrape",
+      );
+      expect(result.score).toBe(39);
+      expect(result.warnings[0]).toMatch(/Pas d'argument prix/);
+    });
+
+    test("-20 % vs a trusted reference passes", () => {
+      const result = scoring.evaluate(
+        { ...solid, currentPrice: 79, lowestRecentPrice: 100 },
+        firstSeen(79),
+        "scrape",
+      );
+      expect(result.score).toBeGreaterThanOrEqual(40);
+    });
+
+    test("-30 % vs a 'prix conseillé' only is not enough", () => {
+      const result = scoring.evaluate(
+        { ...solid, currentPrice: 70, listPrice: 100, listPriceKind: "rrp" },
+        firstSeen(70),
+        "scrape",
+      );
+      expect(result.score).toBeLessThan(40);
+    });
+
+    test("clearly cheaper than every other merchant passes", () => {
+      const result = scoring.evaluate(
+        {
+          ...solid,
+          currentPrice: 85,
+          marketPrice: 100,
+          marketPriceSource: "Amazon",
+        },
+        firstSeen(85),
+        "scrape",
+      );
+      expect(result.score).toBeGreaterThanOrEqual(40);
+    });
+
+    test("matching the Dealabs low with a real drop passes", () => {
+      const result = scoring.evaluate(
+        {
+          ...solid,
+          currentPrice: 88,
+          lowestRecentPrice: 100,
+          dealabsLowestPrice: 89,
+        },
+        firstSeen(88),
+        "scrape",
+      );
+      expect(result.score).toBeGreaterThanOrEqual(40);
+    });
+  });
 });

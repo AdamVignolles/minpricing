@@ -12,7 +12,8 @@ deployment detail.
 ## What this is
 
 minpricing ("DealRadar"): a private, single-user app that collects prices
-(Amazon, Cdiscount, Steam, manual entry), keeps price history, scores real
+(Amazon, Cdiscount, AliExpress, Steam and other game stores, Lidl, IKEA,
+telecom operators, manual entry), keeps price history, scores real
 discounts, generates a Dealabs post draft, and can auto-publish it to Dealabs
 via Playwright using a session saved locally by `npm run dealabs:login`. No
 public pages, no SEO — every route sits behind the admin session.
@@ -32,7 +33,7 @@ npm run deploy:cloudflare                 # build → patch browser binding → 
 
 ## Architecture
 
-Pipeline: `CollectDealsJob` (cron every 30 min) → `CollectionService` →
+Pipeline: `CollectDealsJob` (hourly 8:00-23:00 + 2:00 and 5:00 Paris) → `CollectionService` →
 collectors → normalize/dedupe → `PriceHistory` → scoring → entities → `$action`
 controllers → React console → Dealabs draft / auto-publish.
 
@@ -69,7 +70,7 @@ controllers → React console → Dealabs draft / auto-publish.
   touched deals are rescored): `DealabsHistoryService` reads Dealabs' public
   search page with plain `fetch` (threads are JSON in `data-vue3` attributes,
   parsers in `services/dealabsSearch.ts`) and stores the matching past deals
-  (25 searches/run, cached 24h). Matching is strict on purpose: variant words
+  (15 searches per source and run, best scores first, cached 24h). Matching is strict on purpose: variant words
   (Plus/Max/Pro…) must agree both ways, foreign-store deals are dropped.
   `ItadService` (Steam only, no-op unless `ITAD_API_KEY` is set) stores the
   IsThereAnyDeal all-time low and serves the Steam price curve on demand.
@@ -86,13 +87,26 @@ controllers → React console → Dealabs draft / auto-publish.
   itself — local server only, like auto-publish. Auto-publish attempts are
   recorded on the draft (`publishAttempts`, `lastPublishResult`,
   `lastPublishError`); a "Vérifier" that doesn't confirm puts the draft back
-  to `draft`. Draft texts never contain prices.
+  to `draft`. Draft texts never contain prices — except, for Amazon deals,
+  Keepa's 90-day price chart (`services/keepa.ts`: the public
+  `graph.keepa.com/pricehistory.png` image, no API key), which the
+  publisher inserts at the top of the description through the editor's
+  « Image » → « Image depuis une URL » dialog (Dealabs re-hosts it). Best-
+  effort: a publish never fails over the chart. Also shown on the deal page
+  (`KeepaChart.tsx`, click to enlarge, 30 d/90 d/6 m/1 y) — through
+  `KeepaController` (`/api/keepa/:asin`, admin-only, cached 1 h), because
+  Keepa answers 403 to an image request carrying another site's referrer.
+  Deals from other shops matched to an Amazon page (`marketPriceUrl`) show
+  that product's Amazon chart, labelled as such; only Amazon deals get it
+  in the Dealabs description.
 - **Auto-publish**: `AutoPublishService.publishDeal()` is the single publish
   path (button and run). At the end of `runAll()`, `publishBestDeals()` posts
   deals seen in that run with score ≥ `AUTO_PUBLISH_MIN_SCORE` (65), draft
   still `draft` and never attempted, best first, max
-  `AUTO_PUBLISH_MAX_PER_RUN` (3); skipped when serverless or no Dealabs
-  session. `AUTO_PUBLISH=false` turns it off.
+  `AUTO_PUBLISH_MAX_PER_RUN` (3), one per source per run, and at most
+  `AUTO_PUBLISH_MAX_PER_DAY` (6) attempts over 24 h; skipped when
+  serverless or no Dealabs session. **Off by default**
+  (`AUTO_PUBLISH=true` turns it on); the per-deal button works either way.
 - **Other sources**: `AliExpressCollector` ("Deal du Jour" listing plus
   phone/PC/tablet searches with `shipFromCountry=FR`; product page only for
   new/stale deals; parsing in `collectors/aliexpressSignals.ts`). Branded
@@ -105,8 +119,157 @@ controllers → React console → Dealabs draft / auto-publish.
   plans and boxes via plain `fetch` of each operator's page or public API
   (parsers in `collectors/telecomOffers.ts`); `billingPeriod: "month"`,
   category `telecom`. Phones sold with a plan and offers reserved to box
-  customers are deliberately excluded. Dealabs titles are capped at 140
+  customers are deliberately excluded. Sosh is read in the browser (its
+  shop bounces through an Orange login cookie check). Plans rarely have a
+  struck price, so `MarketReferenceService.refreshTelecom` (no browser)
+  compares each mobile plan with the _other operators'_ stored plans
+  giving at least as much data (`services/telecomMarket.ts`): the cheapest
+  is its `marketPrice` — the "≥ 10 % under the competition" price argument
+  that keeps a plan visible.
+  `FreeGamesCollector` ("freegames"): GamerPower's public giveaway API cut
+  down by `selectGiveaways` (full games from Steam/GOG/Ubisoft/EA/…, worth
+  ≥ $10, mobile ≥ $5; no Epic — own source —, IndieGala, Stove, itch.io,
+  VR, DLC or third-party "key giveaways"); each link is followed to the
+  store page itself. Boulanger, Fnac and Darty block automated access —
+  their official affiliate product feeds (Awin…) are the legitimate route. Dealabs titles are capped at 140
   characters by `dealabsTitle()`.
+  `StoreCollectors.ts`: stores read with plain `fetch` from their own
+  public APIs or server-rendered pages (parsers in
+  `collectors/storeOffers.ts`) — Epic (free games of the week), GOG
+  catalog API (trending), Nintendo eShop EU search index (popularity, top
+  40), PlayStation Store GraphQL (persisted-query hash in the file; full
+  games, 30-day best sellers), Xbox deals page (`__PRELOADED_STATE__`),
+  Lidl search API (non-food aisles, `sort=percentageDiscount-desc`), IKEA
+  limited-time offers, and (parsers in `collectors/retailOffers.ts`)
+  E.Leclerc (universe pages' featured EANs → `products-details-by-skus`;
+  Leclerc's own offer preferred over marketplace shops), Grosbill
+  "prix barrés", Nike product-wall API, Foot Locker sale pages, Castorama
+  "offre du moment" pages. `CarrefourCollector` reads Carrefour's non-food
+  "bons plans high-tech & maison" page in the browser (403 to plain fetch;
+  food promotions are loyalty-card/multi-buy mechanics, left out).
+  Tested and left out: Fnac, Darty, Boulanger, Decathlon, Leroy Merlin,
+  Intersport, Sephora, Marionnaud, Back Market, Rakuten, King Jouet,
+  Humble, Intermarché, Auchan (bot-blocked or nothing rendered); LDLC
+  promos (marketplace with fake struck prices); Apple refurbished (no
+  reference price); Materiel.net (no struck prices); Dell, Lookfantastic
+  (promo codes, not prices).
+- **Quality gate & visibility**: `services/qualityGate.ts` rejects offers at
+  collection time (product < 4/5 on ≥ 20 reviews — 4.5 on AliExpress —,
+  marketplace seller < 4/5 or < 50 sales, low-end Celeron/N4000 laptops,
+  no-name AliExpress products, games with < 1000 Steam / < 300 GOG
+  reviews, a saving under 5 € except free items and monthly plans); existing
+  deals that fail are archived. Collectors call
+  `DiscoverContext.worthFetching(title)` to skip title-disqualified offers
+  before opening product pages; Amazon also skips cards whose badge
+  announces < 20 %. Deals under `MIN_VISIBLE_SCORE` (40) are hidden from
+  lists and get no draft. **No price argument, no deal**: `evaluate()` caps
+  the score at 39 unless the deal has a real drop ≥ 20 % vs a trusted
+  reference (≥ 40 % vs a "prix conseillé" with good reviews), is ≥ 10 %
+  under the best alternative, or matches the lowest price ever seen (with
+  a real drop) — seller and reviews alone reach ~50 points otherwise.
+  Colour variants (same source, first 6 title words, price to the euro —
+  `services/sameListing.ts`) are shown once and never auto-published twice.
+  Deals no successful run has listed for 48 h are marked `expired`
+  (`CollectionService.expireUnseen`); seen again, they come back active.
+- **Freshness** (`services/freshness.ts`): a deal is "new" when first seen
+  or when its price really drops (≥ 1 % and ≥ 0,50 €) — `freshAt`,
+  `freshReason` (`new` | `price-drop`), `droppedFrom`. Seen again unchanged,
+  it keeps its date; a new row that is the same listing as an existing deal
+  (`sameListingSibling`) inherits that deal's date. The "Plus récents"
+  sort, the dashboard's newest rail, the card's badge (« Nouveau » /
+  « Prix en baisse · était X € ») and its time all use `freshAt`. Deals from
+  before `freshAt` get their first-seen date at startup
+  (`SeedService.backfillDealMetadata`, one `updateMany` with
+  `sql\`"first_seen_at"\``): the dev server can add a new column itself,
+so a migration's own `UPDATE` may never run. Run summaries count new
+deals and, separately, the visible ones (`createdVisible`).
+- **Greyed cards**: lists and the dashboard add `onDealabs` to each deal
+  (`DealsController.withDealabsStatus`): « Publié par vous » for a
+  published draft or one of our live posts read from our profile
+  (`MyDealabsPostsService`, cached 1 h, refreshed in the background —
+  matched with `isSameProduct`, so a different Dealabs title still
+  matches); « Déjà sur Dealabs · N° · price » for anyone's live deal for
+  the product posted within 30 days, at any price (`liveOnDealabs`, from
+  the stored history). The history of the 20 top-potential visible deals is
+  re-checked every 6 h at the end of each run (`refreshTop`), others every
+  24 h. In `isSameProduct`, a thread listing several platforms ("sur PS5
+  et Xbox Series X") matches if one of them is ours.
+- **Computers** (`services/pcSpecs.ts`): a title is a computer when it
+  says so _and_ carries a spec (CPU/RAM/SSD) — a laptop bag doesn't. The
+  quality gate rejects computers without a known maker (`KNOWN_PC_BRANDS`:
+  makers and unmistakable series only, plus the mini-PC brands Beelink,
+  Minisforum, Geekom, GMKtec); the score warns on weak configs for the
+  price (8 Go RAM at 600 €+, 256 Go SSD at 700 €+, 4 Go RAM). Sources:
+  Lenovo's store API (`LenovoCollector`, on-sale facet `4104`; pre-configured
+  "NB …" models encode their specs in the name, see `lenovoNameSpecs`),
+  Joybuy's /offer lightning deals (`JoybuyCollector`, parsing in
+  `collectors/joybuyOffers.ts`: Next.js `self.__next_f` payload,
+  `initLightningDataList`; product pages answer bots with a captcha, so
+  only the listing is read). Joybuy labels its struck price « Prix
+  conseillé » (`rrp`): its deals become visible through the model
+  cross-search on Amazon/Cdiscount (`MarketReferenceService.refreshByModel`,
+  shared with AliExpress) when ≥ 10 % cheaper.
+  ITJustGood's "Opération spéciale" page (`ItJustGoodCollector`, refurbished
+  business laptops; its struck "Neuf équivalent" is a new machine's price,
+  so `listPriceKind: "rrp"` and `condition: "refurbished"` — with no
+  reviews on the site, these stay under the visibility bar unless another
+  price argument appears),
+  Cdiscount's informatique pages (30-day low shown), Amazon's computing
+  collection, Grosbill, Leclerc high-tech. Tested and left out: HP (basket
+  codes, not prices), Dell (mostly -10 % business models), Asus/Acer/MSI
+  stores, Frandroid's comparator (client-side prices).
+- **Store price histories** (`services/priceSeries.ts`,
+  `PriceSeriesService`): for deals Keepa can't chart. Nintendo eShop:
+  DekuDeals' item page embeds every day's French eShop price
+  (`price_history_data`); the game is found by DekuDeals' search (exact
+  name only, no DLC/bundle). After a Nintendo run, `refreshLows` stores the
+  two-year low as `historicalLow*` (20 lookups/run, paced, cached 24 h).
+  The deal page shows it (`StoreHistoryChart`, via
+  `/deals/:id/external-history`), and the publisher inserts a QuickChart
+  PNG of the last year (weekly samples, so the label axis stays
+  proportional to time) at the top of the Dealabs description. Tested and
+  unavailable: Idealo history (browser refused), LeDénicheur, PSPrices,
+  gg.deals (403); IsThereAnyDeal needs `ITAD_API_KEY` (free).
+- **Silent drops** (`AmazonWatchCollector`, source `amazon-watch`): Amazon
+  price drops shown as no promotion. Each run reads the best-seller lists
+  of 14 categories (plain fetch, 2 pages each, ~840 products, parser in
+  `services/amazonWatch.ts`), records every price in `PriceHistory` under
+  `watch:<ASIN>` (`AmazonWatchService`, on change + daily heartbeat), and
+  flags `silentDrop`: watched ≥ 3 days, ≥ 15 % and ≥ 5 € under the usual
+  price (median of the last 30 daily prices), at or under the month's
+  low, and not more than two-thirds off (a placeholder price, not a
+  deal). Products Amazon already shows as a promotion (active `amazon`
+  deal) are skipped; up to 12 product pages per run confirm the drop. The
+  deal's `listPrice` is our measured usual price (`regular`). Tested and
+  unavailable: camelcamelcamel (security check), Keepa deals (paid API),
+  Movers & Shakers (nothing rendered to a plain request).
+- **Relaunches** (`RelaunchCollector`, source `relances`): products that
+  already went hot. `HotWatchlistService` reads Dealabs' public "hot" pages
+  once a day (15 pages, paced) and keeps Amazon deals at 300°+ for 120
+  days. Each run, 12 of those whose deal is over (expired, or 3 weeks old)
+  are searched on Amazon by title (`searchAmazon` + `titlesMatch`) — never
+  through Dealabs' click-out redirects, which would count as visits — and
+  become a deal only when back within 2 % of the price that made them hot.
+- **Heat prediction** (`services/heatPrediction.ts`): next to the score
+  (is the price good?), `hotChance` estimates the chance (0-100) that a deal
+  reaches 100° on Dealabs, with French reasons (`hotReasons`), computed in
+  `rescore()` and served live in `/deals/:id/price-stats` → `heat`. Base
+  log-odds fitted on ~2 000 matured Dealabs deals (category, real discount,
+  price band — weak alone, AUC 0.63) plus product terms learned from our own
+  posts: past Dealabs heat of the product, price vs the lowest already
+  posted, a still-live repost within 14 days, marketplace seller, unknown
+  product; an account offset calibrates it to our posts (~10 % reach 100°).
+  Indicative only (AUC ~0.65 on our posts). Used by the "Potentiel Dealabs"
+  sort and by auto-publish (`AUTO_PUBLISH_MIN_HOT_CHANCE`, 35). The Dealabs
+  history stores our own threads tagged `mine` (`DEALABS_USERNAME`) but never
+  counts them in the score's figures or the prediction, and, in
+  `isSameProduct`, bundles/roundups, a short name without its model code,
+  and kids vs adult sizes.
+- **Speed**: `runAll()` runs sources in parallel (`COLLECT_SOURCE_CONCURRENCY`,
+  default 3, heavy ones first); Amazon/Cdiscount/AliExpress open product
+  pages 3 at a time and listing pages 2 at a time (`mapWithConcurrency` in
+  `browser.ts`, each page in its
+  own context). Dealabs history requests are paced app-wide (1 per 1.5 s).
 - **Categories**: collectors set `RawDeal.categoryHint` from the merchant's
   own classification (Amazon `deals?bubble-id=deals-collection-<x>`, the
   Amazon breadcrumb, the Cdiscount URL path); `CategorizationService.fromHint`

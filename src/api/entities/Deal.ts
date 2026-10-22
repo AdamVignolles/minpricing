@@ -111,6 +111,24 @@ export const dealEntity = $entity({
      * table on the deal page. `marketPrice` is the cheapest of them.
      */
     marketComparisons: z.text({ size: "rich" }).optional(),
+    /**
+     * Estimated chance (0-100) that this deal reaches 100° on Dealabs, and
+     * why (JSON list of French sentences) — see `heatPrediction.ts`.
+     */
+    hotChance: z.number().optional(),
+    hotReasons: z.text({ size: "rich" }).optional(),
+    /**
+     * When the deal last became "new": first seen, or its price really
+     * dropped (see `services/freshness.ts`). Merely seen again, it keeps
+     * its date — the "Plus récents" sort and the card's badge use this.
+     */
+    freshAt: z.datetime().optional(),
+    freshReason: z
+      .enum(["new", "price-drop"])
+      .meta({ mode: "text" })
+      .optional(),
+    /** Price before that drop, for the card's "Prix en baisse". */
+    droppedFrom: z.number().optional(),
     itadCheckedAt: z.datetime().optional(),
     /** "month" for plans and boxes: `currentPrice` is a monthly price. */
     billingPeriod: z.enum(["month"]).meta({ mode: "text" }).optional(),

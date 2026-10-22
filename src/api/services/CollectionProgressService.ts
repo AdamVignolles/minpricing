@@ -14,12 +14,16 @@ export interface SourceProgress {
   total?: number;
   collected?: number;
   created?: number;
+  /** New deals the console shows (score ≥ 40). */
+  createdVisible?: number;
   updated?: number;
   error?: string;
   /** Replaces the offer counts when they don't apply (publishing step). */
   summary?: string;
   /** Offers that couldn't be saved (bad data from the site). */
   skipped?: number;
+  /** Offers turned away by the quality gate. */
+  rejected?: number;
   /** Alerts raised while this source ran. */
   warnings?: number;
   /** Things worth opening (e.g. deals published on Dealabs). */
@@ -167,7 +171,9 @@ export class CollectionProgressService {
     summary: {
       collected: number;
       created: number;
+      createdVisible?: number;
       updated: number;
+      rejected?: number;
       error?: string;
       /** Custom one-line result, for steps that aren't a collection. */
       summary?: string;
@@ -180,7 +186,9 @@ export class CollectionProgressService {
       total: undefined,
       collected: summary.collected,
       created: summary.created,
+      createdVisible: summary.createdVisible,
       updated: summary.updated,
+      rejected: summary.rejected,
       error: summary.error,
       summary: summary.summary,
       finishedAt: this.dateTime.nowISOString(),
@@ -189,7 +197,7 @@ export class CollectionProgressService {
       summary.error
         ? `Échec : ${summary.error}`
         : (summary.summary ??
-            `${summary.collected} offre(s) : ${summary.created} nouvelle(s), ${summary.updated} mise(s) à jour.`),
+            `${summary.collected} offre(s) : ${summary.created} nouvelle(s)${summary.createdVisible !== undefined ? ` dont ${summary.createdVisible} visible(s)` : ""}, ${summary.updated} mise(s) à jour.`),
       sourceId,
       summary.error ? "warn" : "info",
     );

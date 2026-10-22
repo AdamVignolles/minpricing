@@ -10,9 +10,11 @@ import type {
   DealsPage,
 } from "../collectors/browser.ts";
 import { parsePriceFr, withBrowser, withPage } from "../collectors/browser.ts";
+import { joybuyModelQuery } from "../collectors/joybuyOffers.ts";
 import { dealEntity } from "../entities/Deal.ts";
 import { type MarketComparison, matchesSameModel } from "./crossSearch.ts";
 import type { Deal } from "./DealTypes.ts";
+import { comparablePlans, TELECOM_SOURCES } from "./telecomMarket.ts";
 
 /** A market price is re-checked at most once a day per deal. */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -134,7 +136,26 @@ export class MarketReferenceService {
     }
     // AliExpress has no EAN: its branded products are matched by model.
     if (sourceId === "aliexpress") {
-      return this.refreshAliExpress(getCloudflareBinding, onProgress);
+      return this.refreshByModel(
+        sourceId,
+        modelQuery,
+        getCloudflareBinding,
+        onProgress,
+      );
+    }
+    // Joybuy has no EAN either, and its struck price is a "prix
+    // conseillé": the other merchants' price is what tells a deal.
+    if (sourceId === "joybuy") {
+      return this.refreshByModel(
+        sourceId,
+        joybuyModelQuery,
+        getCloudflareBinding,
+        onProgress,
+      );
+    }
+    // Mobile plans: compared with the other operators' plans, no browser.
+    if (TELECOM_SOURCES.has(sourceId)) {
+      return this.refreshTelecom(sourceId);
     }
 
     const candidates = await this.deals.findMany({
@@ -205,13 +226,43 @@ export class MarketReferenceService {
   }
 
   /**
-   * Cross-search for AliExpress: each branded product ("POCO X7 Pro",
+   * Each mobile plan of this operator against every other stored plan
+   * giving at least as much data (see `telecomMarket.ts`): the cheapest is
+   * its market price, the five cheapest its comparison table. Cheap (DB
+   * only), so it runs every time — plans change price without notice.
+   */
+  protected async refreshTelecom(sourceId: string): Promise<string[]> {
+    const plans = await this.deals.findMany({
+      where: {
+        and: [{ categoryId: { eq: "telecom" } }, { status: { eq: "active" } }],
+      },
+    });
+    const own = plans.filter((plan) => plan.sourceId === sourceId);
+    for (const plan of own) {
+      const found = comparablePlans(plan, plans);
+      const cheapest = found[0];
+      await this.deals.updateById(plan.id, {
+        marketPrice: cheapest?.price,
+        marketPriceSource: cheapest?.title ?? "",
+        marketPriceUrl: cheapest?.url ?? "",
+        marketCheckedAt: this.dateTime.nowISOString(),
+        marketComparisons: found.length ? JSON.stringify(found) : "",
+      });
+    }
+    return own.map((plan) => plan.id);
+  }
+
+  /**
+   * Cross-search by model name, for sources without an EAN (AliExpress,
+   * Joybuy) — for AliExpress: each branded product ("POCO X7 Pro",
    * "Chuwi Ubox") is searched by model on Amazon and Cdiscount, and every
    * credible match (see `matchesSameModel`) is kept — the deal page's
    * comparison table. The cheapest becomes the market price the score
    * compares against. No-name products are skipped: nothing to compare.
    */
-  protected async refreshAliExpress(
+  protected async refreshByModel(
+    sourceId: string,
+    queryFor: (title: string) => string | undefined,
     getCloudflareBinding?: () => CloudflareBrowserBinding | undefined,
     onProgress?: (done: number, total: number) => void,
   ): Promise<string[]> {
@@ -219,16 +270,13 @@ export class MarketReferenceService {
     const stale = (
       await this.deals.findMany({
         where: {
-          and: [
-            { sourceId: { eq: "aliexpress" } },
-            { status: { eq: "active" } },
-          ],
+          and: [{ sourceId: { eq: sourceId } }, { status: { eq: "active" } }],
         },
       })
     )
       .filter(
         (deal) =>
-          !!modelQuery(deal.title) &&
+          !!queryFor(deal.title) &&
           (!deal.marketCheckedAt ||
             now - new Date(deal.marketCheckedAt).getTime() > CACHE_TTL_MS),
       )
@@ -241,7 +289,7 @@ export class MarketReferenceService {
       await withBrowser(async (browser) => {
         for (const [index, deal] of stale.entries()) {
           onProgress?.(index + 1, stale.length);
-          const model = modelQuery(deal.title) as string;
+          const model = queryFor(deal.title) as string;
           const searches: Array<
             [string, (page: DealsPage) => Promise<SearchResult[]>]
           > = [

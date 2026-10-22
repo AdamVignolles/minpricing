@@ -19,14 +19,17 @@ import type {
   Deal,
   DealAnalysis as Analysis,
   DealVerdict,
+  HeatPrediction,
   MarketComparison,
 } from "../../types.ts";
 import * as f from "../ui/format.ts";
 import Icon from "../ui/Icon.tsx";
+import HeatForecast from "./HeatForecast.tsx";
 
 export interface DealAnalysisProps {
   deal: Deal;
   analysis: Analysis;
+  heat?: HeatPrediction;
 }
 
 /**
@@ -70,7 +73,7 @@ const stars = (value: number) => `${value.toFixed(1).replace(".", ",")} / 5`;
  * (seller, reviews, reference prices) behind each part — so the number
  * can always be checked rather than trusted.
  */
-const DealAnalysis: FC<DealAnalysisProps> = ({ deal, analysis }) => {
+const DealAnalysis: FC<DealAnalysisProps> = ({ deal, analysis, heat }) => {
   const verdict = VERDICT[analysis.verdict];
   const comparisons: MarketComparison[] = (() => {
     try {
@@ -164,6 +167,8 @@ const DealAnalysis: FC<DealAnalysisProps> = ({ deal, analysis }) => {
             </Group>
           </Stack>
         </Group>
+
+        {heat ? <HeatForecast heat={heat} /> : null}
 
         {analysis.warnings.length > 0 ? (
           <Alert

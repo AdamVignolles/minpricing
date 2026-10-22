@@ -259,7 +259,7 @@ const SourceCard: FC<{ source: SourceProgress; now: number }> = ({
       {source.status === "done" ? (
         <Text fz="xs" c="dimmed" mt={4} className="tnum">
           {source.summary ??
-            `${source.collected ?? 0} offres · ${source.created ?? 0} nouvelles · ${source.updated ?? 0} mises à jour`}
+            `${source.collected ?? 0} offres · ${source.created ?? 0} nouvelles${source.createdVisible !== undefined ? ` (${source.createdVisible} visibles)` : ""} · ${source.updated ?? 0} mises à jour`}
         </Text>
       ) : null}
 
@@ -269,8 +269,15 @@ const SourceCard: FC<{ source: SourceProgress; now: number }> = ({
         </Text>
       ) : null}
 
-      {source.skipped || source.warnings ? (
+      {source.skipped || source.warnings || source.rejected ? (
         <Group gap={6} mt={6}>
+          {source.rejected ? (
+            <Tooltip label="Avis ou vendeur trop faibles, PC d'entrée de gamme… (détail dans le journal)">
+              <Badge size="xs" variant="light" color="gray">
+                {source.rejected} écartée(s) (qualité)
+              </Badge>
+            </Tooltip>
+          ) : null}
           {source.skipped ? (
             <Badge size="xs" variant="light" color="orange">
               {source.skipped} offre(s) ignorée(s)
@@ -388,9 +395,10 @@ const CollectionProgressAside: FC<{
     (sum, s) => ({
       collected: sum.collected + (s.collected ?? 0),
       created: sum.created + (s.created ?? 0),
+      createdVisible: sum.createdVisible + (s.createdVisible ?? 0),
       updated: sum.updated + (s.updated ?? 0),
     }),
-    { collected: 0, created: 0, updated: 0 },
+    { collected: 0, created: 0, createdVisible: 0, updated: 0 },
   );
   const warnings = progress.events.filter((e) => e.level === "warn").length;
   const namesById = Object.fromEntries(
@@ -456,7 +464,10 @@ const CollectionProgressAside: FC<{
 
       <SimpleGrid cols={4} spacing="xs">
         <Figure label="offres" value={totals.collected} />
-        <Figure label="nouvelles" value={totals.created} />
+        <Figure
+          label={`nouvelles · ${totals.createdVisible} visibles`}
+          value={totals.created}
+        />
         <Figure label="mises à jour" value={totals.updated} />
         <Figure
           label="alertes"

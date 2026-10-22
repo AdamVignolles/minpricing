@@ -1,5 +1,5 @@
 import { $hook, $inject } from "alepha";
-import { $repository } from "alepha/orm";
+import { $repository, sql } from "alepha/orm";
 
 import { categoryEntity } from "../entities/Category.ts";
 import { dealEntity } from "../entities/Deal.ts";
@@ -66,6 +66,75 @@ export class SeedService {
         type: "api" as const,
       },
       { id: "sfr", name: "RED by SFR (forfaits)", type: "scrape" as const },
+      { id: "sosh", name: "Sosh (forfaits)", type: "scrape" as const },
+      // Stores' own public APIs / pages, read without a browser.
+      {
+        id: "epic",
+        name: "Epic Games Store (jeux gratuits)",
+        type: "api" as const,
+      },
+      { id: "gog", name: "GOG (promos)", type: "api" as const },
+      { id: "nintendo", name: "Nintendo eShop (promos)", type: "api" as const },
+      {
+        id: "playstation",
+        name: "PlayStation Store (promos)",
+        type: "api" as const,
+      },
+      { id: "xbox", name: "Xbox Store (promos)", type: "scrape" as const },
+      { id: "lidl", name: "Lidl (non-alimentaire)", type: "api" as const },
+      { id: "ikea", name: "IKEA (offres limitées)", type: "scrape" as const },
+      {
+        id: "freegames",
+        name: "Jeux gratuits (Steam, GOG, Ubisoft, mobile…)",
+        type: "api" as const,
+      },
+      {
+        id: "leclerc",
+        name: "E.Leclerc (bonnes affaires)",
+        type: "api" as const,
+      },
+      {
+        id: "carrefour",
+        name: "Carrefour (bons plans high-tech & maison)",
+        type: "scrape" as const,
+      },
+      {
+        id: "grosbill",
+        name: "Grosbill (prix barrés)",
+        type: "scrape" as const,
+      },
+      { id: "nike", name: "Nike (promotions)", type: "api" as const },
+      {
+        id: "itjustgood",
+        name: "ITJustGood (PC reconditionnés)",
+        type: "scrape" as const,
+      },
+      { id: "joybuy", name: "Joybuy (ventes flash)", type: "scrape" as const },
+      {
+        id: "amazon-watch",
+        name: "Amazon (baisses de prix non affichées)",
+        type: "scrape" as const,
+      },
+      {
+        id: "relances",
+        name: "Relances (déjà chauds sur Dealabs)",
+        type: "scrape" as const,
+      },
+      {
+        id: "lenovo",
+        name: "Lenovo (PC portables en promo)",
+        type: "api" as const,
+      },
+      {
+        id: "footlocker",
+        name: "Foot Locker (soldes)",
+        type: "scrape" as const,
+      },
+      {
+        id: "castorama",
+        name: "Castorama (offres du moment)",
+        type: "scrape" as const,
+      },
     ];
 
     for (const source of defaults) {
@@ -123,6 +192,27 @@ export class SeedService {
         domain: "bouyguestelecom.fr",
       },
       { id: "sfr", name: "SFR / RED", domain: "sfr.fr" },
+      { id: "sosh", name: "Sosh", domain: "sosh.fr" },
+      { id: "epic", name: "Epic Games Store", domain: "store.epicgames.com" },
+      { id: "gog", name: "GOG", domain: "gog.com" },
+      { id: "nintendo", name: "Nintendo eShop", domain: "nintendo.com" },
+      {
+        id: "playstation",
+        name: "PlayStation Store",
+        domain: "store.playstation.com",
+      },
+      { id: "xbox", name: "Xbox Store", domain: "xbox.com" },
+      { id: "lidl", name: "Lidl", domain: "lidl.fr" },
+      { id: "ikea", name: "IKEA", domain: "ikea.com" },
+      { id: "leclerc", name: "E.Leclerc", domain: "e.leclerc" },
+      { id: "carrefour", name: "Carrefour", domain: "carrefour.fr" },
+      { id: "grosbill", name: "Grosbill", domain: "grosbill.com" },
+      { id: "nike", name: "Nike", domain: "nike.com" },
+      { id: "lenovo", name: "Lenovo", domain: "lenovo.com" },
+      { id: "itjustgood", name: "ITJustGood", domain: "itjustgood.com" },
+      { id: "joybuy", name: "Joybuy", domain: "joybuy.fr" },
+      { id: "footlocker", name: "Foot Locker", domain: "footlocker.fr" },
+      { id: "castorama", name: "Castorama", domain: "castorama.fr" },
     ];
 
     for (const merchant of defaults) {
@@ -144,6 +234,15 @@ export class SeedService {
    * they happen to be re-collected.
    */
   protected async backfillDealMetadata() {
+    // Deals from before `freshAt` existed are "new" as of when we first saw
+    // them. One statement, a no-op once filled (a dev server can add the
+    // column on its own, so the migration's own UPDATE may never run).
+    await this.deals
+      .updateMany(
+        { freshAt: { isNull: true } },
+        { freshAt: sql`"first_seen_at"`, freshReason: "new" },
+      )
+      .catch(() => undefined);
     const stale = await this.deals.findMany({
       where: {
         or: [

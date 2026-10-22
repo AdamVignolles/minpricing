@@ -6,13 +6,30 @@ import { $repository } from "alepha/orm";
 import { dealEntity } from "../entities/Deal.ts";
 import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { DealabsDraftService } from "./DealabsDraftService.ts";
+import { DealabsHistoryService } from "./DealabsHistoryService.ts";
 import {
   DealabsDuplicateError,
   DealabsPublisherService,
 } from "./DealabsPublisherService.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
+import { DealPageCheckService } from "./DealPageCheckService.ts";
+import { PriceSeriesService } from "./PriceSeriesService.ts";
+import { sameListingKey } from "./sameListing.ts";
 
 type Draft = Infer<typeof dealabsDraftEntity.schema>;
+
+/**
+ * The merchant page, opened right before publishing, says the deal can't
+ * go out now: site down, product gone or out of stock, price changed.
+ * Nothing is sent to Dealabs and nothing is recorded on the draft — the
+ * deal may be fine again tomorrow.
+ */
+export class DealNotAvailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DealNotAvailableError";
+  }
+}
 
 /**
  * A publish that is refused before anything is sent to Dealabs (no
@@ -48,10 +65,16 @@ export interface AutoPublishOutcome {
  * - one automatic attempt per deal, ever: a failure or a duplicate is
  *   recorded on the draft and left for you to retry by hand, instead of
  *   being retried every 30 minutes;
- * - at most `AUTO_PUBLISH_MAX_PER_RUN` per run, best scores first;
+ * - at most `AUTO_PUBLISH_MAX_PER_RUN` per run, best scores first, and
+ *   one per source per run (not three PlayStation games in a row);
+ * - at most `AUTO_PUBLISH_MAX_PER_DAY` attempts over the last 24 h: with
+ *   ~16 sources and hourly runs, the per-run cap alone would allow ~50
+ *   posts a day, which reads as spam on Dealabs;
  * - only where publishing can work at all: the local server, with a saved
  *   Dealabs session.
- * Set `AUTO_PUBLISH=false` to turn it off.
+ * Off by default (end-of-run publishing posts on your account without a
+ * review, a spam risk under Dealabs' rules): set `AUTO_PUBLISH=true` to
+ * turn it on. The per-deal button works either way.
  */
 export class AutoPublishService {
   protected log = $logger();
@@ -61,12 +84,22 @@ export class AutoPublishService {
   protected draftService = $inject(DealabsDraftService);
   protected publisher = $inject(DealabsPublisherService);
   protected session = $inject(DealabsSessionService);
+  protected dealabsHistory = $inject(DealabsHistoryService);
+  protected priceSeries = $inject(PriceSeriesService);
+  protected pageCheck = $inject(DealPageCheckService);
   protected env = $env(
     z.object({
-      AUTO_PUBLISH: z.boolean().default(true),
+      AUTO_PUBLISH: z.boolean().default(false),
       /** Deals scoring at least this are published automatically. */
       AUTO_PUBLISH_MIN_SCORE: z.number().default(65),
       AUTO_PUBLISH_MAX_PER_RUN: z.number().default(3),
+      AUTO_PUBLISH_MAX_PER_DAY: z.number().default(6),
+      /**
+       * And at least this estimated chance (%) of reaching 100° on Dealabs
+       * (see `heatPrediction.ts`): a good price nobody votes for hurts the
+       * account more than it helps.
+       */
+      AUTO_PUBLISH_MIN_HOT_CHANCE: z.number().default(35),
     }),
   );
 
@@ -114,6 +147,27 @@ export class AutoPublishService {
     this.busy = true;
     try {
       const deal = await this.deals.getById(dealId);
+      // Same product already live on Dealabs (another link, colour or
+      // shop) at our price or cheaper: posting it again is a duplicate.
+      // Checked before any browser opens; nothing is recorded on the
+      // draft — it's still publishable once that deal expires.
+      const duplicate = await this.dealabsHistory
+        .findLiveDuplicate(deal)
+        .catch(() => undefined);
+      if (duplicate) {
+        throw new DealabsDuplicateError(
+          `Déjà en ligne sur Dealabs à ${duplicate.price.toFixed(2).replace(".", ",")} € (${Math.round(duplicate.temperature)}°), pas de republication`,
+          duplicate.url,
+        );
+      }
+      // A moderator clicks the link before validating: the merchant page
+      // must be up, the product there and still at our price.
+      if (this.pageCheck.enabled) {
+        const verdict = await this.pageCheck.check(deal);
+        if (!verdict.ok) {
+          throw new DealNotAvailableError(`Pas publié : ${verdict.reason}`);
+        }
+      }
       // A draft generated while the deal had no description has an empty
       // one: rebuild it from the deal now (never empty, see render()).
       if (!draft.description?.trim()) {
@@ -128,7 +182,12 @@ export class AutoPublishService {
       };
 
       try {
-        const { dealabsUrl } = await this.publisher.publish(deal, draft);
+        // Keepa for Amazon (the publisher's default); otherwise the
+        // product's eShop history, drawn by QuickChart.
+        const chart = await this.priceSeries
+          .chartImageUrl(deal)
+          .catch(() => undefined);
+        const { dealabsUrl } = await this.publisher.publish(deal, draft, chart);
         return await this.drafts.updateById(draft.id, {
           ...attempt,
           lastPublishResult: "success",
@@ -190,14 +249,58 @@ export class AutoPublishService {
       })
     )
       .filter((deal) => new Date(deal.lastSeenAt).getTime() >= sinceMs)
-      .sort((a, b) => b.score - a.score);
+      .filter(
+        (deal) => (deal.hotChance ?? 0) >= this.env.AUTO_PUBLISH_MIN_HOT_CHANCE,
+      )
+      // Most likely to go hot first, the score breaking ties.
+      .sort(
+        (a, b) => (b.hotChance ?? 0) - (a.hotChance ?? 0) || b.score - a.score,
+      );
+
+    // A colour variant of something already posted (or tried) is the same
+    // deal for Dealabs: never post it twice.
+    const takenKeys = new Set<string>();
+    const handled = await this.drafts.findMany({
+      where: { status: { eq: "posted" } },
+    });
+    const attempted = await this.drafts.findMany({
+      where: { publishAttempts: { gte: 1 } },
+    });
+    for (const draft of [...handled, ...attempted]) {
+      const deal = await this.deals.findById(draft.dealId).catch(() => null);
+      if (deal) takenKeys.add(sameListingKey(deal));
+    }
+
+    const dayAgo = new Date(
+      new Date(this.dateTime.nowISOString()).getTime() - 24 * 60 * 60 * 1000,
+    ).getTime();
+    const attemptsToday = attempted.filter(
+      (draft) =>
+        draft.lastPublishAttemptAt &&
+        new Date(draft.lastPublishAttemptAt).getTime() >= dayAgo,
+    ).length;
+    const budget = Math.min(
+      this.env.AUTO_PUBLISH_MAX_PER_RUN,
+      Math.max(0, this.env.AUTO_PUBLISH_MAX_PER_DAY - attemptsToday),
+    );
+    if (budget === 0) {
+      return {
+        ...outcome,
+        skipped: `limite de ${this.env.AUTO_PUBLISH_MAX_PER_DAY} publications sur 24 h atteinte`,
+      };
+    }
 
     const candidates: typeof deals = [];
+    const sourcesTaken = new Set<string>();
     for (const deal of deals) {
-      if (candidates.length >= this.env.AUTO_PUBLISH_MAX_PER_RUN) break;
+      if (candidates.length >= budget) break;
+      const key = sameListingKey(deal);
+      if (takenKeys.has(key) || sourcesTaken.has(deal.sourceId)) continue;
       const draft = await this.draftService.ensureDraftForDeal(deal.id);
       if (draft?.status === "draft" && !draft.publishAttempts) {
         candidates.push(deal);
+        takenKeys.add(key);
+        sourcesTaken.add(deal.sourceId);
       }
     }
 

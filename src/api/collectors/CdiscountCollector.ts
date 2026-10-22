@@ -1,6 +1,7 @@
 import type { CloudflareBrowserBinding, DealsPage } from "./browser.ts";
 import {
   interleave,
+  mapWithConcurrency,
   parsePriceFr,
   scrollAndCollect,
   withBrowser,
@@ -22,6 +23,12 @@ import type {
   DiscoverContext,
   RawDeal,
 } from "./DealSource.ts";
+
+/** Listing pages read at the same time. */
+const LISTING_CONCURRENCY = 2;
+
+/** Product pages opened at the same time (see AmazonCollector). */
+const PAGE_CONCURRENCY = 3;
 
 /**
  * Auto-discovers current Cdiscount deals from one or more listing pages
@@ -65,97 +72,104 @@ export class CdiscountCollector implements DealSource {
       // which is why nearly every deal used to be high-tech.
       const cardsPerPage: Card[][] = [];
 
-      for (const [pageIndex, homeUrl] of this.homeUrls.entries()) {
-        context?.progress?.(
-          "Lecture des pages promos et catégories",
-          pageIndex + 1,
-          this.homeUrls.length,
-        );
-        try {
-          const cards = await withPage(browser, async (page) => {
-            const response = await page.goto(homeUrl, {
-              waitUntil: "networkidle",
-              timeout: 20_000,
-            });
-            if (!response || !response.ok()) {
-              throw new Error(
-                `Cdiscount page returned ${response?.status() ?? "no response"}`,
-              );
-            }
-
-            await page
-              .waitForSelector('[data-e2e="offer-item"]', { timeout: 10_000 })
-              .catch(() => {
-                // No card showed up in time: the extract() below just
-                // finds none, and this URL simply contributes 0 cards.
+      // Listing pages a few at a time too (each in its own context).
+      let pagesRead = 0;
+      const perPage = await mapWithConcurrency(
+        this.homeUrls,
+        LISTING_CONCURRENCY,
+        async (homeUrl): Promise<Card[]> => {
+          context?.progress?.(
+            "Lecture des pages promos et catégories",
+            ++pagesRead,
+            this.homeUrls.length,
+          );
+          try {
+            const cards = await withPage(browser, async (page) => {
+              const response = await page.goto(homeUrl, {
+                // Not "networkidle": with several pages loading at once the
+                // network is never quiet for long, and the page was dropped
+                // with all its cards. The offer cards are what we wait for.
+                waitUntil: "domcontentloaded",
+                timeout: 30_000,
               });
+              if (!response || !response.ok()) {
+                throw new Error(
+                  `Cdiscount page returned ${response?.status() ?? "no response"}`,
+                );
+              }
 
-            // Collected across every scroll step, not read once at the
-            // end — see `scrollAndCollect`'s doc.
-            return scrollAndCollect(
-              page,
-              () =>
-                page.evaluate(() =>
-                  Array.from(
-                    document.querySelectorAll('[data-e2e="offer-item"]'),
-                  ).map((el) => {
-                    const link = el.closest("a") as HTMLAnchorElement | null;
-                    const title =
-                      el
-                        .querySelector('[data-e2e="lplr-title"]')
-                        ?.textContent?.trim() ?? null;
-                    const priceText =
-                      el
-                        .querySelector('[data-e2e="lplr-price"]')
-                        ?.textContent?.trim() ?? null;
-                    // Measured 2026-10: the homepage offer cards expose
-                    // only `lplr-price` — there is no struck-through
-                    // reference price in the markup, just a
-                    // "Promo"/"Bon plan" ribbon. So this lookup
-                    // legitimately returns nothing today and Cdiscount
-                    // deals ship without a discount rather than with a
-                    // fabricated one.
-                    //
-                    // It is kept because Cdiscount renames its
-                    // struck-price hook regularly and sometimes falls
-                    // back to plain <del>/<s>: if the reference price
-                    // comes back, we pick it up for free.
-                    const listPriceText =
-                      el
-                        .querySelector(
-                          '[data-e2e*="strike" i], [data-e2e*="crossed" i], [data-e2e="lplr-oldPrice"], del, s',
-                        )
-                        ?.textContent?.trim() ?? null;
-                    const img = el.querySelector(
-                      "img",
-                    ) as HTMLImageElement | null;
-                    const text = el.textContent ?? "";
-                    return {
-                      url: link?.href ?? null,
-                      title,
-                      priceText,
-                      listPriceText,
-                      imageUrl: img?.src || null,
-                      // Category hubs mix promotions with regular-priced
-                      // bestsellers: only cards Cdiscount itself marks as
-                      // a promotion are deal candidates.
-                      promo:
-                        /Prix de comparaison|-\s?\d+\s?%|Promo|Bon plan|Soldes|Prix choc|Vente flash|Déstockage/i.test(
-                          text,
-                        ),
-                      sponsored: /Sponsoris/i.test(text),
-                    };
-                  }),
-                ),
-              (card) => card.url?.split("#")[0],
-              // Hubs show their promotions near the top: a few scroll
-              // steps are enough, and keep ten pages from taking minutes.
-              { rounds: 8 },
-            );
-          });
+              await page
+                .waitForSelector('[data-e2e="offer-item"]', { timeout: 20_000 })
+                .catch(() => {
+                  // No card showed up in time: the extract() below just
+                  // finds none, and this URL simply contributes 0 cards.
+                });
 
-          cardsPerPage.push(
-            cards
+              // Collected across every scroll step, not read once at the
+              // end — see `scrollAndCollect`'s doc.
+              return scrollAndCollect(
+                page,
+                () =>
+                  page.evaluate(() =>
+                    Array.from(
+                      document.querySelectorAll('[data-e2e="offer-item"]'),
+                    ).map((el) => {
+                      const link = el.closest("a") as HTMLAnchorElement | null;
+                      const title =
+                        el
+                          .querySelector('[data-e2e="lplr-title"]')
+                          ?.textContent?.trim() ?? null;
+                      const priceText =
+                        el
+                          .querySelector('[data-e2e="lplr-price"]')
+                          ?.textContent?.trim() ?? null;
+                      // Measured 2026-10: the homepage offer cards expose
+                      // only `lplr-price` — there is no struck-through
+                      // reference price in the markup, just a
+                      // "Promo"/"Bon plan" ribbon. So this lookup
+                      // legitimately returns nothing today and Cdiscount
+                      // deals ship without a discount rather than with a
+                      // fabricated one.
+                      //
+                      // It is kept because Cdiscount renames its
+                      // struck-price hook regularly and sometimes falls
+                      // back to plain <del>/<s>: if the reference price
+                      // comes back, we pick it up for free.
+                      const listPriceText =
+                        el
+                          .querySelector(
+                            '[data-e2e*="strike" i], [data-e2e*="crossed" i], [data-e2e="lplr-oldPrice"], del, s',
+                          )
+                          ?.textContent?.trim() ?? null;
+                      const img = el.querySelector(
+                        "img",
+                      ) as HTMLImageElement | null;
+                      const text = el.textContent ?? "";
+                      return {
+                        url: link?.href ?? null,
+                        title,
+                        priceText,
+                        listPriceText,
+                        imageUrl: img?.src || null,
+                        // Category hubs mix promotions with regular-priced
+                        // bestsellers: only cards Cdiscount itself marks as
+                        // a promotion are deal candidates.
+                        promo:
+                          /Prix de comparaison|-\s?\d+\s?%|Promo|Bon plan|Soldes|Prix choc|Vente flash|Déstockage/i.test(
+                            text,
+                          ),
+                        sponsored: /Sponsoris/i.test(text),
+                      };
+                    }),
+                  ),
+                (card) => card.url?.split("#")[0],
+                // Hubs show their promotions near the top: a few scroll
+                // steps are enough, and keep ten pages from taking minutes.
+                { rounds: 8 },
+              );
+            });
+
+            return cards
               .filter(
                 (card) =>
                   card.url &&
@@ -170,85 +184,94 @@ export class CdiscountCollector implements DealSource {
                 priceText: card.priceText as string,
                 listPriceText: card.listPriceText,
                 imageUrl: card.imageUrl,
-              })),
-          );
-        } catch {
-          // One listing page failing must not block the other entry
-          // points from contributing cards.
-        }
-      }
+              }));
+          } catch {
+            // One listing page failing must not block the other entry
+            // points from contributing cards.
+            return [];
+          }
+        },
+      );
+      cardsPerPage.push(...perPage);
 
       const deals: RawDeal[] = [];
-      const candidates = interleave(cardsPerPage, (card) => card.url).slice(
-        0,
-        this.limit,
-      );
+      // Titles that already disqualify an offer (low-end laptop…) never
+      // cost a product-page load.
+      const candidates = interleave(cardsPerPage, (card) => card.url)
+        .filter((card) => context?.worthFetching?.(card.title) ?? true)
+        .slice(0, this.limit);
       const toEnrich = candidates.filter(
         (card) => !context || context.needsDetails(card.url),
       ).length;
       let enriched = 0;
-      for (const card of candidates) {
-        const price = parsePriceFr(card.priceText);
-        if (price === undefined) {
-          continue;
-        }
-
-        const listPrice = card.listPriceText
-          ? parsePriceFr(card.listPriceText)
-          : undefined;
-
-        // The product page is where the seller, the competing offers and
-        // the reviews live — the listing card shows none of them. Only
-        // opened when this deal's details are stale (see DiscoverContext):
-        // one extra page per new deal, not one per deal per run.
-        let fetched: CdiscountProductPage | undefined;
-        if (!context || context.needsDetails(card.url)) {
-          enriched++;
-          context?.progress?.(
-            "Fiches produits (vendeur, offres, avis)",
-            enriched,
-            toEnrich,
-          );
-          try {
-            fetched = await withPage(browser, (page) =>
-              this.fetchDetails(page, card.url, price),
-            );
-          } catch {
-            // Product page failed (timeout, layout change): keep the deal,
-            // just without details this run — it'll be retried next run.
+      // Product pages a few at a time (each in its own context): the
+      // slowest part of a Cdiscount run when many deals are new.
+      const found = await mapWithConcurrency(
+        candidates,
+        PAGE_CONCURRENCY,
+        async (card): Promise<RawDeal | undefined> => {
+          const price = parsePriceFr(card.priceText);
+          if (price === undefined) {
+            return undefined;
           }
-        }
 
-        // Listing cards rarely carry the struck price; the product page's
-        // "Prix de comparaison" does.
-        const referencePrice = fetched?.comparisonPrice ?? listPrice;
-        const struck =
-          referencePrice !== undefined && referencePrice > price
-            ? referencePrice
+          const listPrice = card.listPriceText
+            ? parsePriceFr(card.listPriceText)
             : undefined;
 
-        deals.push({
-          externalId: card.url,
-          title: card.title,
-          url: card.url,
-          imageUrl: card.imageUrl ?? undefined,
-          price,
-          listPrice: struck,
-          description: fetched?.description,
-          currency: "EUR",
-          availability: "in_stock",
-          merchantId: "cdiscount",
-          categoryHint: cdiscountCategoryHint(card.url),
-          details: fetched
-            ? {
-                ...fetched.details,
-                // Cdiscount's struck price is a "Prix de comparaison" it
-                // chooses itself, not a former selling price.
-                listPriceKind: struck !== undefined ? "rrp" : undefined,
-              }
-            : undefined,
-        });
-      }
+          // The product page is where the seller, the competing offers and
+          // the reviews live — the listing card shows none of them. Only
+          // opened when this deal's details are stale (see DiscoverContext):
+          // one extra page per new deal, not one per deal per run.
+          let fetched: CdiscountProductPage | undefined;
+          if (!context || context.needsDetails(card.url)) {
+            try {
+              fetched = await withPage(browser, (page) =>
+                this.fetchDetails(page, card.url, price),
+              );
+            } catch {
+              // Product page failed (timeout, layout change): keep the deal,
+              // just without details this run — it'll be retried next run.
+            }
+            context?.progress?.(
+              "Fiches produits (vendeur, offres, avis)",
+              ++enriched,
+              toEnrich,
+            );
+          }
+
+          // Listing cards rarely carry the struck price; the product page's
+          // "Prix de comparaison" does.
+          const referencePrice = fetched?.comparisonPrice ?? listPrice;
+          const struck =
+            referencePrice !== undefined && referencePrice > price
+              ? referencePrice
+              : undefined;
+
+          return {
+            externalId: card.url,
+            title: card.title,
+            url: card.url,
+            imageUrl: card.imageUrl ?? undefined,
+            price,
+            listPrice: struck,
+            description: fetched?.description,
+            currency: "EUR",
+            availability: "in_stock",
+            merchantId: "cdiscount",
+            categoryHint: cdiscountCategoryHint(card.url),
+            details: fetched
+              ? {
+                  ...fetched.details,
+                  // Cdiscount's struck price is a "Prix de comparaison" it
+                  // chooses itself, not a former selling price.
+                  listPriceKind: struck !== undefined ? "rrp" : undefined,
+                }
+              : undefined,
+          };
+        },
+      );
+      deals.push(...found.filter((deal): deal is RawDeal => !!deal));
 
       return deals;
     }, this.getCloudflareBinding?.());

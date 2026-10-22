@@ -5,6 +5,7 @@ import {
   parseCardBadges,
   parseReviewer,
 } from "../src/api/collectors/aliexpressSignals.ts";
+import { mapWithConcurrency } from "../src/api/collectors/browser.ts";
 import { telecomTitle } from "../src/api/collectors/TelecomCollectors.ts";
 import {
   parseBouyguesPlans,
@@ -19,6 +20,7 @@ import {
 } from "../src/api/jobs/CollectDealsJob.ts";
 import { fitTitle } from "../src/api/services/CollectionService.ts";
 import { matchesSameModel } from "../src/api/services/crossSearch.ts";
+import { qualityIssue } from "../src/api/services/qualityGate.ts";
 import { ScoringService } from "../src/api/services/ScoringService.ts";
 
 // Shapes captured from the operators' real pages / API (trimmed).
@@ -324,5 +326,88 @@ describe("next scheduled collection", () => {
     expect(parisHour(nextCollectionTime(paris(23, 20)))).toBe(2);
     expect(parisHour(nextCollectionTime(paris(2, 10)))).toBe(5);
     expect(parisHour(nextCollectionTime(paris(5, 30)))).toBe(8);
+  });
+});
+
+describe("quality gate", () => {
+  test("bad reviews, bad sellers and low-end laptops are turned away", () => {
+    expect(
+      qualityIssue({
+        title: "Robot aspirateur",
+        sourceId: "amazon",
+        productRating: 3.6,
+        productReviewCount: 120,
+      }),
+    ).toMatch(/produit mal noté/);
+    expect(
+      qualityIssue({
+        title: "Chaussures",
+        sourceId: "cdiscount",
+        soldByMerchant: false,
+        sellerRating: 2.7,
+        sellerSalesCount: 7354,
+      }),
+    ).toMatch(/vendeur mal noté/);
+    expect(
+      qualityIssue({
+        title: "Chaussures",
+        sourceId: "cdiscount",
+        soldByMerchant: false,
+        sellerRating: 4.8,
+        sellerSalesCount: 12,
+      }),
+    ).toMatch(/trop peu de ventes/);
+    expect(
+      qualityIssue({
+        title: 'PC Portable 14" Bvate - N4020, 8 Go RAM',
+        sourceId: "amazon",
+      }),
+    ).toMatch(/entrée de gamme/);
+    expect(
+      qualityIssue({
+        title: "110 V/220 V chaîne extérieure lumières LED",
+        sourceId: "aliexpress",
+      }),
+    ).toMatch(/sans marque/);
+  });
+
+  test("good offers and unknown facts pass", () => {
+    expect(
+      qualityIssue({
+        title: "Lenovo IdeaPad Slim 3 - Ryzen 3",
+        sourceId: "amazon",
+        productRating: 4.4,
+        productReviewCount: 900,
+        soldByMerchant: true,
+      }),
+    ).toBeUndefined();
+    // A rating on 3 reviews isn't enough to judge.
+    expect(
+      qualityIssue({
+        title: "Tapis",
+        sourceId: "cdiscount",
+        productRating: 3,
+        productReviewCount: 3,
+      }),
+    ).toBeUndefined();
+    expect(
+      qualityIssue({ title: "Sekiro", sourceId: "steam" }),
+    ).toBeUndefined();
+  });
+});
+
+describe("concurrency helper", () => {
+  test("keeps order and never runs more than the limit at once", async () => {
+    let running = 0;
+    let peak = 0;
+    const out = await mapWithConcurrency([5, 1, 4, 2, 3], 2, async (n) => {
+      running++;
+      peak = Math.max(peak, running);
+      await new Promise((resolve) => setTimeout(resolve, n * 5));
+      running--;
+      return n * 10;
+    });
+    expect(out).toEqual([50, 10, 40, 20, 30]);
+    expect(peak).toBe(2);
   });
 });

@@ -30,7 +30,9 @@ import type { DraftsController } from "../../api/controllers/DraftsController.ts
 import DealabsConnection from "../components/deals/DealabsConnection.tsx";
 import DealAnalysis from "../components/deals/DealAnalysis.tsx";
 import DealImage from "../components/deals/DealImage.tsx";
+import KeepaChart from "../components/deals/KeepaChart.tsx";
 import PriceHistoryPanel from "../components/deals/PriceHistoryPanel.tsx";
+import StoreHistoryChart from "../components/deals/StoreHistoryChart.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
 import { EmptyState } from "../components/ui/States.tsx";
@@ -597,7 +599,21 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
               </Alert>
             ) : null}
 
-            <DealAnalysis deal={deal} analysis={stats.analysis} />
+            <DealAnalysis
+              deal={deal}
+              analysis={stats.analysis}
+              heat={stats.heat}
+            />
+
+            {stats.keepa ? (
+              <KeepaChart
+                asin={stats.keepa.asin}
+                sameProductOnAmazon={stats.keepa.sameProductOnAmazon}
+                title={deal.title}
+              />
+            ) : (
+              <StoreHistoryChart deal={deal} />
+            )}
 
             <Group gap="sm">
               <Button

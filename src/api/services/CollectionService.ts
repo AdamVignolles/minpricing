@@ -5,7 +5,12 @@ import { $repository } from "alepha/orm";
 
 import { AliExpressCollector } from "../collectors/AliExpressCollector.ts";
 import { AmazonCollector } from "../collectors/AmazonCollector.ts";
-import type { CloudflareBrowserBinding } from "../collectors/browser.ts";
+import { AmazonWatchCollector } from "../collectors/AmazonWatchCollector.ts";
+import {
+  type CloudflareBrowserBinding,
+  mapWithConcurrency,
+} from "../collectors/browser.ts";
+import { CarrefourCollector } from "../collectors/CarrefourCollector.ts";
 import { CdiscountCollector } from "../collectors/CdiscountCollector.ts";
 import type {
   DealSource,
@@ -13,27 +18,75 @@ import type {
   RawDeal,
 } from "../collectors/DealSource.ts";
 import { ManualCollector } from "../collectors/ManualCollector.ts";
+import { RelaunchCollector } from "../collectors/RelaunchCollector.ts";
 import { SteamCollector } from "../collectors/SteamCollector.ts";
+import {
+  CastoramaCollector,
+  EpicCollector,
+  FootLockerCollector,
+  FreeGamesCollector,
+  GogCollector,
+  GrosbillCollector,
+  LeclercCollector,
+  LenovoCollector,
+  ItJustGoodCollector,
+  JoybuyCollector,
+  NikeCollector,
+  IkeaCollector,
+  LidlCollector,
+  NintendoCollector,
+  PlayStationCollector,
+  XboxCollector,
+} from "../collectors/StoreCollectors.ts";
 import {
   BouyguesCollector,
   FreeCollector,
   OrangeCollector,
   SfrCollector,
+  SoshCollector,
 } from "../collectors/TelecomCollectors.ts";
 import { dealEntity } from "../entities/Deal.ts";
 import { sourceEntity } from "../entities/Source.ts";
 import { trackedProductEntity } from "../entities/TrackedProduct.ts";
+import { AmazonWatchService } from "./AmazonWatchService.ts";
 import { AutoPublishService } from "./AutoPublishService.ts";
 import { CategorizationService } from "./CategorizationService.ts";
 import { CollectionProgressService } from "./CollectionProgressService.ts";
 import { DealabsDraftService } from "./DealabsDraftService.ts";
 import { DealabsHistoryService } from "./DealabsHistoryService.ts";
 import { DEFAULT_MERCHANT_BY_SOURCE } from "./DealTypes.ts";
+import { freshnessOnUpdate } from "./freshness.ts";
+import { predictDealHeat } from "./heatPrediction.ts";
+import { HotWatchlistService } from "./HotWatchlistService.ts";
 import { IdealoReferenceService } from "./IdealoReferenceService.ts";
 import { ItadService } from "./ItadService.ts";
 import { MarketReferenceService } from "./MarketReferenceService.ts";
+import { PriceSeriesService } from "./PriceSeriesService.ts";
 import { PricingService } from "./PricingService.ts";
-import { ScoringService, type SourceReliability } from "./ScoringService.ts";
+import { qualityIssue } from "./qualityGate.ts";
+import { sameListingKey } from "./sameListing.ts";
+import {
+  MIN_VISIBLE_SCORE,
+  ScoringService,
+  type SourceReliability,
+} from "./ScoringService.ts";
+
+/** Sources that open many browser pages: started first in a run. */
+const HEAVY_SOURCES = [
+  "amazon",
+  "cdiscount",
+  "aliexpress",
+  "carrefour",
+  "relances",
+  "amazon-watch",
+];
+
+/** Top-potential deals whose Dealabs status is re-checked each run. */
+const TOP_LIVE_CHECKS = 20;
+const TOP_LIVE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+/** A deal unlisted for this long is considered over (see `expireUnseen`). */
+const EXPIRE_AFTER_MS = 48 * 60 * 60 * 1000;
 
 /** `Deal.title` limit (see the entity). */
 const TITLE_MAX = 300;
@@ -57,7 +110,11 @@ export interface CollectionSummary {
   sourceId: string;
   collected: number;
   created: number;
+  /** Of those, how many are visible (score ≥ MIN_VISIBLE_SCORE). */
+  createdVisible?: number;
   updated: number;
+  /** Offers turned away by the quality gate (bad reviews, bad seller…). */
+  rejected?: number;
   error?: string;
 }
 
@@ -98,6 +155,9 @@ export class CollectionService {
   protected marketReference = $inject(MarketReferenceService);
   protected dealabsHistory = $inject(DealabsHistoryService);
   protected itad = $inject(ItadService);
+  protected priceSeries = $inject(PriceSeriesService);
+  protected hotWatchlist = $inject(HotWatchlistService);
+  protected amazonWatch = $inject(AmazonWatchService);
   protected progress = $inject(CollectionProgressService);
   protected autoPublish = $inject(AutoPublishService);
 
@@ -165,7 +225,7 @@ export class CollectionService {
       }),
       // Product pages opened per run (each one is a request Amazon may
       // flag): shared round-robin across the collections above.
-      AMAZON_DEALS_LIMIT: z.number().default(60),
+      AMAZON_DEALS_LIMIT: z.number().default(200),
       CDISCOUNT_HOME_URL: z.text({
         // Homepage "Bons plans" carousel (~8 cards) and the soldes page
         // (~32 cards, no pagination), plus Cdiscount's category hubs —
@@ -184,9 +244,13 @@ export class CollectionService {
           "https://www.cdiscount.com/electromenager/v-110-0.html",
           "https://www.cdiscount.com/auto/v-133-0.html",
           "https://www.cdiscount.com/vin-alimentaire/v-127-1.html",
+          // Computers: known brands with Cdiscount's "prix le + bas sur
+          // 30 j" (the most trusted reference there is).
+          "https://www.cdiscount.com/informatique/v-107-0.html",
+          "https://www.cdiscount.com/informatique/ordinateurs-pc-portables/v-10709-10709.html",
         ].join(","),
       }),
-      CDISCOUNT_DEALS_LIMIT: z.number().default(90),
+      CDISCOUNT_DEALS_LIMIT: z.number().default(200),
       ALIEXPRESS_DEALS_URL: z.text({
         // Deal du Jour, plus best-selling phones, PCs and tablets shipped
         // from France: where AliExpress beats French retailers on branded
@@ -199,7 +263,11 @@ export class CollectionService {
           ),
         ].join(","),
       }),
-      ALIEXPRESS_DEALS_LIMIT: z.number().default(40),
+      ALIEXPRESS_DEALS_LIMIT: z.number().default(200),
+      // Sources collected at the same time. Each heavy one runs its own
+      // headless browser: 3 is comfortable for a desktop and for
+      // Cloudflare's Browser Rendering concurrency.
+      COLLECT_SOURCE_CONCURRENCY: z.number().default(3),
     }),
   );
 
@@ -225,6 +293,34 @@ export class CollectionService {
     free: new FreeCollector(),
     bouygues: new BouyguesCollector(),
     sfr: new SfrCollector(),
+    sosh: new SoshCollector(),
+    epic: new EpicCollector(),
+    gog: new GogCollector(),
+    nintendo: new NintendoCollector(),
+    playstation: new PlayStationCollector(),
+    xbox: new XboxCollector(),
+    lidl: new LidlCollector(),
+    ikea: new IkeaCollector(),
+    freegames: new FreeGamesCollector(),
+    leclerc: new LeclercCollector(),
+    carrefour: new CarrefourCollector(() => this.cloudflareBrowserBinding()),
+    grosbill: new GrosbillCollector(),
+    nike: new NikeCollector(),
+    footlocker: new FootLockerCollector(),
+    castorama: new CastoramaCollector(),
+    "amazon-watch": new AmazonWatchCollector(
+      this.amazonWatch,
+      new AmazonCollector([], 0, () => this.cloudflareBrowserBinding()),
+      () => this.cloudflareBrowserBinding(),
+    ),
+    relances: new RelaunchCollector(
+      this.hotWatchlist,
+      new AmazonCollector([], 0, () => this.cloudflareBrowserBinding()),
+      () => this.cloudflareBrowserBinding(),
+    ),
+    lenovo: new LenovoCollector(),
+    itjustgood: new ItJustGoodCollector(),
+    joybuy: new JoybuyCollector(),
   };
 
   /**
@@ -265,12 +361,26 @@ export class CollectionService {
 
     const summaries: CollectionSummary[] = [];
     try {
-      for (const source of sources) {
-        await this.progress.sourceStarted(source.id);
-        const summary = await this.runOne(source.id);
-        summaries.push(summary);
-        await this.progress.sourceFinished(source.id, summary);
-      }
+      // Sources are independent sites: run several at once instead of one
+      // after the other (that alone took a run from ~25 min to the length
+      // of the slowest source). Heaviest first, so they don't end up last.
+      const ordered = [...sources].sort(
+        (a, b) =>
+          (HEAVY_SOURCES.indexOf(b.id) >= 0 ? 1 : 0) -
+          (HEAVY_SOURCES.indexOf(a.id) >= 0 ? 1 : 0),
+      );
+      await mapWithConcurrency(
+        ordered,
+        this.env.COLLECT_SOURCE_CONCURRENCY,
+        async (source) => {
+          await this.progress.sourceStarted(source.id);
+          const summary = await this.runOne(source.id);
+          summaries.push(summary);
+          await this.progress.sourceFinished(source.id, summary);
+        },
+      );
+      await this.expireUnseen(summaries);
+      await this.refreshTopOnDealabs(sources);
       if (this.autoPublish.enabled) {
         await this.publishBestDeals(runStartedAt);
       }
@@ -280,6 +390,69 @@ export class CollectionService {
     }
     await this.progress.finish();
     return summaries;
+  }
+
+  /**
+   * A deal no source has listed for {@link EXPIRE_AFTER_MS} is over (sold
+   * out, back to full price): mark it expired so the console only shows
+   * live offers with their current score. Only for sources that ran
+   * without error this time — a failed run proves nothing. Seen again
+   * later, the upsert makes it active again.
+   */
+  protected async expireUnseen(summaries: CollectionSummary[]): Promise<void> {
+    const cutoff = new Date(
+      new Date(this.dateTime.nowISOString()).getTime() - EXPIRE_AFTER_MS,
+    ).toISOString();
+    for (const summary of summaries) {
+      if (summary.error || summary.sourceId === "manual") continue;
+      try {
+        const expired = await this.deals.updateMany(
+          {
+            and: [
+              { sourceId: { eq: summary.sourceId } },
+              { status: { eq: "active" } },
+              { lastSeenAt: { lt: cutoff } },
+            ],
+          },
+          { status: "expired" },
+        );
+        if (expired.length > 0) {
+          this.progress.note(
+            `${expired.length} deal(s) plus listés depuis 48 h : expirés`,
+            summary.sourceId,
+          );
+        }
+      } catch (error) {
+        this.log.warn("Could not expire unseen deals", {
+          sourceId: summary.sourceId,
+          error,
+        });
+      }
+    }
+  }
+
+  /**
+   * "Already on Dealabs?" for the deals most likely to be posted next (top
+   * Dealabs potential), re-checked every 6 h instead of every 24 h — the
+   * greyed cards are only as good as that check. Then rescored: a fresh
+   * history changes the prediction too.
+   */
+  protected async refreshTopOnDealabs(
+    sources: Array<{ id: string; type: SourceReliability }>,
+  ): Promise<void> {
+    const ids = await this.dealabsHistory
+      .refreshTop(TOP_LIVE_CHECKS, TOP_LIVE_MAX_AGE_MS)
+      .catch(() => [] as string[]);
+    const types = new Map(sources.map((source) => [source.id, source.type]));
+    for (const id of ids) {
+      const deal = await this.deals.findById(id).catch(() => null);
+      if (deal) await this.rescore(id, types.get(deal.sourceId) ?? "scrape");
+    }
+    if (ids.length) {
+      this.progress.note(
+        `${ids.length} deal(s) à fort potentiel revérifiés sur Dealabs`,
+      );
+    }
   }
 
   /**
@@ -365,7 +538,10 @@ export class CollectionService {
       }
 
       let created = 0;
+      const createdIds: string[] = [];
       let updated = 0;
+      let rejected = 0;
+      const rejectedReasons = new Map<string, number>();
       for (const [index, rawDeal] of rawDeals.entries()) {
         step(
           "Enregistrement et notation des offres",
@@ -375,13 +551,19 @@ export class CollectionService {
         // One offer that can't be saved (unexpected data from the site)
         // is skipped and reported, instead of failing the whole source.
         try {
-          const wasCreated = await this.upsertDeal(
+          const outcome = await this.upsertDeal(
             source.id,
             source.type,
             rawDeal,
           );
-          if (wasCreated) {
+          if (outcome.result === "rejected") {
+            rejected++;
+            // Group by kind of reason ("vendeur mal noté", not the rating).
+            const kind = outcome.reason.replace(/\s*\(.*\)$/, "");
+            rejectedReasons.set(kind, (rejectedReasons.get(kind) ?? 0) + 1);
+          } else if (outcome.result === "created") {
             created++;
+            createdIds.push(outcome.dealId);
           } else {
             updated++;
           }
@@ -417,11 +599,28 @@ export class CollectionService {
         ...(await this.itad.refreshStale(source.id, (done, total) =>
           step("Plus bas historique (IsThereAnyDeal)", done, total),
         )),
+        ...(await this.priceSeries.refreshLows(source.id)),
       ]);
       for (const [index, dealId] of [...checked].entries()) {
         step("Mise à jour des notes", index + 1, checked.size);
         await this.rescore(dealId, source.type);
       }
+
+      // New deals the console actually shows (score ≥ 40 after the
+      // rescoring above): "9 nouvelles" alone read as 9 deals to look at.
+      const createdVisible = createdIds.length
+        ? (
+            await this.deals.findMany({
+              where: {
+                and: [
+                  { id: { inArray: createdIds } },
+                  { status: { eq: "active" } },
+                  { score: { gte: MIN_VISIBLE_SCORE } },
+                ],
+              },
+            })
+          ).length
+        : 0;
 
       await this.sources.updateById(source.id, {
         lastRunAt: now,
@@ -431,11 +630,23 @@ export class CollectionService {
         lastError: "",
       });
 
+      if (rejected > 0) {
+        this.progress.note(
+          `${rejected} offre(s) écartée(s) : ${[...rejectedReasons]
+            .sort((a, b) => b[1] - a[1])
+            .map(([reason, count]) => `${reason} (${count})`)
+            .join(", ")}.`,
+          source.id,
+        );
+      }
+
       return {
         sourceId: source.id,
         collected: rawDeals.length,
         created,
+        createdVisible,
         updated,
+        rejected,
       };
     } catch (error) {
       const fullMessage =
@@ -490,6 +701,7 @@ export class CollectionService {
       needsDetails: (externalId) => !fresh.has(externalId),
       progress: (step, done, total) =>
         this.progress.step(sourceId, step, done, total),
+      worthFetching: (title) => !qualityIssue({ title, sourceId }),
     };
   }
 
@@ -508,14 +720,46 @@ export class CollectionService {
       deal.currentPrice,
       deal.referencePrice,
     );
-    const { score } = this.scoring.evaluate(deal, stats, sourceType);
-    await this.deals.updateById(deal.id, { score });
+    const evaluation = this.scoring.evaluate(deal, stats, sourceType);
+    const heat = predictDealHeat(deal, evaluation);
+    await this.deals.updateById(deal.id, {
+      score: evaluation.score,
+      hotChance: heat.chance,
+      hotReasons: JSON.stringify(heat.reasons),
+    });
   }
 
   /** Collapses whitespace and fits an error message in `Source.lastError`. */
   protected truncateError(message: string, max = 255): string {
     const flat = message.replace(/\s+/g, " ").trim();
     return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+  }
+
+  /** An existing deal of this source that is the same listing (see sameListing.ts). */
+  protected async sameListingSibling(
+    sourceId: string,
+    title: string,
+    price: number,
+  ) {
+    const key = sameListingKey({ sourceId, title, currentPrice: price });
+    const near = await this.deals.findMany({
+      where: {
+        and: [
+          { sourceId: { eq: sourceId } },
+          { currentPrice: { gte: Math.floor(price) - 1 } },
+          { currentPrice: { lte: Math.ceil(price) + 1 } },
+        ],
+      },
+      limit: 200,
+    });
+    return near.find(
+      (deal) =>
+        sameListingKey({
+          sourceId,
+          title: deal.title,
+          currentPrice: deal.currentPrice,
+        }) === key,
+    );
   }
 
   /**
@@ -552,7 +796,10 @@ export class CollectionService {
     sourceId: string,
     sourceType: SourceReliability,
     rawDeal: RawDeal,
-  ): Promise<boolean> {
+  ): Promise<
+    | { result: "created" | "updated"; dealId: string }
+    | { result: "rejected"; reason: string }
+  > {
     const now = this.dateTime.nowISOString();
     rawDeal = { ...rawDeal, title: fitTitle(rawDeal.title) };
 
@@ -564,6 +811,31 @@ export class CollectionService {
         ],
       },
     });
+
+    // Quality gate first: a badly rated product or seller is never a good
+    // deal. This run's facts when read, otherwise what's stored.
+    const reason = qualityIssue({
+      title: rawDeal.title,
+      sourceId,
+      productRating: rawDeal.details?.productRating ?? existing?.productRating,
+      productReviewCount:
+        rawDeal.details?.productReviewCount ?? existing?.productReviewCount,
+      soldByMerchant:
+        rawDeal.details?.soldByMerchant ?? existing?.soldByMerchant,
+      sellerRating: rawDeal.details?.sellerRating ?? existing?.sellerRating,
+      sellerSalesCount:
+        rawDeal.details?.sellerSalesCount ?? existing?.sellerSalesCount,
+      // A monthly plan's saving repeats every month: no euro floor.
+      price: rawDeal.billingPeriod ? undefined : rawDeal.price,
+      listPrice: rawDeal.billingPeriod ? undefined : rawDeal.listPrice,
+    });
+    if (reason) {
+      // Already stored: archive it so it leaves the console.
+      if (existing && existing.status !== "archived") {
+        await this.deals.updateById(existing.id, { status: "archived" });
+      }
+      return { result: "rejected", reason };
+    }
 
     // The merchant's own reference price is what a shopper compares
     // against, so that is what drives the badge. `oldPrice` (the price we
@@ -631,6 +903,11 @@ export class CollectionService {
         }
       : {};
 
+    // A new row for a product we already list (another listing of it — a
+    // colour, a re-listed ASIN) isn't news: it inherits that deal's date.
+    const sibling = existing
+      ? undefined
+      : await this.sameListingSibling(sourceId, rawDeal.title, rawDeal.price);
     const dealId = existing
       ? existing.id
       : (
@@ -651,6 +928,9 @@ export class CollectionService {
             billingPeriod: rawDeal.billingPeriod,
             firstSeenAt: now,
             lastSeenAt: now,
+            freshAt: sibling?.freshAt ?? sibling?.firstSeenAt ?? now,
+            freshReason: sibling?.freshReason ?? "new",
+            droppedFrom: sibling?.droppedFrom,
             status: "active",
             ...details,
           })
@@ -676,6 +956,12 @@ export class CollectionService {
         billingPeriod: rawDeal.billingPeriod,
         lastSeenAt: now,
         status: "active",
+        // "New" again only on a real price drop (see freshness.ts); a deal
+        // from before `freshAt` existed gets its first-seen date.
+        ...(existing.freshAt
+          ? {}
+          : { freshAt: existing.firstSeenAt, freshReason: "new" as const }),
+        ...freshnessOnUpdate(existing.currentPrice, rawDeal.price, now),
         ...details,
       });
     }
@@ -694,8 +980,11 @@ export class CollectionService {
     await this.rescore(dealId, sourceType);
 
     const deal = await this.deals.getById(dealId);
-    await this.drafts.maybeGenerateDraft(deal);
+    // No draft for a deal nobody should post.
+    if (deal.score >= MIN_VISIBLE_SCORE) {
+      await this.drafts.maybeGenerateDraft(deal);
+    }
 
-    return !existing;
+    return { result: existing ? "updated" : "created", dealId };
   }
 }
