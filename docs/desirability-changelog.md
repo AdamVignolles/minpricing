@@ -5,6 +5,18 @@ added to the heat model) and `config/collection.json` (Amazon/Cdiscount
 pages and caps), newest first. Written by the `deals-debrief` skill (every evening)
 or by hand.
 
+## v3 — 2026-10-26 — deals-debrief
+
+- Xiaomi 0 → 0.2. Marché : 56 fils, 45 % hot, médiane 74° ; aucun post à nous.
+- Mot-clé « ecran pc|moniteur|ecran gaming » 0.2 → 0.4 (pas de 0.2, mesuré
+  0.5). Marché : 43 fils, 53 % hot, médiane 193° ; aucun post à nous.
+- Nike reste à 0.4 (mesuré 0.6) : nos 5 posts récents sont tous sous 50°
+  (−37°, −29°, 29°, 13°, −30°), donc 0.2 sous la valeur mesurée.
+- Leçon ajoutée : périphériques gaming de niche au prix catalogue / clavier
+  importé (Model O 2 9°, Katar Pro 17°, GMMK 2 31°, GMMK 3 QWERTZ −14°).
+  Leçon Nike : preuve mise à jour.
+- Collection : non touchée (agent sources). Règles : aucun changement.
+
 ## 2026-10-24 — deals-debrief (leçons uniquement)
 
 - Leçon ajoutée : pas de PC portable 8 Go de RAM à partir de ~450 € (IdeaPad
