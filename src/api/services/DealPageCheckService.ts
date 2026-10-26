@@ -120,77 +120,87 @@ export class DealPageCheckService {
               })
               .catch(() => null);
             // Prices are often rendered after the first paint (GOG, Nike…).
-            await page.evaluate(
-              () => new Promise((done) => setTimeout(done, 4_000)),
-            );
-            const read = await page.evaluate(() => {
-              const offers: { price?: number; availability?: string }[] = [];
-              const visit = (node: unknown): void => {
-                if (!node || typeof node !== "object") return;
-                if (Array.isArray(node)) {
-                  node.forEach(visit);
-                  return;
+            // Wait on our side: an in-page timer dies with the page when the
+            // store redirects by script (age gate, locale, PSN/GOG).
+            const pause = (ms: number) =>
+              new Promise((done) => setTimeout(done, ms));
+            await pause(4_000);
+            const readPage = () =>
+              page.evaluate(() => {
+                const offers: { price?: number; availability?: string }[] = [];
+                const visit = (node: unknown): void => {
+                  if (!node || typeof node !== "object") return;
+                  if (Array.isArray(node)) {
+                    node.forEach(visit);
+                    return;
+                  }
+                  const record = node as Record<string, unknown>;
+                  if (
+                    "price" in record ||
+                    "lowPrice" in record ||
+                    "availability" in record
+                  ) {
+                    const value = Number(
+                      String(record.price ?? record.lowPrice ?? "").replace(
+                        ",",
+                        ".",
+                      ),
+                    );
+                    offers.push({
+                      price:
+                        Number.isFinite(value) && value > 0 ? value : undefined,
+                      availability:
+                        typeof record.availability === "string"
+                          ? record.availability
+                          : undefined,
+                    });
+                  }
+                  Object.values(record).forEach(visit);
+                };
+                for (const script of Array.from(
+                  document.querySelectorAll(
+                    'script[type="application/ld+json"]',
+                  ),
+                )) {
+                  try {
+                    visit(JSON.parse(script.textContent ?? ""));
+                  } catch {
+                    // Malformed JSON-LD: ignore.
+                  }
                 }
-                const record = node as Record<string, unknown>;
-                if (
-                  "price" in record ||
-                  "lowPrice" in record ||
-                  "availability" in record
-                ) {
-                  const value = Number(
-                    String(record.price ?? record.lowPrice ?? "").replace(
-                      ",",
-                      ".",
-                    ),
-                  );
-                  offers.push({
-                    price:
-                      Number.isFinite(value) && value > 0 ? value : undefined,
-                    availability:
-                      typeof record.availability === "string"
-                        ? record.availability
-                        : undefined,
-                  });
-                }
-                Object.values(record).forEach(visit);
-              };
-              for (const script of Array.from(
-                document.querySelectorAll('script[type="application/ld+json"]'),
-              )) {
-                try {
-                  visit(JSON.parse(script.textContent ?? ""));
-                } catch {
-                  // Malformed JSON-LD: ignore.
-                }
-              }
-              const metas = Array.from(
-                document.querySelectorAll(
-                  'meta[itemprop="price"], meta[property="product:price:amount"], meta[property="og:price:amount"]',
-                ),
-              )
-                .map((meta) =>
-                  Number(
-                    (meta.getAttribute("content") ?? "").replace(",", "."),
+                const metas = Array.from(
+                  document.querySelectorAll(
+                    'meta[itemprop="price"], meta[property="product:price:amount"], meta[property="og:price:amount"]',
                   ),
                 )
-                .filter((value) => Number.isFinite(value) && value > 0);
-              const availability =
-                offers.find((offer) => offer.availability)?.availability ??
-                document
-                  .querySelector('[itemprop="availability"]')
-                  ?.getAttribute("href") ??
-                undefined;
-              return {
-                title: document.title,
-                text: (document.body?.innerText ?? "").slice(0, 200_000),
-                structuredPrices: [
-                  ...offers
-                    .map((offer) => offer.price)
-                    .filter((price): price is number => price !== undefined),
-                  ...metas,
-                ],
-                availability,
-              };
+                  .map((meta) =>
+                    Number(
+                      (meta.getAttribute("content") ?? "").replace(",", "."),
+                    ),
+                  )
+                  .filter((value) => Number.isFinite(value) && value > 0);
+                const availability =
+                  offers.find((offer) => offer.availability)?.availability ??
+                  document
+                    .querySelector('[itemprop="availability"]')
+                    ?.getAttribute("href") ??
+                  undefined;
+                return {
+                  title: document.title,
+                  text: (document.body?.innerText ?? "").slice(0, 200_000),
+                  structuredPrices: [
+                    ...offers
+                      .map((offer) => offer.price)
+                      .filter((price): price is number => price !== undefined),
+                    ...metas,
+                  ],
+                  availability,
+                };
+              });
+            // A late redirect destroys the context mid-read: read the new page.
+            const read = await readPage().catch(async () => {
+              await pause(4_000);
+              return readPage();
             });
             return {
               status: response?.status() ?? 0,

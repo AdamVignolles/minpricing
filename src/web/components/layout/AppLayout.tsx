@@ -28,7 +28,7 @@ import {
 } from "./CollectionProgressAside.tsx";
 
 /**
- * The five places the application can be. Keeping them in one array is what
+ * The places the application can be. Keeping them in one array is what
  * guarantees the desktop rail and the mobile drawer can never drift apart.
  *
  * `exact` exists only for "/" — every other route is a prefix of its own
@@ -44,6 +44,7 @@ const NAV: Array<{
   { href: "/", label: "Tableau de bord", icon: "dashboard", exact: true },
   { href: "/deals", label: "Bons plans", icon: "tag" },
   { href: "/stats", label: "Statistiques", icon: "chart" },
+  { href: "/agents", label: "Agents", icon: "bolt" },
   { href: "/admin", label: "Administration", icon: "settings" },
 ];
 

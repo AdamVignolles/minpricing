@@ -3,6 +3,13 @@
 #           → Notion plan log, then final log (Haiku)
 #  Saturday: Notion temperature refresh only (Haiku)
 #  Sunday:   weekly review (Sonnet), code proposal if any, then refresh
+#  Every day: deals-sources (Sonnet) compares what each deal source yields
+#  with what goes hot on Dealabs, tunes config/collection.json (how often
+#  each source runs, unproductive ones off, Amazon/Cdiscount pages), probes
+#  new shops and writes source proposals — while the publications wait
+#  Every day, last: deals-debrief (Sonnet) reviews our Dealabs profile and
+#  comments, adjusts config/selection-lessons.md, desirability.json and
+#  small steps of publish-rules.json, reports to Notion
 # Logs: data/agents/evening-<date>.log
 
 $ErrorActionPreference = "Continue"
@@ -27,6 +34,21 @@ if (-not $claude) {
 }
 if (-not $claude) { Log "ERREUR: claude.exe introuvable"; exit 1 }
 
+# A dev server stuck after a code reload ("Dev server has no app loaded")
+# still holds its port but answers 500: kill it so it gets restarted.
+try {
+  Invoke-WebRequest -UseBasicParsing -Uri "http://localhost:5173/api/auth/login" -Method Post -ContentType "application/json" `
+    -Body '{"username":"x","password":"x"}' -TimeoutSec 20 | Out-Null
+} catch {
+  $code = $_.Exception.Response.StatusCode.value__
+  if ($code -ge 500) {
+    Log "serveur bloqué (HTTP $code) : redémarrage"
+    Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+      Where-Object { $_.CommandLine -match 'alepha.*\bdev\b|npm-cli\.js" run dev' } |
+      ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    Start-Sleep -Seconds 3
+  }
+}
 $server = node scripts/agents/dealradar.mjs ensure-server 2>&1
 Log "server: $server"
 if ($server -notmatch '"running":true') { Log "ERREUR: serveur DealRadar injoignable"; exit 1 }
@@ -47,7 +69,11 @@ if ($day -eq 0) {
   }
 }
 
-if ($day -ge 1 -and $day -le 5) {
+$sourcesTools = "Read,Write,Edit,Glob,$bridge,$notion"
+$sourcesDone = $false
+$alreadyDone = Test-Path (Join-Path $dir "published-$today.json")
+if ($alreadyDone) { Log "publications du jour déjà faites (published-$today.json) : pas de nouvelle sélection" }
+if ($day -ge 1 -and $day -le 5 -and -not $alreadyDone) {
   Claude "/deals-select" "sonnet" "Read,Write,$bridge,$notion"
   $queue = Join-Path $dir "queue-$today.json"
   if (Test-Path $queue) {
@@ -58,6 +84,10 @@ if ($day -ge 1 -and $day -le 5) {
       -RedirectStandardOutput (Join-Path $dir "publish-$today.out") -RedirectStandardError (Join-Path $dir "publish-$today.err")
     for ($i = 0; $i -lt 60 -and -not (Test-Path $plan); $i++) { Start-Sleep -Seconds 2 }
     if (Test-Path $plan) { Log "plan: $(Get-Content $plan -Raw)"; Claude "/deals-log plan" "haiku" "Read,$bridge,$notion" }
+    # The posts wait for their random times (17:30-21:30): review the
+    # sources meanwhile.
+    Claude "/deals-sources" "sonnet" $sourcesTools
+    $sourcesDone = $true
     $publisher.WaitForExit()
     Log "publish-queue terminé (code $($publisher.ExitCode))"
   } else {
@@ -65,5 +95,10 @@ if ($day -ge 1 -and $day -le 5) {
   }
 }
 
+if (-not $sourcesDone) { Claude "/deals-sources" "sonnet" $sourcesTools }
 Claude "/deals-log final" "haiku" "Read,$bridge,$notion"
+# Every day, after publishing: review our Dealabs profile (temperatures,
+# comments), adjust lessons / desirability / small rule steps,
+# and write the analysis to Notion.
+Claude "/deals-debrief" "sonnet" "Read,Write,Edit,$bridge,$notion"
 Log "fin"

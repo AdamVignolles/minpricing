@@ -5,6 +5,7 @@ import { HttpError } from "alepha/server";
 import { $client } from "alepha/server/links";
 
 import type { AdminController } from "../api/controllers/AdminController.ts";
+import type { AgentsController } from "../api/controllers/AgentsController.ts";
 import type { AuthController } from "../api/controllers/AuthController.ts";
 import type { CatalogController } from "../api/controllers/CatalogController.ts";
 import type { DealsController } from "../api/controllers/DealsController.ts";
@@ -51,6 +52,7 @@ export class AppRouter {
   admin = $client<AdminController>();
   stats = $client<StatsController>();
   auth = $client<AuthController>();
+  agents = $client<AgentsController>();
 
   head = $head({
     title: "DealRadar",
@@ -78,6 +80,7 @@ export class AppRouter {
       this.dealsList,
       this.dealDetail,
       this.statsPage,
+      this.agentsPage,
       this.adminPage,
     ],
     // This app has no public part (see `AGENTS.md`): every action behind
@@ -160,18 +163,50 @@ export class AppRouter {
     loader: async () => ({ overview: await this.stats.overview({}) }),
   });
 
+  /**
+   * What the local agents did (`data/agents/`, `config/`): their reports,
+   * the weights they select with, the lessons they learned. `report`
+   * picks the report shown in the Rapports tab (default: the newest).
+   */
+  agentsPage = $page({
+    path: "/agents",
+    name: "agents",
+    schema: {
+      query: z.object({
+        tab: z.text().optional(),
+        report: z.text().optional(),
+      }),
+    },
+    lazy: () => import("./pages/AgentsPage.tsx"),
+    loader: async ({ query }) => {
+      const [overview, reports, categories] = await Promise.all([
+        this.agents.agentsOverview({}),
+        this.agents.agentReportList({}),
+        this.catalog.listCategories({}),
+      ]);
+      const reportId = query.report ?? reports[0]?.id;
+      const report = reportId
+        ? await this.agents
+            .agentReportDetail({ params: { id: reportId } })
+            .catch(() => undefined)
+        : undefined;
+      return { overview, reports, report, categories, tab: query.tab };
+    },
+  });
+
   adminPage = $page({
     path: "/admin",
     name: "admin",
+    schema: { query: z.object({ tab: z.text().optional() }) },
     lazy: () => import("./pages/AdminPage.tsx"),
-    loader: async () => {
+    loader: async ({ query }) => {
       const [stats, products, runs, sources] = await Promise.all([
         this.admin.stats({}),
         this.products.listProducts({ query: {} }),
-        this.admin.runs({ query: { size: 20 } }),
+        this.admin.runs({ query: { size: 40 } }),
         this.sources.listSources({}),
       ]);
-      return { stats, products, runs, sources };
+      return { stats, products, runs, sources, tab: query.tab };
     },
   });
 }

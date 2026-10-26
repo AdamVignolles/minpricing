@@ -1,8 +1,8 @@
 {
-  "$comment": "Auto-publish rules. Applied by scripts/agents/dealradar.mjs (shortlist, random plan) and the deals-select skill (judgment veto). Tuned weekly by the deals-weekly skill within `bounds` and `learning` — every change is logged in docs/publish-rules-changelog.md, the previous version is kept in config/publish-rules.previous.json for rollback.",
-  "version": 2,
-  "updatedAt": "2026-10-21",
-  "updatedBy": "Adam (random volume and times, no weekend)",
+  "$comment": "Auto-publish rules. Applied by scripts/agents/dealradar.mjs (shortlist, random plan) and the deals-select skill (judgment veto). Tuned weekly by the deals-weekly skill within `bounds` and `learning`, never against `adamPreferences` — every change is logged in docs/publish-rules-changelog.md, the previous version is kept in config/publish-rules.previous.json for rollback.",
+  "version": 3,
+  "updatedAt": "2026-10-23",
+  "updatedBy": "Adam (fewer games, more PC / tech / Amazon)",
   "publishDays": [1, 2, 3, 4, 5],
   "perDay": { "min": 2, "max": 5 },
   "window": { "start": "17:30", "end": "21:30" },
@@ -10,14 +10,36 @@
   "minScore": 65,
   "minHotChance": 20,
   "maxPerCategoryPerDay": 2,
+  "categoryCaps": { "video-games": 1 },
+  "shortlistPerCategory": 3,
   "excludedSources": ["aliexpress", "itjustgood"],
-  "categoryAdjust": {},
-  "sourceAdjust": {},
+  "categoryAdjust": {
+    "video-games": -12,
+    "computing": 15,
+    "phones": 10,
+    "audio": 10,
+    "tv-photo": 10,
+    "diy": 10,
+    "appliances": 5
+  },
+  "sourceAdjust": {
+    "amazon": 10,
+    "amazon-watch": 10,
+    "cdiscount": 5,
+    "lenovo": 5
+  },
   "priceBandAdjust": { "<30": 0, "30-100": 0, "100-300": 0, ">300": 0 },
+  "adamPreferences": {
+    "$comment": "Adam's choices: the weekly review may make these stronger, never weaker. Only Adam changes them.",
+    "categoryAdjustMax": { "video-games": -10 },
+    "categoryAdjustMin": { "computing": 10 },
+    "sourceAdjustMin": { "amazon": 5, "amazon-watch": 5 },
+    "categoryCapsMax": { "video-games": 1 }
+  },
   "bounds": {
     "minScore": [50, 85],
-    "minHotChance": [20, 60],
-    "adjust": [-15, 15],
+    "minHotChance": [15, 60],
+    "adjust": [-25, 25],
     "perDayMax": [2, 5],
     "maxPerCategoryPerDay": [1, 3]
   },

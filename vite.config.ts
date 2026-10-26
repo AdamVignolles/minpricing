@@ -23,6 +23,10 @@ export default defineConfig({
         "**/docs/**",
         "**/scripts/**",
         "**/dist/**",
+        // Rewritten by the local agents every evening; the app re-reads the
+        // JSON it needs (desirability, collection) on its own.
+        "**/config/**",
+        "**/.claude/**",
       ],
     },
   },

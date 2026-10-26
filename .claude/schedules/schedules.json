@@ -1,5 +1,5 @@
 {
-  "$comment": "Registry of Claude cloud routines. Managed by the schedule-manager agent. Notion 'Planifications' is the on/off switch; this file is the local source of truth for config and prompts.",
+  "$comment": "Registry of Claude cloud routines. Managed by the schedule-manager agent. Notion 'Planifications' is the on/off switch; this file is the local source of truth for config and prompts. localTasks: Windows Task Scheduler jobs on this PC (not cloud routines — no Notion switch, no RemoteTrigger); edit the script, not a routine.",
   "timezone": "Europe/Paris",
   "notion": {
     "hub": "https://app.notion.com/p/400e672efaf08130a1ccc3995c887d31",
@@ -34,7 +34,10 @@
       "cron_utc": "0 7 * * *",
       "agent": "email-manager",
       "model": "claude-sonnet-5-5",
-      "connectors": ["Gmail", "Notion"],
+      "connectors": [
+        "Gmail",
+        "Notion"
+      ],
       "prompt_file": "gmail-morning.md",
       "enabled": true
     },
@@ -47,8 +50,70 @@
       "cron_utc": "15 7 * * *",
       "agent": "calendar-manager",
       "model": "claude-sonnet-5-5",
-      "connectors": ["Google-Calendar", "Gmail", "Notion"],
+      "connectors": [
+        "Google-Calendar",
+        "Gmail",
+        "Notion"
+      ],
       "prompt_file": "calendar-morning.md",
+      "enabled": true
+    }
+  ],
+  "localTasks": [
+    {
+      "name": "DealRadar - soirée",
+      "scheduler": "Windows Task Scheduler",
+      "local_time": "17:00 every day (Paris)",
+      "script": "scripts/agents/evening.ps1",
+      "log": "data/agents/evening-<date>.log",
+      "steps": [
+        {
+          "when": "Sunday",
+          "skill": "deals-weekly",
+          "agent": "results-reviewer",
+          "model": "sonnet",
+          "what": "weekly review of publish-rules.json"
+        },
+        {
+          "when": "Sunday, if a proposal exists",
+          "skill": "deals-code",
+          "agent": "dev-agent + code-reviewer",
+          "model": "sonnet",
+          "what": "implements data/agents/code-proposal-*.md on a branch"
+        },
+        {
+          "when": "Mon–Fri",
+          "skill": "deals-select",
+          "agent": "deal-selector",
+          "model": "sonnet",
+          "what": "picks tonight’s deals, then random-time publishing 17:30–21:30 (Node, no tokens)"
+        },
+        {
+          "when": "Mon–Fri, after the draw",
+          "skill": "deals-log plan",
+          "model": "haiku",
+          "what": "Notion plan log"
+        },
+        {
+          "when": "every day (during publishing on weekdays)",
+          "skill": "deals-sources",
+          "agent": "sources-scout",
+          "model": "sonnet",
+          "what": "sources review → config/collection.json, probes, source proposals"
+        },
+        {
+          "when": "every day",
+          "skill": "deals-log final",
+          "model": "haiku",
+          "what": "Notion results and temperatures"
+        },
+        {
+          "when": "every day, last",
+          "skill": "deals-debrief",
+          "model": "sonnet",
+          "what": "Dealabs profile and comments → lessons, desirability, small rule steps"
+        }
+      ],
       "enabled": true
     }
   ]

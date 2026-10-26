@@ -17,6 +17,11 @@ import {
 import { $adminSession } from "../services/AdminAuth.ts";
 import { CollectionProgressService } from "../services/CollectionProgressService.ts";
 import { CollectionService } from "../services/CollectionService.ts";
+import {
+  lastLoggedRuns,
+  loadCollectionTuning,
+  SOURCE_EVERY_HOURS_BOUNDS,
+} from "../services/collectionTuning.ts";
 import type { StoredDealabsDeal } from "../services/DealabsHistoryService.ts";
 import {
   type DealabsThread,
@@ -65,15 +70,27 @@ export class AdminController {
         draftsPending: z.number(),
         trackedProducts: z.number(),
         priceObservations: z.number(),
+        visibleDeals: z.number(),
+        nextRunAt: z.datetime(),
+        running: z.boolean(),
         sources: z.array(
           z.object({
             id: z.text(),
             name: z.text(),
+            type: z.text(),
             enabled: z.boolean(),
             lastRunAt: z.datetime().optional(),
             lastSuccessAt: z.datetime().optional(),
             lastErrorAt: z.datetime().optional(),
             lastError: z.text().optional(),
+            activeDeals: z.number(),
+            visibleDeals: z.number(),
+            scheduled: z.boolean(),
+            everyHours: z.number(),
+            locked: z.boolean(),
+            lastDurationMs: z.number().optional(),
+            lastCollected: z.number().optional(),
+            lastNewVisible: z.number().optional(),
           }),
         ),
       }),
@@ -95,13 +112,64 @@ export class AdminController {
         this.sources.findMany(),
       ]);
 
+      // Per source: live deals, the agents' schedule (config/collection.json)
+      // and the latest logged run (time, yield) — what the admin needs to
+      // tell a healthy source from a useless or slow one.
+      const tuning = loadCollectionTuning();
+      const logged = lastLoggedRuns();
+      const counts = await Promise.all(
+        sources.map((source) =>
+          Promise.all([
+            this.deals.count({
+              and: [
+                { sourceId: { eq: source.id } },
+                { status: { eq: "active" } },
+              ],
+            }),
+            this.deals.count({
+              and: [
+                { sourceId: { eq: source.id } },
+                { status: { eq: "active" } },
+                { score: { gte: MIN_VISIBLE_SCORE } },
+              ],
+            }),
+          ]),
+        ),
+      );
+
       return {
         activeDeals,
         expiredDeals,
         draftsPending,
         trackedProducts,
         priceObservations,
-        sources,
+        visibleDeals: counts.reduce((sum, [, visible]) => sum + visible, 0),
+        nextRunAt: nextCollectionTime(new Date()).toISOString(),
+        running: await this.progress.isRunning(),
+        sources: sources.map((source, index) => {
+          const schedule = tuning.sources?.[source.id];
+          const run = logged.get(source.id);
+          return {
+            ...source,
+            activeDeals: counts[index][0],
+            visibleDeals: counts[index][1],
+            locked: tuning.lockedSources?.includes(source.id) ?? false,
+            scheduled:
+              schedule?.enabled !== false ||
+              (tuning.lockedSources?.includes(source.id) ?? false),
+            everyHours: Math.min(
+              Math.max(schedule?.everyHours ?? 1, SOURCE_EVERY_HOURS_BOUNDS[0]),
+              SOURCE_EVERY_HOURS_BOUNDS[1],
+            ),
+            ...(run?.ms !== undefined ? { lastDurationMs: run.ms } : {}),
+            ...(run?.collected !== undefined
+              ? { lastCollected: run.collected }
+              : {}),
+            ...(run?.createdVisible !== undefined
+              ? { lastNewVisible: run.createdVisible }
+              : {}),
+          };
+        }),
       };
     },
   });
@@ -296,7 +364,9 @@ export class AdminController {
         hours: z.number().min(1).max(168).optional(),
         /** 0 = candidates only (the selector doesn't need the history). */
         days: z.number().min(0).max(60).optional(),
-        limit: z.number().min(1).max(100).optional(),
+        limit: z.number().min(1).max(200).optional(),
+        /** Best candidates kept per category, so one category can't fill the list. */
+        perCategory: z.number().min(1).max(50).optional(),
       }),
       response: z.object({
         generatedAt: z.text(),
@@ -417,6 +487,15 @@ export class AdminController {
           (a, b) =>
             (b.hotChance ?? 0) - (a.hotChance ?? 0) || b.score - a.score,
         )
+        // The heat model favours video games (Dealabs-wide base rates), so a
+        // plain top-N is all games: keep the best N of each category instead.
+        .filter((deal, _, sorted) => {
+          if (!query.perCategory) return true;
+          const sameCategory = sorted.filter(
+            (other) => other.categoryId === deal.categoryId,
+          );
+          return sameCategory.indexOf(deal) < query.perCategory;
+        })
         .slice(0, query.limit ?? 25)
         .map((deal) => ({
           id: deal.id,

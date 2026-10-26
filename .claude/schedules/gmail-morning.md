@@ -33,6 +33,7 @@ Interroge Propositions Gmail où Décision = "Approuvé". Pour chaque ligne, app
 Économise : liste les emails arrivés depuis 24 h (`in:inbox newer_than:1d`) en vue métadonnées seulement (expéditeur, objet, libellés Gmail) ; n'ouvre un email que si son expéditeur et son objet ne suffisent pas à le classer.
 
 Classe CHAQUE email dans exactement une catégorie et applique le libellé correspondant (crée-le s'il manque) :
+
 - "Finance" : banques, Bankin, Trade Republic, Crédit Mutuel, Binance, Crypto.com
 - "Emploi" : Indeed, alertes LinkedIn, Hellowork, Meteojob
 - "Alternance" : universite-paris-saclay.fr, cfa-numia.fr, urbanandmainlines.com, Hitachi
@@ -44,7 +45,7 @@ Classe CHAQUE email dans exactement une catégorie et applique le libellé corre
 - "Administratif" : impôts, CAF, assurance, opérateurs, comptes (alertes Google, Notion…)
 - "Personnel" : emails écrits par une vraie personne
 - "Autres" : le reste
-Marque comme lus : Emploi, Réseaux sociaux, Promotions, et Bankin quotidien. Ne retire rien de la boîte de réception à cette étape. Garde le décompte par catégorie pour l'étape 4.
+  Marque comme lus : Emploi, Réseaux sociaux, Promotions, et Bankin quotidien. Ne retire rien de la boîte de réception à cette étape. Garde le décompte par catégorie pour l'étape 4.
 
 ## Étape 3 — Proposer (Décision = "À valider", "Proposé le" = aujourd'hui)
 
@@ -61,6 +62,7 @@ Crée des lignes dans Propositions Gmail, regroupées par expéditeur (une ligne
 ## Étape 4 — Résumé (des chiffres, pas de liste d'emails)
 
 Crée une ligne dans Résumés quotidiens : Titre = "Résumé du <date>", Date = aujourd'hui, Nouveaux emails (total), Action requise, Propositions (créées aujourd'hui), Appliqués (étape 1).
+
 - Résumé (propriété) = les catégories triées de la plus fournie à la moins fournie, catégories vides omises, ex. « Promotions 9 · Emploi 5 · Finance 3 · Réseaux sociaux 2 · Santé 1 ».
 - Corps de la page : un tableau « Catégorie | Emails » trié par nombre décroissant, puis une ligne « ⚠️ N emails demandent une action — voir À valider », puis une ligne « Appliqué ce matin : … » (décisions de l'étape 1 en chiffres). Ne liste PAS les emails un par un ; seule exception : une ligne « 🚩 Suspect : expéditeur – objet » si un email ressemble à du hameçonnage.
 

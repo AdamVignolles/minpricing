@@ -76,7 +76,7 @@ export class AmazonCollector implements DealSource {
   id = "amazon";
   name = "Amazon (bons plans, auto)";
 
-  protected readonly dealsUrls: string[];
+  protected dealsUrls: string[];
 
   constructor(
     dealsUrls: string | string[],
@@ -96,6 +96,15 @@ export class AmazonCollector implements DealSource {
     protected getCloudflareBinding?: () => CloudflareBrowserBinding | undefined,
   ) {
     this.dealsUrls = Array.isArray(dealsUrls) ? dealsUrls : [dealsUrls];
+  }
+
+  /**
+   * Pages and per-run cap for the next run — `CollectionService` applies
+   * `config/collection.json` (tuned by the local agents) before each run.
+   */
+  setTargets(dealsUrls: string[], limit: number): void {
+    this.dealsUrls = dealsUrls;
+    this.limit = limit;
   }
 
   async discover(context?: DiscoverContext): Promise<RawDeal[]> {

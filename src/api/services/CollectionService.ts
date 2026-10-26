@@ -1,3 +1,6 @@
+import { appendFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+
 import { $env, $inject, Alepha, z } from "alepha";
 import { DateTimeProvider } from "alepha/datetime";
 import { $logger } from "alepha/logger";
@@ -52,6 +55,12 @@ import { AmazonWatchService } from "./AmazonWatchService.ts";
 import { AutoPublishService } from "./AutoPublishService.ts";
 import { CategorizationService } from "./CategorizationService.ts";
 import { CollectionProgressService } from "./CollectionProgressService.ts";
+import {
+  type CollectionTuning,
+  loadCollectionTuning,
+  resolveTargets,
+  sourceDue,
+} from "./collectionTuning.ts";
 import { DealabsDraftService } from "./DealabsDraftService.ts";
 import { DealabsHistoryService } from "./DealabsHistoryService.ts";
 import { DEFAULT_MERCHANT_BY_SOURCE } from "./DealTypes.ts";
@@ -339,6 +348,33 @@ export class CollectionService {
     return cloudflareEnv?.BROWSER as CloudflareBrowserBinding | undefined;
   }
 
+  /**
+   * Pages and caps of the Amazon/Cdiscount collectors for this run, from
+   * the env defaults plus `config/collection.json` (see collectionTuning).
+   */
+  protected applyCollectionTuning(): CollectionTuning {
+    const tuning = loadCollectionTuning();
+    const amazon = resolveTargets(
+      splitUrls(this.env.AMAZON_DEALS_URL),
+      this.env.AMAZON_DEALS_LIMIT,
+      tuning.amazon,
+    );
+    const cdiscount = resolveTargets(
+      splitUrls(this.env.CDISCOUNT_HOME_URL),
+      this.env.CDISCOUNT_DEALS_LIMIT,
+      tuning.cdiscount,
+    );
+    (this.collectorsById.amazon as AmazonCollector).setTargets(
+      amazon.urls,
+      amazon.limit,
+    );
+    (this.collectorsById.cdiscount as CdiscountCollector).setTargets(
+      cdiscount.urls,
+      cdiscount.limit,
+    );
+    return tuning;
+  }
+
   async runAll(): Promise<CollectionSummary[]> {
     // Two overlapping runs doubled every page load (and Amazon's suspicion)
     // for nothing: the cron tick and a manual "collect now" now skip while
@@ -347,9 +383,24 @@ export class CollectionService {
       this.log.warn("Collection already running: this run is skipped.");
       return [];
     }
+    const tuning = this.applyCollectionTuning();
 
-    const sources = await this.sources.findMany({
+    // `config/collection.json` → `sources`: the deals-sources agent spaces
+    // out sources that rarely change and switches off unproductive ones.
+    const now = new Date(this.dateTime.nowISOString()).getTime();
+    const enabled = await this.sources.findMany({
       where: { enabled: { eq: true } },
+    });
+    const switchedOff: string[] = [];
+    const sources = enabled.filter((source) => {
+      const { due, reason } = sourceDue(
+        source.id,
+        source.lastSuccessAt,
+        now,
+        tuning,
+      );
+      if (reason === "disabled") switchedOff.push(source.id);
+      return due;
     });
     const runStartedAt = this.dateTime.nowISOString();
     await this.progress.start([
@@ -360,6 +411,7 @@ export class CollectionService {
     ]);
 
     const summaries: CollectionSummary[] = [];
+    const durations = new Map<string, number>();
     try {
       // Sources are independent sites: run several at once instead of one
       // after the other (that alone took a run from ~25 min to the length
@@ -374,12 +426,24 @@ export class CollectionService {
         this.env.COLLECT_SOURCE_CONCURRENCY,
         async (source) => {
           await this.progress.sourceStarted(source.id);
+          const startedAt = Date.now();
           const summary = await this.runOne(source.id);
           summaries.push(summary);
+          durations.set(source.id, Date.now() - startedAt);
           await this.progress.sourceFinished(source.id, summary);
         },
       );
-      await this.expireUnseen(summaries);
+      // Switched-off sources list nothing any more: their deals expire too.
+      await this.expireUnseen([
+        ...summaries,
+        ...switchedOff.map((sourceId) => ({
+          sourceId,
+          collected: 0,
+          created: 0,
+          updated: 0,
+        })),
+      ]);
+      this.logRun(runStartedAt, summaries, durations, switchedOff);
       await this.refreshTopOnDealabs(sources);
       if (this.autoPublish.enabled) {
         await this.publishBestDeals(runStartedAt);
@@ -390,6 +454,43 @@ export class CollectionService {
     }
     await this.progress.finish();
     return summaries;
+  }
+
+  /**
+   * One line per run in `data/agents/collection-runs.jsonl` (time and yield
+   * of each source) for the deals-sources agent. Local only: skipped when
+   * the folder doesn't exist (Workers, fresh clone).
+   */
+  protected logRun(
+    startedAt: string,
+    summaries: CollectionSummary[],
+    durations: Map<string, number>,
+    switchedOff: string[],
+  ): void {
+    try {
+      const dir = join(process.cwd(), "data", "agents");
+      if (!existsSync(dir)) return;
+      appendFileSync(
+        join(dir, "collection-runs.jsonl"),
+        `${JSON.stringify({
+          at: startedAt,
+          switchedOff,
+          sources: summaries.map((s) => ({
+            id: s.sourceId,
+            ms: durations.get(s.sourceId),
+            collected: s.collected,
+            created: s.created,
+            createdVisible: s.createdVisible,
+            updated: s.updated,
+            rejected: s.rejected,
+            ...(s.error ? { error: s.error.slice(0, 120) } : {}),
+          })),
+        })}
+`,
+      );
+    } catch {
+      // Best effort: the run itself matters, not its log line.
+    }
   }
 
   /**

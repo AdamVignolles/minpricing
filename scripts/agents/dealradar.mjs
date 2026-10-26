@@ -15,6 +15,8 @@
  *   check-shop <dealId>         the app's pre-publish page check, dry run
  *   publish <dealId>            publish one deal now
  *   ledger [days]               what the agents published, as predicted
+ *   sources-review [days]       yield/time per source + what goes hot on Dealabs (deals-sources)
+ *   probe <url>                 can a candidate shop be read with plain fetch?
  */
 import { spawn } from "node:child_process";
 import {
@@ -88,7 +90,9 @@ async function login() {
       // Not this port.
     }
   }
-  throw new Error(`DealRadar server not reachable on ports ${ports.join(", ")}`);
+  throw new Error(
+    `DealRadar server not reachable on ports ${ports.join(", ")}`,
+  );
 }
 
 async function api(method, path) {
@@ -149,7 +153,11 @@ function readLedger(days = 60) {
 }
 
 async function fetchReport(hours, days) {
-  const res = await api("GET", `/admin/agent-report?hours=${hours}&days=${days}`);
+  // Best 15 of each category (not an overall top-N, which is all games).
+  const res = await api(
+    "GET",
+    `/admin/agent-report?hours=${hours}&days=${days}&perCategory=15&limit=200`,
+  );
   if (!res.ok) {
     throw new Error(
       `report failed (${res.status}): ${JSON.stringify(res.body).slice(0, 300)}`,
@@ -177,7 +185,13 @@ function triedToday() {
 }
 
 const band = (price) =>
-  price < 30 ? "<30" : price < 100 ? "30-100" : price < 300 ? "100-300" : ">300";
+  price < 30
+    ? "<30"
+    : price < 100
+      ? "30-100"
+      : price < 300
+        ? "100-300"
+        : ">300";
 
 function isPublishDay(r, date = new Date()) {
   // publishDays: 1 = Monday … 7 = Sunday.
@@ -189,8 +203,20 @@ async function shortlist() {
   const r = rules();
   const report = await fetchReport(24, 0);
   const tried = triedToday();
-  const ranked = report.candidates
-    .filter((c) => !r.excludedSources.includes(c.sourceId) && !tried.has(c.id))
+  // Why the other candidates were left out — shown in the evening report.
+  const rejected = {
+    sourceExclue: 0,
+    dejaTenteAujourdhui: 0,
+    scoreTropBas: 0,
+    chanceHotTropBasse: 0,
+  };
+  const scored = report.candidates
+    .filter((c) => {
+      if (r.excludedSources.includes(c.sourceId))
+        return (rejected.sourceExclue++, false);
+      if (tried.has(c.id)) return (rejected.dejaTenteAujourdhui++, false);
+      return true;
+    })
     .map((c) => {
       const adjusted =
         (c.hotChance ?? 0) +
@@ -199,8 +225,21 @@ async function shortlist() {
         (r.priceBandAdjust[band(c.price)] ?? 0);
       return { ...c, adjusted };
     })
-    .filter((c) => c.score >= r.minScore && c.adjusted >= r.minHotChance)
+    .filter((c) => {
+      if (c.score < r.minScore) return (rejected.scoreTropBas++, false);
+      if (c.adjusted < r.minHotChance)
+        return (rejected.chanceHotTropBasse++, false);
+      return true;
+    });
+  // Diversity: at most `shortlistPerCategory` of one category in the list,
+  // so backups aren't all the same kind of deal.
+  const perCategory = {};
+  const ranked = scored
     .sort((a, b) => b.adjusted - a.adjusted || b.score - a.score)
+    .filter((c) => {
+      perCategory[c.categoryId] = (perCategory[c.categoryId] ?? 0) + 1;
+      return perCategory[c.categoryId] <= (r.shortlistPerCategory ?? 99);
+    })
     .slice(0, 12)
     .map((c) => ({
       id: c.id,
@@ -226,7 +265,13 @@ async function shortlist() {
     publishToday: isPublishDay(r),
     perDay: r.perDay,
     candidates: report.candidates.length,
-    eligible: ranked.length,
+    eligible: scored.length,
+    rejected,
+    rules: {
+      minScore: r.minScore,
+      minHotChance: r.minHotChance,
+      excludedSources: r.excludedSources,
+    },
     ranked,
   };
   writeFileSync(fileOf("shortlist"), JSON.stringify(result));
@@ -270,31 +315,56 @@ async function publish(dealId) {
     result,
     status: res.status,
     url: res.ok ? res.body?.dealabsUrl : undefined,
-    error: res.ok ? undefined : String(res.body?.message ?? res.body).slice(0, 300),
+    error: res.ok
+      ? undefined
+      : String(res.body?.message ?? res.body).slice(0, 300),
   };
 }
 
-async function publishQueue(file) {
+async function publishQueue(file, now = false) {
   const r = rules();
   const queue = readJson(resolve(file));
   // Old queues had items + backups; new ones a single ranked list.
-  const ranked = queue.ranked ?? [...(queue.items ?? []), ...(queue.backups ?? [])];
+  const ranked = queue.ranked ?? [
+    ...(queue.items ?? []),
+    ...(queue.backups ?? []),
+  ];
   const planFile = fileOf("plan");
   if (!isPublishDay(r)) {
-    const plan = { date: today(), skipped: "pas de publication ce jour (week-end)", times: [] };
+    const plan = {
+      date: today(),
+      skipped: "pas de publication ce jour (week-end)",
+      times: [],
+    };
     writeFileSync(planFile, JSON.stringify(plan));
     return plan;
   }
 
   const doneToday = () =>
     readLedger(1).filter((e) => e.date === today() && e.result === "success");
-  const target = Math.max(
-    0,
-    r.perDay.min + Math.floor(Math.random() * (r.perDay.max - r.perDay.min + 1)) -
-      doneToday().length,
-  );
-  const from = new Date(Math.max(atToday(r.window.start).getTime(), Date.now() + 5 * 60_000));
-  const times = randomTimes(Math.min(target, ranked.length), from, atToday(r.window.end), r.minGapMinutes);
+  // `--now` (manual test): keep today's drawn count, publish right away,
+  // one minute apart, instead of waiting for the drawn times.
+  const earlier = existsSync(planFile) ? readJson(planFile) : undefined;
+  const target =
+    now && earlier?.date === today() && earlier.target !== undefined
+      ? Math.max(0, earlier.target - doneToday().length)
+      : Math.max(
+          0,
+          r.perDay.min +
+            Math.floor(Math.random() * (r.perDay.max - r.perDay.min + 1)) -
+            doneToday().length,
+        );
+  const count = Math.min(target, ranked.length);
+  const times = now
+    ? Array.from({ length: count }, (_, i) => new Date(Date.now() + i * 60_000))
+    : randomTimes(
+        count,
+        new Date(
+          Math.max(atToday(r.window.start).getTime(), Date.now() + 5 * 60_000),
+        ),
+        atToday(r.window.end),
+        r.minGapMinutes,
+      );
   const plan = {
     date: today(),
     target,
@@ -313,22 +383,54 @@ async function publishQueue(file) {
     for (const candidate of ranked) {
       if (attempts >= MAX_TRIES_PER_SLOT) break;
       if (tried.has(candidate.dealId)) continue;
-      const sameCategory = doneToday().filter((e) => e.categoryId === candidate.categoryId).length;
-      if (candidate.categoryId && sameCategory >= r.maxPerCategoryPerDay) continue;
+      const sameCategory = doneToday().filter(
+        (e) => e.categoryId === candidate.categoryId,
+      ).length;
+      const cap =
+        r.categoryCaps?.[candidate.categoryId] ?? r.maxPerCategoryPerDay;
+      if (candidate.categoryId && sameCategory >= cap) continue;
       attempts++;
       tried.add(candidate.dealId);
       const outcome = await publish(candidate.dealId).catch((error) => ({
         result: "failed",
         error: String(error).slice(0, 300),
       }));
-      const entry = { date: today(), at: new Date().toISOString(), slot: hhmm(time), ...candidate, ...outcome };
+      const entry = {
+        date: today(),
+        at: new Date().toISOString(),
+        slot: hhmm(time),
+        ...candidate,
+        ...outcome,
+      };
       appendFileSync(ledgerFile, `${JSON.stringify(entry)}\n`);
       results.push(entry);
       if (outcome.result === "success") break;
     }
   }
-  writeFileSync(fileOf("published"), JSON.stringify({ date: today(), plan, results }, null, 2));
+  writeFileSync(
+    fileOf("published"),
+    JSON.stringify({ date: today(), plan, results }, null, 2),
+  );
   return { plan, results };
+}
+
+/** Local copy of a report, shown by the console's Agents page. */
+function writeReport(name, markdown) {
+  const dir = join(outDir, "reports");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${name}.md`), markdown);
+}
+function appendReport(name, marker, markdown) {
+  const file = join(outDir, "reports", `${name}.md`);
+  if (!existsSync(file)) return;
+  const current = readFileSync(file, "utf8");
+  if (!current.includes(marker))
+    writeFileSync(
+      file,
+      `${current}
+${markdown}
+`,
+    );
 }
 
 const STATUS = {
@@ -346,12 +448,86 @@ const STATUS = {
  */
 async function notionLog(mode) {
   const date = today();
-  const queue = existsSync(fileOf("queue")) ? readJson(fileOf("queue")) : { ranked: [] };
-  const ranked = queue.ranked ?? [...(queue.items ?? []), ...(queue.backups ?? [])];
-  const plan = existsSync(fileOf("plan")) ? readJson(fileOf("plan")) : undefined;
-  const shortlistFile = existsSync(fileOf("shortlist")) ? readJson(fileOf("shortlist")) : undefined;
+  const queue = existsSync(fileOf("queue"))
+    ? readJson(fileOf("queue"))
+    : { ranked: [] };
+  const ranked = queue.ranked ?? [
+    ...(queue.items ?? []),
+    ...(queue.backups ?? []),
+  ];
+  const plan = existsSync(fileOf("plan"))
+    ? readJson(fileOf("plan"))
+    : undefined;
+  const shortlistFile = existsSync(fileOf("shortlist"))
+    ? readJson(fileOf("shortlist"))
+    : undefined;
+
+  const cell = (value) =>
+    String(value ?? "—")
+      .replace(/\|/g, "/")
+      .replace(/\n/g, " ");
+  const euro = (value) =>
+    value === undefined
+      ? "—"
+      : value === 0
+        ? "gratuit"
+        : `${String(value).replace(".", ",")} €`;
 
   if (mode === "plan") {
+    const sl = shortlistFile ?? {
+      candidates: 0,
+      eligible: 0,
+      rejected: {},
+      rules: {},
+    };
+    const rej = sl.rejected ?? {};
+    const vetoed = queue.vetoed ?? [];
+    const times = plan?.times ?? [];
+    const role = (dealId) => {
+      const i = plan?.planned?.indexOf(dealId) ?? -1;
+      return i >= 0 ? `🕒 prévu à ${times[i]}` : "remplaçant";
+    };
+    const journalBody = [
+      `<callout icon="🎯" color="blue_bg">`,
+      plan?.skipped
+        ? `Pas de publication aujourd'hui : ${plan.skipped}.`
+        : `<b>${times.length} publication(s) tirée(s) au sort</b> à ${times.join(", ") || "—"} parmi <b>${ranked.length}</b> deals retenus (sur ${sl.candidates} candidats vus en 24 h). Si un deal échoue (page refusée, doublon), le suivant de la liste prend sa place.`,
+      `</callout>`,
+      "",
+      "## Entonnoir de sélection",
+      "",
+      "| Étape | Deals |",
+      "| --- | --- |",
+      `| Candidats vus en 24 h (pas encore tentés, pas déjà sur Dealabs) | ${sl.candidates} |`,
+      ...(sl.rejected
+        ? [
+            `| ❌ Source exclue (${(sl.rules?.excludedSources ?? []).join(", ")}) | ${rej.sourceExclue ?? 0} |`,
+            `| ❌ Déjà tenté aujourd'hui | ${rej.dejaTenteAujourdhui ?? 0} |`,
+            `| ❌ Score sous ${sl.rules?.minScore} | ${rej.scoreTropBas ?? 0} |`,
+            `| ❌ Chance hot sous ${sl.rules?.minHotChance} % | ${rej.chanceHotTropBasse ?? 0} |`,
+          ]
+        : [
+            `| ❌ Écartés par les règles (source, score, chance hot) | ${sl.candidates - sl.eligible} |`,
+          ]),
+      `| ✅ Éligibles selon les règles (v${sl.rulesVersion ?? "?"}) | ${sl.eligible} |`,
+      `| 🚫 Écartés par l'agent (jugement) | ${vetoed.length} |`,
+      `| 🎯 Retenus, dans l'ordre de passage | ${ranked.length} |`,
+      "",
+      "## Deals retenus",
+      "",
+      "| # | Deal | Source | Prix | Score | Chance hot | Rôle | Pourquoi |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+      ...ranked.map(
+        (d, i) =>
+          `| ${i + 1} | ${cell(d.title?.slice(0, 70))} | ${cell(d.sourceId)} | ${euro(d.price)} | ${cell(d.score)} | ${cell(d.adjustedHotChance ?? d.hotChance)} % | ${role(d.dealId)} | ${cell(d.reason)} |`,
+      ),
+      "",
+      "## Écartés par l'agent",
+      "",
+      ...(vetoed.length
+        ? vetoed.map((v) => `- ${cell(v.title)} — ${cell(v.why)}`)
+        : ["- Aucun"]),
+    ].join("\n");
     const rows = (plan?.planned ?? []).map((dealId, i) => {
       const d = ranked.find((x) => x.dealId === dealId) ?? {};
       return {
@@ -369,7 +545,7 @@ async function notionLog(mode) {
         "Pourquoi choisi": d.reason,
       };
     });
-    return {
+    const result = {
       journal: {
         Titre: `Soirée du ${date}`,
         Type: "🌆 Soirée",
@@ -380,12 +556,23 @@ async function notionLog(mode) {
           ? plan.skipped
           : `${shortlistFile?.eligible ?? 0} deals éligibles sur ${shortlistFile?.candidates ?? 0}, ${ranked.length} retenus après vérification. Tirage du jour : ${plan?.target ?? 0} publication(s) à ${plan?.times.join(", ") || "—"}.`,
       },
+      journalBody,
       rows,
     };
+    writeReport(
+      `soiree-${date}`,
+      `# Soirée du ${date}
+
+${journalBody}
+`,
+    );
+    return result;
   }
 
   // final
-  const published = existsSync(fileOf("published")) ? readJson(fileOf("published")) : { results: [] };
+  const published = existsSync(fileOf("published"))
+    ? readJson(fileOf("published"))
+    : { results: [] };
   const outcomes = published.results.map((e) => ({
     dealId: e.dealId,
     Deal: e.title,
@@ -401,11 +588,19 @@ async function notionLog(mode) {
     Score: e.score,
     "Chance hot prévue": e.hotChance,
     "Chance ajustée": e.adjustedHotChance,
-    "Pourquoi choisi": plan?.planned?.includes(e.dealId) ? e.reason : `Remplaçant : ${e.reason}`,
+    "Pourquoi choisi": plan?.planned?.includes(e.dealId)
+      ? e.reason
+      : `Remplaçant : ${e.reason}`,
   }));
   const report = await fetchReport(24, 14);
   const temperatures = report.posted
-    .filter((p) => p.temperature !== undefined && report.ledger.some((l) => l.dealId === p.dealId && l.result === "success"))
+    .filter(
+      (p) =>
+        p.temperature !== undefined &&
+        report.ledger.some(
+          (l) => l.dealId === p.dealId && l.result === "success",
+        ),
+    )
     .map((p) => ({
       dealId: p.dealId,
       Température: p.temperature,
@@ -414,7 +609,29 @@ async function notionLog(mode) {
       "Lien Dealabs": p.url,
     }));
   const count = (status) => outcomes.filter((o) => o.Statut === status).length;
-  const reasons = outcomes.filter((o) => o.Statut !== "✅ Publié").map((o) => `${o.Deal?.slice(0, 40)} : ${o.Erreur ?? o.Statut}`);
+  const journalBodyAppend = outcomes.length
+    ? [
+        "",
+        "## Résultats de la soirée",
+        "",
+        "| Heure | Deal | Résultat | Lien ou raison |",
+        "| --- | --- | --- | --- |",
+        ...published.results.map(
+          (e) =>
+            `| ${hhmm(new Date(e.at))} | ${cell(e.title?.slice(0, 70))} | ${STATUS[e.result] ?? "❌ Échec"}${plan?.planned?.includes(e.dealId) ? "" : " (remplaçant)"} | ${e.url ? `[voir sur Dealabs](${e.url})` : cell(e.error)} |`,
+        ),
+      ].join("\n")
+    : undefined;
+  const reasons = outcomes
+    .filter((o) => o.Statut !== "✅ Publié")
+    .map((o) => `${o.Deal?.slice(0, 40)} : ${o.Erreur ?? o.Statut}`);
+  if (journalBodyAppend) {
+    appendReport(
+      `soiree-${date}`,
+      "## Résultats de la soirée",
+      journalBodyAppend,
+    );
+  }
   return {
     journalUpdate: {
       Titre: `Soirée du ${date}`,
@@ -423,6 +640,7 @@ async function notionLog(mode) {
         ? undefined
         : `Résultat : ${count("✅ Publié")} publié(s), ${count("⏭️ Ignoré")} ignoré(s) par la vérification de page, ${count("♻️ Doublon")} doublon(s), ${count("❌ Échec")} échec(s).${reasons.length ? ` Détail : ${reasons.join(" ; ")}.` : ""}`,
     },
+    journalBodyAppend,
     outcomes,
     temperatures,
   };
@@ -432,10 +650,18 @@ async function notionLog(mode) {
 async function stats(days = 28) {
   const r = rules();
   const report = await fetchReport(24, days);
-  const predicted = new Map(report.ledger.filter((l) => l.result === "success").map((l) => [l.dealId, l]));
+  const predicted = new Map(
+    report.ledger
+      .filter((l) => l.result === "success")
+      .map((l) => [l.dealId, l]),
+  );
   const matureBefore = Date.now() - r.learning.maturedAfterDays * 86_400_000;
   const posts = report.posted
-    .filter((p) => p.temperature !== undefined && new Date(p.publishedAt).getTime() <= matureBefore)
+    .filter(
+      (p) =>
+        p.temperature !== undefined &&
+        new Date(p.publishedAt).getTime() <= matureBefore,
+    )
     .map((p) => {
       const l = predicted.get(p.dealId);
       return {
@@ -453,9 +679,13 @@ async function stats(days = 28) {
     return {
       n: list.length,
       hot: list.filter((p) => p.hot).length,
-      hotRate: list.length ? Math.round((100 * list.filter((p) => p.hot).length) / list.length) : 0,
+      hotRate: list.length
+        ? Math.round((100 * list.filter((p) => p.hot).length) / list.length)
+        : 0,
       medianTemp: temps.length ? temps[Math.floor(temps.length / 2)] : null,
-      meanPredicted: list.length ? Math.round(list.reduce((s, p) => s + p.predicted, 0) / list.length) : null,
+      meanPredicted: list.length
+        ? Math.round(list.reduce((s, p) => s + p.predicted, 0) / list.length)
+        : null,
     };
   };
   const groupBy = (key) => {
@@ -469,7 +699,14 @@ async function stats(days = 28) {
   };
   const buckets = {};
   for (const p of posts) {
-    const b = p.predicted < 10 ? "0-9" : p.predicted < 20 ? "10-19" : p.predicted < 30 ? "20-29" : "30+";
+    const b =
+      p.predicted < 10
+        ? "0-9"
+        : p.predicted < 20
+          ? "10-19"
+          : p.predicted < 30
+            ? "20-29"
+            : "30+";
     (buckets[b] ??= []).push(p);
   }
   return {
@@ -481,9 +718,689 @@ async function stats(days = 28) {
     byCategory: groupBy("cat"),
     bySource: groupBy("src"),
     byPriceBand: groupBy("band"),
-    calibration: Object.fromEntries(Object.entries(buckets).map(([k, list]) => [k, summarize(list)])),
+    calibration: Object.fromEntries(
+      Object.entries(buckets).map(([k, list]) => [k, summarize(list)]),
+    ),
     failures: report.failures,
-    agentAttempts: report.ledger.reduce((acc, l) => ({ ...acc, [l.result]: (acc[l.result] ?? 0) + 1 }), {}),
+    agentAttempts: report.ledger.reduce(
+      (acc, l) => ({ ...acc, [l.result]: (acc[l.result] ?? 0) + 1 }),
+      {},
+    ),
+  };
+}
+
+/** Same normalisation as src/api/services/desirability.ts. */
+const words = (text) =>
+  ` ${text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9+]+/g, " ")
+    .trim()} `;
+
+/**
+ * What the daily tuning (deals-tune) needs, computed here so the agent
+ * only compares numbers: per brand and product type, how Dealabs voted on
+ * the threads stored in our deals' history (+ our own posts), with a
+ * suggested weight; and what each shop/category yields for selection.
+ */
+async function tuneStats() {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dbFile = (env.DATABASE_URL ?? "sqlite://./data/dev.db").replace(
+    /^sqlite:\/\//,
+    "",
+  );
+  const db = new DatabaseSync(resolve(root, dbFile), { readOnly: true });
+  const desirability = readJson(join(root, "config", "desirability.json"));
+  const collection = readJson(join(root, "config", "collection.json"));
+  const r = rules();
+  const brands = Object.keys(desirability.brands);
+  const brandOf = (title) => {
+    const w = words(title);
+    return brands.find((b) => w.includes(words(b)));
+  };
+
+  // Every Dealabs thread stored in a deal's history, once, with the deal's category.
+  const threads = new Map();
+  for (const row of db
+    .prepare(
+      "SELECT category_id, dealabs_history FROM deals WHERE dealabs_history IS NOT NULL AND dealabs_history != '[]'",
+    )
+    .all()) {
+    let history = [];
+    try {
+      history = JSON.parse(row.dealabs_history);
+    } catch {
+      continue;
+    }
+    for (const t of history) {
+      if (t.mine || !t.url || threads.has(t.url)) continue;
+      threads.set(t.url, {
+        title: t.title ?? "",
+        temp: t.temperature ?? 0,
+        cat: row.category_id,
+      });
+    }
+  }
+  const all = [...threads.values()].filter((t) => t.cat !== "video-games");
+  const hotThreshold = r.learning.hotThreshold;
+  const overallHot = all.filter((t) => t.temp >= hotThreshold).length;
+  const baseLogOdds = Math.log(
+    (overallHot + 1) / (all.length - overallHot + 1),
+  );
+  const summarize = (list, current) => {
+    const hot = list.filter((t) => t.temp >= hotThreshold).length;
+    const temps = list.map((t) => t.temp).sort((a, b) => a - b);
+    // Shrunk toward 0 by the sample size: 10 threads count for half.
+    const raw = Math.log((hot + 1) / (list.length - hot + 1)) - baseLogOdds;
+    const suggested = Math.max(
+      desirability.bounds[0],
+      Math.min(
+        desirability.bounds[1],
+        raw * (list.length / (list.length + 10)),
+      ),
+    );
+    return {
+      n: list.length,
+      hotRate: Math.round((100 * hot) / list.length),
+      medianTemp: temps[Math.floor(temps.length / 2)],
+      current,
+      suggested: Math.round(suggested * 10) / 10,
+    };
+  };
+
+  const byBrand = {};
+  const noBrand = [];
+  for (const t of all) {
+    const brand = brandOf(t.title);
+    if (brand) (byBrand[brand] ??= []).push(t);
+    else if (desirability.noBrandCategories.includes(t.cat)) noBrand.push(t);
+  }
+  const brandStats = Object.fromEntries(
+    Object.entries(byBrand)
+      .filter(([, list]) => list.length >= 5)
+      .map(([brand, list]) => [
+        brand,
+        summarize(list, desirability.brands[brand]),
+      ])
+      .sort((a, b) => b[1].n - a[1].n)
+      .slice(0, 40),
+  );
+  const keywordStats = Object.fromEntries(
+    Object.entries(desirability.keywords).map(([pattern, current]) => {
+      const variants = pattern.split("|").map(words);
+      const list = all.filter((t) =>
+        variants.some((v) => words(t.title).includes(v)),
+      );
+      return [
+        pattern,
+        list.length >= 5
+          ? summarize(list, current)
+          : { n: list.length, current },
+      ];
+    }),
+  );
+
+  // Our own posts by brand (matched on our profile).
+  const report = await fetchReport(24, 28);
+  const ours = {};
+  for (const p of report.posted ?? []) {
+    if (p.temperature === undefined) continue;
+    const brand =
+      p.categoryId === "video-games"
+        ? "(jeu vidéo)"
+        : (brandOf(p.title) ?? "(sans marque connue)");
+    const s = (ours[brand] ??= { n: 0, hot: 0, temps: [] });
+    s.n++;
+    if (p.temperature >= hotThreshold) s.hot++;
+    s.temps.push(p.temperature);
+  }
+
+  // What each shop/category yields for the selection (last 7 days).
+  const since = Date.now() - 7 * 86_400_000;
+  const yieldRows = db
+    .prepare(
+      "SELECT source_id src, category_id cat, COUNT(*) n, SUM(score >= ?) good, ROUND(AVG(hot_chance), 0) hot FROM deals WHERE status = 'active' AND score >= 40 AND last_seen_at >= ? AND source_id IN ('amazon','amazon-watch','cdiscount','lenovo','joybuy','grosbill','leclerc','carrefour') GROUP BY 1, 2 HAVING n >= 3 ORDER BY good DESC LIMIT 30",
+    )
+    .all(r.minScore, since);
+
+  return {
+    threadsAnalysed: all.length,
+    overallHotRate: Math.round((100 * overallHot) / Math.max(1, all.length)),
+    noBrandPenalty: { ...summarize(noBrand, desirability.noBrandPenalty) },
+    brands: brandStats,
+    keywords: keywordStats,
+    ourPostsByBrand: Object.fromEntries(
+      Object.entries(ours).map(([brand, s]) => [
+        brand,
+        {
+          n: s.n,
+          hot: s.hot,
+          medianTemp: s.temps.sort((a, b) => a - b)[
+            Math.floor(s.temps.length / 2)
+          ],
+        },
+      ]),
+    ),
+    collectionYield7d: yieldRows.map(
+      (y) =>
+        `${y.src}/${y.cat}: ${y.n} vus, ${y.good} score≥${r.minScore}, hot moy ${y.hot}`,
+    ),
+    collection: {
+      amazon: {
+        limit: collection.amazon.limit,
+        bounds: collection.amazon.bounds,
+        pages: Object.fromEntries(
+          Object.entries(collection.amazon.extraPages).map(([k, v]) => [
+            k,
+            v.enabled,
+          ]),
+        ),
+      },
+      cdiscount: {
+        limit: collection.cdiscount.limit,
+        bounds: collection.cdiscount.bounds,
+        pages: Object.fromEntries(
+          Object.entries(collection.cdiscount.extraPages).map(([k, v]) => [
+            k,
+            v.enabled,
+          ]),
+        ),
+      },
+    },
+    limits: {
+      bounds: desirability.bounds,
+      maxDailyStep: desirability.maxDailyStep,
+    },
+  };
+}
+
+const DEALABS_HEADERS = {
+  "user-agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36",
+  "accept-language": "fr-FR,fr;q=0.9",
+};
+const unescapeHtml = (s) =>
+  s
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+
+/** Our threads from the public profile, with the fields the app doesn't keep. */
+async function readProfile(user, pages = 3) {
+  const posts = [];
+  for (let page = 1; page <= pages; page++) {
+    const res = await fetch(
+      `https://www.dealabs.com/profile/${encodeURIComponent(user)}/bons-plans?page=${page}`,
+      { headers: DEALABS_HEADERS, signal: AbortSignal.timeout(20_000) },
+    ).catch(() => null);
+    if (!res?.ok) break;
+    const html = await res.text();
+    let found = 0;
+    for (const m of html.matchAll(/data-vue3='([^']*)'|data-vue3="([^"]*)"/g)) {
+      try {
+        const json = JSON.parse(unescapeHtml(m[1] ?? m[2] ?? ""));
+        if (json?.name !== "ThreadMainListItemNormalizer") continue;
+        const t = json.props.thread;
+        found++;
+        posts.push({
+          id: String(t.threadId),
+          title: String(t.title).slice(0, 90),
+          url: `https://www.dealabs.com/bons-plans/${t.titleSlug}-${t.threadId}`,
+          publishedAt: new Date(Number(t.publishedAt) * 1000).toISOString(),
+          temp: Math.round(Number(t.temperature) || 0),
+          hot: !!t.isHot,
+          expired: !!t.isExpired,
+          status: t.status,
+          comments: Number(t.commentCount) || 0,
+          price: Number(t.price) || 0,
+          merchant: t.merchant?.merchantName,
+          flags: [
+            t.deletedAt && "supprimé",
+            t.isLocked && "verrouillé",
+            t.isSpamLocked && "spam",
+            t.isCommunityFavorite && "coup de cœur",
+            t.isTrending && "tendance",
+          ].filter(Boolean),
+        });
+      } catch {
+        // Other data-vue3 components.
+      }
+    }
+    if (found === 0) break;
+    await sleep(1500);
+  }
+  return posts;
+}
+
+/** The first comments of a thread, read in a headless browser (the API refuses scripts). */
+async function readComments(urls) {
+  if (urls.length === 0) return {};
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch();
+  const out = {};
+  try {
+    for (const url of urls) {
+      const context = await browser.newContext({
+        locale: "fr-FR",
+        userAgent: DEALABS_HEADERS["user-agent"],
+      });
+      try {
+        const page = await context.newPage();
+        await page.goto(url, {
+          waitUntil: "domcontentloaded",
+          timeout: 45_000,
+        });
+        await page.waitForTimeout(5000);
+        await page.evaluate(() =>
+          window.scrollTo(0, document.body.scrollHeight),
+        );
+        await page.waitForTimeout(3000);
+        const texts = await page.evaluate(() =>
+          [
+            ...document.querySelectorAll(
+              '[class*="comment-body"], .commentList-item, article[id^="comment"]',
+            ),
+          ].map((el) => el.innerText.replace(/\s+/g, " ").trim()),
+        );
+        // Keep the innermost texts (parents repeat their children).
+        const leaves = [...new Set(texts)].filter(
+          (t) => t && !texts.some((o) => o !== t && t.includes(o)),
+        );
+        out[url] = leaves.slice(0, 6).map((t) => t.slice(0, 220));
+      } catch {
+        out[url] = [];
+      } finally {
+        await context.close();
+      }
+      await sleep(2000);
+    }
+  } finally {
+    await browser.close();
+  }
+  return out;
+}
+
+/**
+ * The evening debrief's input: our posts of the last 14 days (temperature,
+ * comments, status, flags), whether the agents posted them, and the
+ * comments of the posts worth understanding (frozen, flagged, debated) —
+ * read once per thread and comment count (cached).
+ */
+async function profileReview() {
+  const user = env.DEALABS_USERNAME;
+  if (!user) throw new Error("DEALABS_USERNAME missing in .env");
+  const since = Date.now() - 14 * 86_400_000;
+  const posts = (await readProfile(user)).filter(
+    (p) => new Date(p.publishedAt).getTime() >= since,
+  );
+  const ledger = readLedger(30).filter((e) => e.result === "success");
+  const byAgents = (p) => ledger.some((e) => e.url && e.url.includes(p.id));
+
+  const cacheFile = join(outDir, "comments-cache.json");
+  const cache = existsSync(cacheFile) ? readJson(cacheFile) : {};
+  const worth = posts
+    .filter(
+      (p) =>
+        p.comments > 0 &&
+        (p.temp < 20 ||
+          p.flags.length ||
+          p.status !== "Activated" ||
+          p.comments >= 5),
+    )
+    .filter((p) => cache[p.id]?.count !== p.comments)
+    .sort((a, b) => a.temp - b.temp)
+    .slice(0, 6);
+  const fresh = await readComments(worth.map((p) => p.url));
+  for (const p of worth)
+    cache[p.id] = { count: p.comments, comments: fresh[p.url] ?? [] };
+  writeFileSync(cacheFile, JSON.stringify(cache));
+
+  const hot = posts.filter((p) => p.temp >= rules().learning.hotThreshold);
+  return {
+    period: "14 derniers jours",
+    summary: {
+      posts: posts.length,
+      parLesAgents: posts.filter(byAgents).length,
+      hot: hot.length,
+      negatifs: posts.filter((p) => p.temp < 0).length,
+      tempMediane:
+        posts.map((p) => p.temp).sort((a, b) => a - b)[
+          Math.floor(posts.length / 2)
+        ] ?? null,
+      nonActives: posts.filter((p) => p.status !== "Activated").length,
+      signales: posts.filter((p) =>
+        p.flags.some((f) => ["supprimé", "verrouillé", "spam"].includes(f)),
+      ).length,
+    },
+    posts: posts.map(
+      (p) =>
+        `${p.publishedAt.slice(5, 16).replace("T", " ")} | ${p.temp}° | ${p.comments} comm. | ${p.status}${p.expired ? " · expiré" : ""}${p.flags.length ? ` · ${p.flags.join(", ")}` : ""} | ${byAgents(p) ? "agents" : "manuel"} | ${p.price} € | ${p.title}`,
+    ),
+    comments: Object.fromEntries(
+      posts
+        .filter((p) => cache[p.id]?.comments?.length)
+        .map((p) => [
+          `${p.title.slice(0, 50)} (${p.temp}°)`,
+          cache[p.id].comments,
+        ]),
+    ),
+  };
+}
+
+/** Dealabs merchant names → our source ids (lowercase, letters/digits only). */
+const MERCHANT_SOURCES = [
+  [/^amazon/, ["amazon", "amazon-watch", "relances"]],
+  [/^cdiscount/, ["cdiscount"]],
+  [/^aliexpress/, ["aliexpress"]],
+  [/^sosh/, ["sosh"]],
+  [/^orange/, ["orange"]],
+  [/^free/, ["free"]],
+  [/^(bouygues|byou)/, ["bouygues"]],
+  [/^(redbysfr|sfr)/, ["sfr"]],
+  [/^epic/, ["epic"]],
+  [/^gog/, ["gog"]],
+  [/^(nintendo|eshop)/, ["nintendo"]],
+  [/^playstation/, ["playstation"]],
+  [/^(xbox|microsoft)/, ["xbox"]],
+  [/^steam/, ["steam"]],
+  [/^lidl/, ["lidl"]],
+  [/^ikea/, ["ikea"]],
+  [/^(eleclerc|leclerc)/, ["leclerc"]],
+  [/^carrefour/, ["carrefour"]],
+  [/^grosbill/, ["grosbill"]],
+  [/^nike/, ["nike"]],
+  [/^footlocker/, ["footlocker"]],
+  [/^castorama/, ["castorama"]],
+  [/^lenovo/, ["lenovo"]],
+  [/^joybuy/, ["joybuy"]],
+  [/^itjustgood/, ["itjustgood"]],
+];
+const merchantKey = (name) =>
+  (name ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+const sourcesOfMerchant = (name) =>
+  MERCHANT_SOURCES.find(([re]) => re.test(merchantKey(name)))?.[1] ?? [];
+const median = (values) => {
+  const sorted = values.filter((v) => v !== undefined).sort((a, b) => a - b);
+  return sorted.length ? sorted[Math.floor(sorted.length / 2)] : undefined;
+};
+
+/** Threads of a Dealabs listing page (hot, new…), with merchant and group. */
+async function readDealabsListing(path, pages, spacingMs = 1_500) {
+  const threads = [];
+  for (let page = 1; page <= pages; page++) {
+    if (page > 1) await sleep(spacingMs);
+    const res = await fetch(`https://www.dealabs.com/${path}?page=${page}`, {
+      headers: DEALABS_HEADERS,
+      signal: AbortSignal.timeout(20_000),
+    }).catch(() => null);
+    if (!res?.ok) break;
+    const html = await res.text();
+    for (const m of html.matchAll(/data-vue3='([^']*)'|data-vue3="([^"]*)"/g)) {
+      try {
+        const json = JSON.parse(unescapeHtml(m[1] ?? m[2] ?? ""));
+        if (json?.name !== "ThreadMainListItemNormalizer") continue;
+        const t = json.props?.thread;
+        if (!t?.threadId || t.type !== "Deal") continue;
+        threads.push({
+          id: String(t.threadId),
+          title: String(t.title ?? ""),
+          merchant: t.merchant?.merchantName ?? t.linkHost ?? "(sans marchand)",
+          group: t.mainGroup?.threadGroupName ?? "?",
+          temp: Math.round(Number(t.temperature) || 0),
+        });
+      } catch {
+        // Not a thread payload.
+      }
+    }
+  }
+  return [...new Map(threads.map((t) => [t.id, t])).values()];
+}
+
+/**
+ * Everything the deals-sources skill needs in one small JSON: each
+ * source's yield (deals seen, visible, publishable, our posts and their
+ * temperatures), run time and errors, its schedule; then what goes hot
+ * on Dealabs, by merchant and category, and which of it we don't cover.
+ */
+async function sourcesReview(days = 7) {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dbFile = (env.DATABASE_URL ?? "sqlite://./data/dev.db").replace(
+    /^sqlite:\/\//,
+    "",
+  );
+  const db = new DatabaseSync(resolve(root, dbFile), { readOnly: true });
+  const r = rules();
+  const collection = readJson(join(root, "config", "collection.json"));
+  const since = Date.now() - days * 86_400_000;
+
+  const sources = db
+    .prepare("SELECT id, enabled, last_error FROM sources")
+    .all();
+  const yieldRows = db
+    .prepare(
+      `SELECT source_id src, COUNT(*) seen,
+        SUM(status = 'active' AND score >= 40) visible,
+        SUM(status = 'active' AND score >= ? AND hot_chance >= ?) publishable,
+        MAX(score) best,
+        ROUND(AVG(CASE WHEN score >= 40 THEN hot_chance END), 0) hot
+       FROM deals WHERE last_seen_at >= ? GROUP BY 1`,
+    )
+    .all(r.minScore, r.minHotChance, since);
+  const catRows = db
+    .prepare(
+      `SELECT source_id src, category_id cat, COUNT(*) n FROM deals
+       WHERE last_seen_at >= ? AND status = 'active' AND score >= 40
+       GROUP BY 1, 2 ORDER BY n DESC`,
+    )
+    .all(since);
+
+  // Run times and freshness, from the app's run log.
+  const runsFile = join(outDir, "collection-runs.jsonl");
+  const runs = existsSync(runsFile)
+    ? readFileSync(runsFile, "utf8")
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+        .filter((run) => new Date(run.at).getTime() >= since)
+    : [];
+  const runStats = {};
+  for (const run of runs) {
+    for (const s of run.sources) {
+      const st = (runStats[s.id] ??= {
+        runs: 0,
+        errors: 0,
+        ms: [],
+        withNew: 0,
+        newVisible: 0,
+      });
+      st.runs++;
+      if (s.error) st.errors++;
+      if (s.ms !== undefined) st.ms.push(s.ms);
+      if ((s.createdVisible ?? 0) > 0) st.withNew++;
+      st.newVisible += s.createdVisible ?? 0;
+    }
+  }
+
+  // Our posts (agents and manual) with their temperature, by source.
+  const report = existsSync(fileOf("report"))
+    ? readJson(fileOf("report"))
+    : await fetchReport(24, 30);
+  const ours = {};
+  for (const p of report.posted ?? []) {
+    const o = (ours[p.sourceId ?? "?"] ??= { n: 0, hot: 0, temps: [] });
+    o.n++;
+    if ((p.temperature ?? 0) >= r.learning.hotThreshold) o.hot++;
+    if (p.temperature !== undefined) o.temps.push(p.temperature);
+  }
+
+  const perSource = sources
+    .map((s) => {
+      const y = yieldRows.find((row) => row.src === s.id) ?? {};
+      const st = runStats[s.id];
+      const o = ours[s.id];
+      const sched = collection.sources?.[s.id] ?? {};
+      return {
+        id: s.id,
+        on: !!s.enabled && sched.enabled !== false,
+        locked: (collection.lockedSources ?? []).includes(s.id) || undefined,
+        everyHours: sched.everyHours ?? 1,
+        notPublished: r.excludedSources.includes(s.id) || undefined,
+        seen: y.seen ?? 0,
+        visible: y.visible ?? 0,
+        publishable: y.publishable ?? 0,
+        bestScore: y.best ?? 0,
+        avgHotChance: y.hot ?? 0,
+        categories: catRows
+          .filter((row) => row.src === s.id)
+          .slice(0, 3)
+          .map((row) => `${row.cat}:${row.n}`)
+          .join(" "),
+        runs: st?.runs ?? 0,
+        medianSec: st ? Math.round((median(st.ms) ?? 0) / 1000) : undefined,
+        errorRate: st ? Math.round((100 * st.errors) / st.runs) : undefined,
+        runsWithNewVisible: st?.withNew,
+        newVisible: st?.newVisible,
+        ourPosts: o
+          ? `${o.n} posts, ${o.hot} hot, médiane ${median(o.temps) ?? "?"}°`
+          : undefined,
+        lastError: s.last_error ? s.last_error.slice(0, 80) : undefined,
+      };
+    })
+    .sort((a, b) => b.publishable - a.publishable || b.visible - a.visible);
+
+  // What the Dealabs community makes hot, and what we don't cover.
+  const hot = await readDealabsListing("hot", 10);
+  const summarize = (list) => ({
+    n: list.length,
+    medianTemp: median(list.map((t) => t.temp)),
+  });
+  const byMerchant = {};
+  const byGroup = {};
+  for (const t of hot) {
+    (byMerchant[t.merchant] ??= []).push(t);
+    (byGroup[t.group] ??= []).push(t);
+  }
+  const covered = (t) => sourcesOfMerchant(t.merchant).length > 0;
+
+  return {
+    days,
+    rules: {
+      minScore: r.minScore,
+      minHotChance: r.minHotChance,
+      excludedSources: r.excludedSources,
+    },
+    collection: {
+      lockedSources: collection.lockedSources,
+      everyHoursBounds: [1, 24],
+      amazon: {
+        limit: collection.amazon.limit,
+        bounds: collection.amazon.bounds,
+        pages: Object.fromEntries(
+          Object.entries(collection.amazon.extraPages).map(([k, v]) => [
+            k,
+            v.enabled,
+          ]),
+        ),
+      },
+      cdiscount: {
+        limit: collection.cdiscount.limit,
+        bounds: collection.cdiscount.bounds,
+        pages: Object.fromEntries(
+          Object.entries(collection.cdiscount.extraPages).map(([k, v]) => [
+            k,
+            v.enabled,
+          ]),
+        ),
+      },
+    },
+    runsLogged: runs.length,
+    perSource,
+    dealabsHot: {
+      threads: hot.length,
+      coveredShare: Math.round(
+        (100 * hot.filter(covered).length) / Math.max(1, hot.length),
+      ),
+      byGroup: Object.entries(byGroup)
+        .map(([group, list]) => ({
+          group,
+          ...summarize(list),
+          covered: list.filter(covered).length,
+        }))
+        .sort((a, b) => b.n - a.n),
+      merchants: Object.entries(byMerchant)
+        .map(([merchant, list]) => ({
+          merchant,
+          ...summarize(list),
+          groups: [...new Set(list.map((t) => t.group))].slice(0, 3).join(", "),
+          ourSources: sourcesOfMerchant(merchant).join(",") || "NON COUVERT",
+          example: list
+            .slice()
+            .sort((a, b) => b.temp - a.temp)[0]
+            .title.slice(0, 70),
+        }))
+        .sort((a, b) => b.n - a.n)
+        .slice(0, 30),
+    },
+    rejectedSources: collection.rejectedSources ?? {},
+  };
+}
+
+const BLOCK_SIGNS =
+  /captcha|datadome|just a moment|access denied|cf-chl|perimeterx|are you a robot|robot check|incapsula/i;
+
+/**
+ * Can a candidate shop be read without a browser? Status, size, prices
+ * and structured data in the HTML, anti-bot signs. A first check before
+ * writing a source proposal — never a scraper.
+ */
+async function probe(url) {
+  if (!url.startsWith("https://")) throw new Error("probe: https URL only");
+  const started = Date.now();
+  const res = await fetch(url, {
+    headers: {
+      ...DEALABS_HEADERS,
+      accept: "text/html,application/json;q=0.9,*/*;q=0.8",
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(25_000),
+  }).catch((error) => ({ error: String(error?.message ?? error) }));
+  if ("error" in res) return { url, ok: false, error: res.error };
+  const body = await res.text();
+  const ldJson = [
+    ...body.matchAll(
+      /<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/g,
+    ),
+  ];
+  return {
+    url,
+    finalUrl: res.url,
+    status: res.status,
+    ms: Date.now() - started,
+    bytes: body.length,
+    contentType: res.headers.get("content-type"),
+    title: body
+      .match(/<title[^>]*>([^<]*)/i)?.[1]
+      ?.trim()
+      .slice(0, 100),
+    blocked: BLOCK_SIGNS.test(body.slice(0, 50_000)) || res.status === 403,
+    euroPrices: (body.match(/\d+[,.]\d{2}\s?(€|&euro;|EUR)/g) ?? []).length,
+    ldJsonBlocks: ldJson.length,
+    ldJsonOffers: ldJson.filter((m) => /"price"|"lowPrice"/.test(m[1])).length,
+    embeddedState:
+      /__NEXT_DATA__|self\.__next_f|__NUXT__|__PRELOADED_STATE__/.test(body),
+    sample: body
+      .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/g, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 300),
   };
 }
 
@@ -503,7 +1420,9 @@ try {
         file: fileOf("report"),
         candidates: report.candidates.length,
         posted: report.posted.length,
-        withTemperature: report.posted.filter((p) => p.temperature !== undefined).length,
+        withTemperature: report.posted.filter(
+          (p) => p.temperature !== undefined,
+        ).length,
         ledger: report.ledger.length,
       });
       break;
@@ -513,18 +1432,31 @@ try {
       break;
     case "publish-queue":
       if (!args[0]) throw new Error("usage: publish-queue <queue.json>");
-      print(await publishQueue(args[0]));
+      print(await publishQueue(args[0], args.includes("--now")));
       break;
     case "notion-log":
-      if (!["plan", "final"].includes(args[0])) throw new Error("usage: notion-log <plan|final>");
+      if (!["plan", "final"].includes(args[0]))
+        throw new Error("usage: notion-log <plan|final>");
       print(await notionLog(args[0]));
       break;
     case "stats":
       print(await stats(Number(args[0] ?? 28)));
       break;
+    case "tune-stats":
+      print(await tuneStats());
+      break;
+    case "profile-review":
+      print(await profileReview());
+      break;
     case "posted": {
-      const report = existsSync(fileOf("report")) ? readJson(fileOf("report")) : await fetchReport(24, 28);
-      print({ failures: report.failures, ledger: report.ledger.length, otherPosts: report.otherPosts?.length ?? 0 });
+      const report = existsSync(fileOf("report"))
+        ? readJson(fileOf("report"))
+        : await fetchReport(24, 28);
+      print({
+        failures: report.failures,
+        ledger: report.ledger.length,
+        otherPosts: report.otherPosts?.length ?? 0,
+      });
       for (const p of report.posted ?? []) {
         process.stdout.write(
           `${[p.dealId, p.publishedAt?.slice(0, 10), p.sourceId, p.categoryId, p.price, p.score, p.hotChance, p.temperature ?? "?", p.isHot ? "HOT" : "", p.isExpired ? "expired" : "", p.title].join(" | ")}\n`,
@@ -534,20 +1466,34 @@ try {
     }
     case "check-shop": {
       if (!args[0]) throw new Error("usage: check-shop <dealId>");
-      const res = await api("GET", `/deals/${encodeURIComponent(args[0])}/publish-check`);
-      print(res.ok ? res.body : { ok: false, reason: `check failed (${res.status})` });
+      const res = await api(
+        "GET",
+        `/deals/${encodeURIComponent(args[0])}/publish-check`,
+      );
+      print(
+        res.ok
+          ? res.body
+          : { ok: false, reason: `check failed (${res.status})` },
+      );
       break;
     }
     case "publish":
       if (!args[0]) throw new Error("usage: publish <dealId>");
       print(await publish(args[0]));
       break;
+    case "sources-review":
+      print(await sourcesReview(Number(args[0] ?? 7)));
+      break;
+    case "probe":
+      if (!args[0]) throw new Error("usage: probe <url>");
+      print(await probe(args[0]));
+      break;
     case "ledger":
       print(readLedger(Number(args[0] ?? 60)));
       break;
     default:
       throw new Error(
-        "commands: ensure-server | report | shortlist | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days]",
+        "commands: ensure-server | report | shortlist | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days] | sources-review [days] | probe <url>",
       );
   }
 } catch (error) {

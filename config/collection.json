@@ -1,0 +1,178 @@
+{
+  "$comment": "Collection focus, re-read before each collection run (no restart), steered by the deals-sources skill (logged in docs/sources-changelog.md). `limit` = product pages opened per run (each one is a request the shop may flag); `extraPages` are verified listing pages added to the defaults — only pages listed here can be enabled, agents never add URLs. `sources`: per-source schedule — `enabled: false` skips a source in scheduled runs (its code and data stay), `everyHours` (1–24) runs it at most every N hours. `lockedSources` (Adam) are never switched off.",
+  "version": 4,
+  "updatedAt": "2026-10-24",
+  "updatedBy": "deals-sources",
+  "amazon": {
+    "limit": 250,
+    "bounds": [150, 300],
+    "extraPages": {
+      "electronics": {
+        "url": "https://www.amazon.fr/deals?bubble-id=deals-collection-electronics",
+        "enabled": true
+      },
+      "home-improvement": {
+        "url": "https://www.amazon.fr/deals?bubble-id=deals-collection-home-improvement",
+        "enabled": true
+      },
+      "kitchen": {
+        "url": "https://www.amazon.fr/deals?bubble-id=deals-collection-kitchen",
+        "enabled": true
+      }
+    }
+  },
+  "cdiscount": {
+    "limit": 250,
+    "bounds": [150, 300],
+    "extraPages": {
+      "ecrans": {
+        "url": "https://www.cdiscount.com/informatique/ecrans-informatiques/l-10732.html",
+        "enabled": true
+      },
+      "tablettes": {
+        "url": "https://www.cdiscount.com/informatique/tablettes-tactiles-ebooks/l-10798.html",
+        "enabled": true
+      },
+      "high-tech": {
+        "url": "https://www.cdiscount.com/high-tech/v-106-0.html",
+        "enabled": true
+      }
+    }
+  },
+  "lockedSources": ["amazon", "amazon-watch", "cdiscount", "lenovo", "manual"],
+  "sources": {
+    "steam": {
+      "enabled": true,
+      "everyHours": 6
+    },
+    "amazon": {
+      "enabled": true
+    },
+    "cdiscount": {
+      "enabled": true
+    },
+    "aliexpress": {
+      "enabled": true,
+      "everyHours": 24
+    },
+    "orange": {
+      "enabled": true,
+      "everyHours": 12
+    },
+    "free": {
+      "enabled": true,
+      "everyHours": 12
+    },
+    "bouygues": {
+      "enabled": true,
+      "everyHours": 12
+    },
+    "sfr": {
+      "enabled": true,
+      "everyHours": 12
+    },
+    "sosh": {
+      "enabled": true,
+      "everyHours": 24
+    },
+    "epic": {
+      "enabled": true,
+      "everyHours": 12
+    },
+    "gog": {
+      "enabled": true,
+      "everyHours": 6
+    },
+    "nintendo": {
+      "enabled": true,
+      "everyHours": 6
+    },
+    "playstation": {
+      "enabled": true
+    },
+    "xbox": {
+      "enabled": true,
+      "everyHours": 6
+    },
+    "lidl": {
+      "enabled": true,
+      "everyHours": 6
+    },
+    "ikea": {
+      "enabled": true,
+      "everyHours": 12
+    },
+    "leclerc": {
+      "enabled": true,
+      "everyHours": 6
+    },
+    "carrefour": {
+      "enabled": true,
+      "everyHours": 6
+    },
+    "grosbill": {
+      "enabled": true,
+      "everyHours": 6
+    },
+    "nike": {
+      "enabled": true,
+      "everyHours": 6
+    },
+    "footlocker": {
+      "enabled": true,
+      "everyHours": 12
+    },
+    "castorama": {
+      "enabled": true
+    },
+    "freegames": {
+      "enabled": true
+    },
+    "lenovo": {
+      "enabled": true
+    },
+    "relances": {
+      "enabled": true,
+      "everyHours": 6
+    },
+    "itjustgood": {
+      "enabled": true,
+      "everyHours": 24
+    },
+    "joybuy": {
+      "enabled": true
+    },
+    "amazon-watch": {
+      "enabled": true
+    }
+  },
+  "rejectedSources": {
+    "fnac": "bloque les robots ou n'affiche rien sans navigateur (testé) — flux d'affiliation officiel (Awin) = la voie légitime",
+    "darty": "bloque les robots ou n'affiche rien sans navigateur (testé) — flux d'affiliation officiel (Awin) = la voie légitime",
+    "boulanger": "bloque les robots ou n'affiche rien sans navigateur (testé) — flux d'affiliation officiel = la voie légitime",
+    "decathlon": "bloque les robots ou n'affiche rien sans navigateur (testé)",
+    "leroy-merlin": "bloque les robots ou n'affiche rien sans navigateur (testé)",
+    "intersport": "bloque les robots ou n'affiche rien sans navigateur (testé)",
+    "sephora": "bloque les robots ou n'affiche rien sans navigateur (testé)",
+    "marionnaud": "bloque les robots ou n'affiche rien sans navigateur (testé)",
+    "back-market": "bloque les robots ou n'affiche rien sans navigateur (testé)",
+    "rakuten": "bloque les robots ou n'affiche rien sans navigateur (testé)",
+    "king-jouet": "bloque les robots ou n'affiche rien sans navigateur (testé)",
+    "humble": "bloque les robots ou n'affiche rien sans navigateur (testé)",
+    "intermarche": "bloque les robots ou n'affiche rien sans navigateur (testé)",
+    "auchan": "bloque les robots ou n'affiche rien sans navigateur (testé)",
+    "ldlc": "marketplace avec faux prix barrés",
+    "apple-reconditionne": "pas de prix de référence",
+    "materiel-net": "pas de prix barrés",
+    "dell": "codes promo, surtout -10 % pro",
+    "hp": "codes panier, pas de prix",
+    "lookfantastic": "codes promo, pas de prix",
+    "asus-acer-msi": "boutiques testées, rien d'exploitable",
+    "frandroid": "prix chargés côté client",
+    "idealo": "refuse les navigateurs automatisés",
+    "ledenicheur": "refuse les navigateurs automatisés",
+    "camelcamelcamel": "contrôle de sécurité",
+    "psprices": "403",
+    "gg-deals": "403"
+  }
+}

@@ -260,7 +260,32 @@ deals and, separately, the visible ones (`createdVisible`).
   posted, a still-live repost within 14 days, marketplace seller, unknown
   product; an account offset calibrates it to our posts (~10 % reach 100°).
   Indicative only (AUC ~0.65 on our posts). Used by the "Potentiel Dealabs"
-  sort and by auto-publish (`AUTO_PUBLISH_MIN_HOT_CHANCE`, 35). The Dealabs
+  sort and by auto-publish (`AUTO_PUBLISH_MIN_HOT_CHANCE`, 35).
+  **Desirability** (`services/desirability.ts`): brand and product-type
+  terms from `config/desirability.json` (re-read when it changes; none on
+  Workers), added through `predictDealHeat` — no brand term for video games
+  (their titles name the store), an unknown-brand penalty for tech/home/DIY.
+  Weights are measured on the Dealabs threads stored in deals' history and
+  tuned daily by the local `deals-debrief` skill (`docs/desirability-changelog.md`).
+- **Collection tuning** (`services/collectionTuning.ts`): before each run,
+  `CollectionService.applyCollectionTuning()` adds the enabled
+  `extraPages` of `config/collection.json` to the Amazon/Cdiscount defaults
+  and applies its clamped `limit` (`setTargets` on the collectors) — no
+  restart needed. Agents only toggle listed, verified pages. Its `sources`
+  map schedules each source (`sourceDue`: `enabled: false` skips it in
+  `runAll()` and lets its deals expire; `everyHours` 1–24 since its last
+  success), never for `lockedSources`. Each run appends time and yield per
+  source to `data/agents/collection-runs.jsonl` (local only). The daily
+  `deals-sources` skill owns this file (see `docs/sources-changelog.md`).
+- **Local agents** (`.claude/agents`, `.claude/skills/deals-*`,
+  `scripts/agents/`): a Windows scheduled task runs `evening.ps1` at 17:00
+  — selection (Mon–Fri), random-time publishing through
+  `/api/admin/agent-report` and the publish endpoint, Notion logs, weekly
+  review of `config/publish-rules.json` (Sunday), a daily sources review
+  (`deals-sources`: yield per source vs what goes hot on Dealabs →
+  `config/collection.json`, `probe` of new shops, source proposals for
+  `deals-code`), and an evening debrief (`deals-debrief`: our Dealabs profile and its comments → `config/selection-lessons.md`, desirability, collection, small rule steps, Notion analysis). Everything
+  deterministic is in `scripts/agents/dealradar.mjs`; Claude only judges. The Dealabs
   history stores our own threads tagged `mine` (`DEALABS_USERNAME`) but never
   counts them in the score's figures or the prediction, and, in
   `isSameProduct`, bundles/roundups, a short name without its model code,

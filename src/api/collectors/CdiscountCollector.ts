@@ -46,7 +46,7 @@ export class CdiscountCollector implements DealSource {
   id = "cdiscount";
   name = "Cdiscount (bons plans, auto)";
 
-  protected readonly homeUrls: string[];
+  protected homeUrls: string[];
 
   constructor(
     homeUrls: string | string[],
@@ -55,6 +55,15 @@ export class CdiscountCollector implements DealSource {
     protected getCloudflareBinding?: () => CloudflareBrowserBinding | undefined,
   ) {
     this.homeUrls = Array.isArray(homeUrls) ? homeUrls : [homeUrls];
+  }
+
+  /**
+   * Pages and per-run cap for the next run — `CollectionService` applies
+   * `config/collection.json` (tuned by the local agents) before each run.
+   */
+  setTargets(homeUrls: string[], limit: number): void {
+    this.homeUrls = homeUrls;
+    this.limit = limit;
   }
 
   async discover(context?: DiscoverContext): Promise<RawDeal[]> {

@@ -1,6 +1,7 @@
 import { $module } from "alepha";
 
 import { AdminController } from "./controllers/AdminController.ts";
+import { AgentsController } from "./controllers/AgentsController.ts";
 import { AuthController } from "./controllers/AuthController.ts";
 import { CatalogController } from "./controllers/CatalogController.ts";
 import { DealsController } from "./controllers/DealsController.ts";
@@ -10,6 +11,7 @@ import { ProductsController } from "./controllers/ProductsController.ts";
 import { SourcesController } from "./controllers/SourcesController.ts";
 import { StatsController } from "./controllers/StatsController.ts";
 import { CollectDealsJob } from "./jobs/CollectDealsJob.ts";
+import { AgentsService } from "./services/AgentsService.ts";
 import { AmazonWatchService } from "./services/AmazonWatchService.ts";
 import { AutoPublishService } from "./services/AutoPublishService.ts";
 import { CategorizationService } from "./services/CategorizationService.ts";
@@ -41,10 +43,12 @@ export const ApiModule = $module({
     AdminController,
     StatsController,
     KeepaController,
+    AgentsController,
     // jobs
     CollectDealsJob,
     // services
     CollectionService,
+    AgentsService,
     CollectionProgressService,
     AutoPublishService,
     PricingService,

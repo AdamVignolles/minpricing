@@ -1,4 +1,10 @@
 import type { StoredDealabsDeal } from "./DealabsHistoryService.ts";
+import {
+  type DesirabilityTerm,
+  type DesirabilityWeights,
+  desirabilityTerms,
+  loadDesirability,
+} from "./desirability.ts";
 import { isComputer, parsePcSpecs, pcWarnings } from "./pcSpecs.ts";
 import type { DealEvaluation } from "./ScoringService.ts";
 
@@ -90,6 +96,8 @@ export interface HeatInput {
   specWarnings?: string[];
   /** `Deal.dealabsHistory`, parsed. */
   history?: StoredDealabsDeal[];
+  /** Brand / product-type desirability (see `desirability.ts`). */
+  extraTerms?: DesirabilityTerm[];
 }
 
 export interface HeatPrediction {
@@ -199,6 +207,8 @@ export function predictHeat(
     }
   }
 
+  terms.push(...(input.extraTerms ?? []));
+
   if (input.specWarnings?.length) {
     // The configuration is what PC buyers argue about first (16 Go on a
     // 1 000 € laptop went to -11°).
@@ -257,6 +267,7 @@ export function predictDealHeat(
   },
   evaluation: Pick<DealEvaluation, "reference">,
   now = new Date(),
+  desirability: DesirabilityWeights = loadDesirability(),
 ): HeatPrediction {
   let history: StoredDealabsDeal[] = [];
   try {
@@ -275,6 +286,7 @@ export function predictDealHeat(
       sellerName: deal.sellerName,
       productReviewCount: deal.productReviewCount,
       history,
+      extraTerms: desirabilityTerms(deal.title, deal.categoryId, desirability),
       specWarnings: isComputer(deal.title)
         ? pcWarnings(
             parsePcSpecs(`${deal.title}\n${deal.description ?? ""}`),

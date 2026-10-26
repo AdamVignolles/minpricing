@@ -26,13 +26,20 @@ Numbers decide, not impressions. Everything you write is French.
      `minScore`;
    - `perDay.max` may move by 1 within `bounds.perDayMax` (more if the
      hot rate rises, fewer if it falls); never touch `publishDays`,
-     `window`, nor shrink `excludedSources` (Adam's choices);
+     `window`, `adamPreferences`, nor shrink `excludedSources` (Adam's
+     choices);
    - at most 3 keys a week, all values clamped to `bounds`. "No change" is
-     a valid decision.
-   If changing: copy current rules to `config/publish-rules.previous.json`,
-   write the new file (version + 1, `updatedAt`, `updatedBy:
-   "deals-weekly"`), prepend a changelog entry (what, from → to, the
-   numbers, what you expect).
+     a valid decision;
+   - **`adamPreferences` are limits you never cross**: video-games adjust
+     stays ≤ its `categoryAdjustMax`, computing ≥ its `categoryAdjustMin`,
+     Amazon sources ≥ their `sourceAdjustMin`, `categoryCaps` ≤
+     `categoryCapsMax`. You may make them stronger. If the numbers say one
+     of them is wrong, don't change it — write it in the Résumé as a
+     suggestion for Adam.
+     If changing: copy current rules to `config/publish-rules.previous.json`,
+     write the new file (version + 1, `updatedAt`, `updatedBy:
+"deals-weekly"`), prepend a changelog entry (what, from → to, the
+     numbers, what you expect).
 4. **Code proposal** only if rules can't fix it (e.g. a category's
    calibration wrong over ≥ 20 posts): write
    `data/agents/code-proposal-<today>.md` — problem with numbers, exact
@@ -43,4 +50,8 @@ Numbers decide, not impressions. Everything you write is French.
    hotRate, Changements de règles (one line per change or "Aucun"),
    Résumé (3 sentences). Page body: a table per group (n, hot, taux,
    médiane °) and the decision with its reason.
-Reply in two lines: hot rate, decisions.
+   Also write the same report as plain Markdown (no Notion tags) to
+   `data/agents/reports/bilan-<today>.md`: first line `# Bilan semaine du
+<today>`, then `> ` + the Résumé, the tables and the decision. The
+   console's Agents page shows it.
+   Reply in two lines: hot rate, decisions.

@@ -3,6 +3,23 @@
 Every change to `config/publish-rules.json`, newest first. Written by the
 `results-reviewer` agent (or by hand), with the numbers that justified it.
 
+## v3 — 2026-10-23 — Adam
+
+- **Fewer games, more PC / tech / Amazon.** The heat model gives video
+  games a Dealabs-wide bonus (hot chance 10–36 %) and Amazon/PC deals
+  almost nothing (3–9 %), so with a 20 % bar only games passed — 22 of the
+  25 candidates on 2026-10-22. Our own history says the opposite: games 1
+  hot out of 12 posts; what burned was a 3D printer, a Ryobi tool and a
+  famous game franchise.
+- Adjustments (points of hot chance): video games −12; computing +15;
+  phones, audio, TV/photo, DIY +10; appliances +5. Sources: Amazon and
+  Amazon silent drops +10, Cdiscount and Lenovo +5.
+- At most **1 video game published a day** (`categoryCaps`).
+- The candidates are now the best of _each_ category (not an overall top
+  25), and the shortlist keeps at most 3 per category.
+- These are Adam's preferences (`adamPreferences`): the weekly review may
+  strengthen them, never weaken them. Adjust bounds widened to ±25.
+
 ## v2 — 2026-10-21 — Adam
 
 - Monday to Friday only (`publishDays`), nothing on weekends.
