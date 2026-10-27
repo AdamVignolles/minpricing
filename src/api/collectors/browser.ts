@@ -59,6 +59,7 @@ export type CloudflareBrowserBinding =
 export async function withBrowser<T>(
   fn: (browser: DealsBrowserHandle) => Promise<T>,
   cloudflareBinding?: CloudflareBrowserBinding,
+  options: WithBrowserOptions<T> = {},
 ): Promise<T> {
   if (cloudflareBinding) {
     const { default: puppeteer } = await import("@cloudflare/puppeteer");
@@ -77,12 +78,86 @@ export async function withBrowser<T>(
   // module... [code: 10021]"), even though this branch never runs there.
   // A dynamic `import()` is only resolved if actually awaited, so it never
   // trips that check on the `cloudflareBinding` path above.
+  const lightpandaUrl = lightpandaEndpoint(options.source);
+  if (lightpandaUrl) {
+    try {
+      const { chromium } = await import("playwright");
+      const browser = await chromium.connectOverCDP(lightpandaUrl);
+      try {
+        const result = await fn({ engine: "playwright", browser });
+        const isEmpty = options.isEmpty ?? isEmptyResult;
+        if (!isEmpty(result)) return result;
+        noteLightpandaFallback(options.source, "empty result");
+      } finally {
+        await browser.close().catch(() => {});
+      }
+    } catch (error) {
+      noteLightpandaFallback(
+        options.source,
+        error instanceof Error ? error.message.split("\n")[0]! : String(error),
+      );
+    }
+  }
+
   const browser = await acquireSharedBrowser();
   try {
     return await fn({ engine: "playwright", browser });
   } finally {
     await releaseSharedBrowser();
   }
+}
+
+export type BrowserEngine = "chromium" | "lightpanda";
+
+export interface WithBrowserOptions<T> {
+  /** Source id, used to look up its engine in `config/collection.json`. */
+  source?: string;
+  /** What counts as a failed read worth retrying on Chromium (default: `[]`). */
+  isEmpty?: (result: T) => boolean;
+}
+
+const sourceEngines = new Map<string, BrowserEngine>();
+const lightpandaFallbacks = new Map<string, number>();
+
+/** Engines per source id, set before each run from `config/collection.json`. */
+export function configureBrowserEngines(
+  engines: Record<string, BrowserEngine | undefined> | undefined,
+): void {
+  sourceEngines.clear();
+  for (const [source, engine] of Object.entries(engines ?? {})) {
+    if (engine) sourceEngines.set(source, engine);
+  }
+}
+
+/**
+ * Lightpanda's CDP endpoint (`LIGHTPANDA_WS_URL`, e.g. ws://127.0.0.1:9222)
+ * when this source is configured for it. Unset env = always Chromium, so
+ * the feature is inert until Lightpanda is actually running.
+ */
+export function lightpandaEndpoint(source?: string): string | undefined {
+  if (!source || sourceEngines.get(source) !== "lightpanda") return undefined;
+  return process.env.LIGHTPANDA_WS_URL || undefined;
+}
+
+/** Lightpanda to Chromium fallbacks since the last call, per source. */
+export function takeLightpandaFallbacks(): Record<string, number> {
+  const counts = Object.fromEntries(lightpandaFallbacks);
+  lightpandaFallbacks.clear();
+  return counts;
+}
+
+function noteLightpandaFallback(source: string | undefined, why: string) {
+  if (!source) return;
+  lightpandaFallbacks.set(source, (lightpandaFallbacks.get(source) ?? 0) + 1);
+  console.warn(`[browser] ${source}: Lightpanda failed (${why}), using Chromium`);
+}
+
+function isEmptyResult(result: unknown): boolean {
+  return (
+    result == null ||
+    result === "" ||
+    (Array.isArray(result) && result.length === 0)
+  );
 }
 
 /**

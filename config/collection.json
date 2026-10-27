@@ -1,5 +1,5 @@
 {
-  "$comment": "Collection focus, re-read before each collection run (no restart), steered by the deals-sources skill (logged in docs/sources-changelog.md). `limit` = product pages opened per run (each one is a request the shop may flag); `extraPages` are verified listing pages added to the defaults — only pages listed here can be enabled, agents never add URLs. `sources`: per-source schedule — `enabled: false` skips a source in scheduled runs (its code and data stay), `everyHours` (1–24) runs it at most every N hours. `lockedSources` (Adam) are never switched off.",
+  "$comment": "Collection focus, re-read before each collection run (no restart), steered by the deals-sources skill (logged in docs/sources-changelog.md). `limit` = product pages opened per run (each one is a request the shop may flag); `extraPages` are verified listing pages added to the defaults — only pages listed here can be enabled, agents never add URLs. `sources`: per-source schedule — `enabled: false` skips a source in scheduled runs (its code and data stay), `everyHours` (1–24) runs it at most every N hours. `engine: \"lightpanda\"` reads a source with Lightpanda (needs LIGHTPANDA_WS_URL, falls back to Chromium on error or empty result; default chromium). `lockedSources` (Adam) are never switched off.",
   "version": 4,
   "updatedAt": "2026-10-24",
   "updatedBy": "deals-sources",
@@ -49,11 +49,13 @@
       "enabled": true
     },
     "cdiscount": {
-      "enabled": true
+      "enabled": true,
+      "engine": "lightpanda"
     },
     "aliexpress": {
       "enabled": true,
-      "everyHours": 24
+      "everyHours": 24,
+      "engine": "lightpanda"
     },
     "orange": {
       "enabled": true,
@@ -108,7 +110,8 @@
     },
     "carrefour": {
       "enabled": true,
-      "everyHours": 6
+      "everyHours": 6,
+      "engine": "lightpanda"
     },
     "grosbill": {
       "enabled": true,

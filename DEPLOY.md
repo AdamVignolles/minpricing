@@ -128,6 +128,18 @@ If Cloudflare ever changes the Browser Rendering binding's shape, or
 Alepha adds first-class support for it, `browser.ts` is the only file that
 needs to change.
 
+## Optional: Lightpanda on the VM
+
+Install the binary (https://github.com/lightpanda-io/browser/releases), run
+`lightpanda serve --host 127.0.0.1 --port 9222` as a service and set
+`LIGHTPANDA_WS_URL=ws://127.0.0.1:9222`. Sources with `"engine":
+"lightpanda"` in `config/collection.json` then use it and fall back to
+Chromium on error or empty result (counted per run as `lightpandaFallbacks`
+in `data/agents/collection-runs.jsonl`). Node/VM only; ignored on Workers.
+`scripts/probe-lightpanda.mjs` compares both engines on our pages. Probe
+(Oct 2026): same items as Chromium except Sosh (403), RAM much lower, CPU
+not consistently lower.
+
 ## Gotcha: Workers bundling for `playwright` / `@cloudflare/puppeteer`
 
 Two related but opposite bugs hit this exact code path during the first

@@ -47,33 +47,35 @@ export class CarrefourCollector implements DealSource {
   ) {}
 
   async discover(context?: DiscoverContext): Promise<RawDeal[]> {
-    return withBrowser(async (browser) => {
-      const deals = new Map<string, RawDeal>();
-      for (const [index, url] of CARREFOUR_PAGES.entries()) {
-        context?.progress?.(
-          "Bons plans high-tech & maison",
-          index + 1,
-          CARREFOUR_PAGES.length,
-        );
-        try {
-          const cards = await withPage(browser, async (page) => {
-            await page.goto(url, {
-              waitUntil: "domcontentloaded",
-              timeout: 30_000,
-            });
-            await page
-              .waitForSelector("article[data-testid]", { timeout: 15_000 })
-              .catch(() => undefined);
-            // The grid loads more cards as it scrolls.
-            await page.evaluate(async () => {
-              for (let i = 0; i < 6; i++) {
-                window.scrollBy(0, 2500);
-                await new Promise((resolve) => setTimeout(resolve, 800));
-              }
-            });
-            return page.evaluate(() =>
-              Array.from(document.querySelectorAll("article[data-testid]")).map(
-                (el): CarrefourCard => ({
+    return withBrowser(
+      async (browser) => {
+        const deals = new Map<string, RawDeal>();
+        for (const [index, url] of CARREFOUR_PAGES.entries()) {
+          context?.progress?.(
+            "Bons plans high-tech & maison",
+            index + 1,
+            CARREFOUR_PAGES.length,
+          );
+          try {
+            const cards = await withPage(browser, async (page) => {
+              await page.goto(url, {
+                waitUntil: "domcontentloaded",
+                timeout: 30_000,
+              });
+              await page
+                .waitForSelector("article[data-testid]", { timeout: 15_000 })
+                .catch(() => undefined);
+              // The grid loads more cards as it scrolls.
+              await page.evaluate(async () => {
+                for (let i = 0; i < 6; i++) {
+                  window.scrollBy(0, 2500);
+                  await new Promise((resolve) => setTimeout(resolve, 800));
+                }
+              });
+              return page.evaluate(() =>
+                Array.from(
+                  document.querySelectorAll("article[data-testid]"),
+                ).map((el): CarrefourCard => ({
                   ean: el.getAttribute("data-testid") ?? "",
                   href:
                     el
@@ -93,48 +95,52 @@ export class CarrefourCollector implements DealSource {
                     el
                       .querySelector(".sticker-promo__text")
                       ?.textContent?.trim() ?? "",
-                }),
-              ),
-            );
-          });
-          for (const card of cards) {
-            const prices = parseCarrefourPrices(card.text);
-            if (!/^\d{8,14}$/.test(card.ean) || !card.href || !card.title) {
-              continue;
-            }
-            if (!prices || deals.has(card.ean)) continue;
-            deals.set(card.ean, {
-              externalId: card.ean,
-              // The brand is usually already at the end of the title.
-              title: card.title.toUpperCase().includes(card.brand.toUpperCase())
-                ? card.title
-                : `${card.brand} ${card.title}`.trim(),
-              url: `https://www.carrefour.fr${card.href}`,
-              imageUrl:
-                card.image?.replace("p_200x200", "p_540x540") ?? undefined,
-              price: prices.price,
-              listPrice: prices.listPrice,
-              currency: "EUR",
-              availability: "in_stock",
-              merchantId: "carrefour",
-              description: card.promo
-                ? `Offre Carrefour : ${card.promo}.`
-                : undefined,
-              details: {
-                ean: card.ean,
-                sellerName: "Carrefour",
-                soldByMerchant: true,
-                shippedByMerchant: true,
-                condition: "new",
-                listPriceKind: "regular",
-              },
+                })),
+              );
             });
+            for (const card of cards) {
+              const prices = parseCarrefourPrices(card.text);
+              if (!/^\d{8,14}$/.test(card.ean) || !card.href || !card.title) {
+                continue;
+              }
+              if (!prices || deals.has(card.ean)) continue;
+              deals.set(card.ean, {
+                externalId: card.ean,
+                // The brand is usually already at the end of the title.
+                title: card.title
+                  .toUpperCase()
+                  .includes(card.brand.toUpperCase())
+                  ? card.title
+                  : `${card.brand} ${card.title}`.trim(),
+                url: `https://www.carrefour.fr${card.href}`,
+                imageUrl:
+                  card.image?.replace("p_200x200", "p_540x540") ?? undefined,
+                price: prices.price,
+                listPrice: prices.listPrice,
+                currency: "EUR",
+                availability: "in_stock",
+                merchantId: "carrefour",
+                description: card.promo
+                  ? `Offre Carrefour : ${card.promo}.`
+                  : undefined,
+                details: {
+                  ean: card.ean,
+                  sellerName: "Carrefour",
+                  soldByMerchant: true,
+                  shippedByMerchant: true,
+                  condition: "new",
+                  listPriceKind: "regular",
+                },
+              });
+            }
+          } catch {
+            // A page failing (challenge, layout change) skips it, not the run.
           }
-        } catch {
-          // A page failing (challenge, layout change) skips it, not the run.
         }
-      }
-      return [...deals.values()];
-    }, this.getCloudflareBinding?.());
+        return [...deals.values()];
+      },
+      this.getCloudflareBinding?.(),
+      { source: this.id },
+    );
   }
 }

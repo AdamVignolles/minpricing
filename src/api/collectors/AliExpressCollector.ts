@@ -52,172 +52,177 @@ export class AliExpressCollector implements DealSource {
   }
 
   async discover(context?: DiscoverContext): Promise<RawDeal[]> {
-    return withBrowser(async (browser) => {
-      type Card = {
-        id: string;
-        title: string;
-        priceText: string;
-        imageUrl: string | null;
-        lowestInDays?: number;
-        categoryHint?: string;
-        shipsFrom?: string;
-      };
-      const cardsPerPage: Card[][] = [];
+    return withBrowser(
+      async (browser) => {
+        type Card = {
+          id: string;
+          title: string;
+          priceText: string;
+          imageUrl: string | null;
+          lowestInDays?: number;
+          categoryHint?: string;
+          shipsFrom?: string;
+        };
+        const cardsPerPage: Card[][] = [];
 
-      // Listing pages a few at a time too (each in its own context).
-      let pagesRead = 0;
-      const perPage = await mapWithConcurrency(
-        this.urls,
-        LISTING_CONCURRENCY,
-        async (url): Promise<Card[]> => {
-          // Search pages say what they are: `/w/wholesale-smartphone.html`
-          // → "aliexpress:smartphone"; `shipFromCountry=FR` → ships from FR.
-          const term = url.match(/wholesale-([a-z0-9-]+)\.html/i)?.[1];
-          const categoryHint = term ? `aliexpress:${term}` : undefined;
-          const shipsFrom =
-            new URL(url).searchParams.get("shipFromCountry") ?? undefined;
-          context?.progress?.(
-            "Lecture des pages deals",
-            ++pagesRead,
-            this.urls.length,
-          );
-          try {
-            const cards = await withPage(browser, async (page) => {
-              await page.goto(url, {
-                waitUntil: "domcontentloaded",
-                timeout: 30_000,
-              });
-              await page
-                .waitForSelector('a[href*="/item/"]', { timeout: 15_000 })
-                .catch(() => {
-                  // No card rendered: this page contributes nothing.
-                });
-              return scrollAndCollect(
-                page,
-                () =>
-                  page.evaluate(() =>
-                    Array.from(
-                      document.querySelectorAll('a[href*="/item/"]'),
-                    ).map((el) => {
-                      const link = el as HTMLAnchorElement;
-                      const id = link.href.match(/\/item\/(\d+)/)?.[1] ?? null;
-                      // Card text: title, price, stock label, rating.
-                      const lines = (link.innerText ?? "")
-                        .split("\n")
-                        .map((line) => line.trim())
-                        .filter(Boolean);
-                      const title =
-                        link
-                          .querySelector("[aria-label]")
-                          ?.getAttribute("aria-label") ??
-                        lines[0] ??
-                        null;
-                      const priceText =
-                        lines.find((line) => /\d+[,.]\d{2}\s?€/.test(line)) ??
-                        null;
-                      const img = link.querySelector(
-                        "img",
-                      ) as HTMLImageElement | null;
-                      return {
-                        id,
-                        title,
-                        priceText,
-                        imageUrl: img?.src || null,
-                        lines,
-                      };
-                    }),
-                  ),
-                (card) => card.id,
-                { rounds: 8 },
-              );
-            });
-            return cards
-              .filter((card) => card.id && card.title && card.priceText)
-              .map((card) => ({
-                id: card.id as string,
-                title: card.title as string,
-                priceText: card.priceText as string,
-                imageUrl: card.imageUrl,
-                lowestInDays: parseCardBadges(card.lines).lowestInDays,
-                categoryHint,
-                shipsFrom,
-              }));
-          } catch {
-            // One listing page failing must not block the others.
-            return [];
-          }
-        },
-      );
-      cardsPerPage.push(...perPage);
-
-      // No-name products are dropped before anything is opened: they'd be
-      // rejected anyway, and the cap is better spent on comparable ones.
-      const candidates = interleave(cardsPerPage, (card) => card.id)
-        .filter((card) => context?.worthFetching?.(card.title) ?? true)
-        .slice(0, this.limit);
-      const toEnrich = candidates.filter(
-        (card) => !context || context.needsDetails(card.id),
-      ).length;
-      let enriched = 0;
-
-      const deals: RawDeal[] = [];
-      const found = await mapWithConcurrency(
-        candidates,
-        PAGE_CONCURRENCY,
-        async (card): Promise<RawDeal | undefined> => {
-          const listingPrice = parsePriceFr(card.priceText);
-          if (listingPrice === undefined) return undefined;
-          const url = `https://fr.aliexpress.com/item/${card.id}.html`;
-
-          let details:
-            | (DealDetails & { price?: number; originalPrice?: number })
-            | undefined;
-          if (!context || context.needsDetails(card.id)) {
-            details = await withPage(browser, (page) =>
-              this.fetchDetails(page, url),
-            ).catch(() => undefined);
+        // Listing pages a few at a time too (each in its own context).
+        let pagesRead = 0;
+        const perPage = await mapWithConcurrency(
+          this.urls,
+          LISTING_CONCURRENCY,
+          async (url): Promise<Card[]> => {
+            // Search pages say what they are: `/w/wholesale-smartphone.html`
+            // → "aliexpress:smartphone"; `shipFromCountry=FR` → ships from FR.
+            const term = url.match(/wholesale-([a-z0-9-]+)\.html/i)?.[1];
+            const categoryHint = term ? `aliexpress:${term}` : undefined;
+            const shipsFrom =
+              new URL(url).searchParams.get("shipFromCountry") ?? undefined;
             context?.progress?.(
-              "Fiches produits (boutique, avis, livraison)",
-              ++enriched,
-              toEnrich,
+              "Lecture des pages deals",
+              ++pagesRead,
+              this.urls.length,
             );
-          }
+            try {
+              const cards = await withPage(browser, async (page) => {
+                await page.goto(url, {
+                  waitUntil: "domcontentloaded",
+                  timeout: 30_000,
+                });
+                await page
+                  .waitForSelector('a[href*="/item/"]', { timeout: 15_000 })
+                  .catch(() => {
+                    // No card rendered: this page contributes nothing.
+                  });
+                return scrollAndCollect(
+                  page,
+                  () =>
+                    page.evaluate(() =>
+                      Array.from(
+                        document.querySelectorAll('a[href*="/item/"]'),
+                      ).map((el) => {
+                        const link = el as HTMLAnchorElement;
+                        const id =
+                          link.href.match(/\/item\/(\d+)/)?.[1] ?? null;
+                        // Card text: title, price, stock label, rating.
+                        const lines = (link.innerText ?? "")
+                          .split("\n")
+                          .map((line) => line.trim())
+                          .filter(Boolean);
+                        const title =
+                          link
+                            .querySelector("[aria-label]")
+                            ?.getAttribute("aria-label") ??
+                          lines[0] ??
+                          null;
+                        const priceText =
+                          lines.find((line) => /\d+[,.]\d{2}\s?€/.test(line)) ??
+                          null;
+                        const img = link.querySelector(
+                          "img",
+                        ) as HTMLImageElement | null;
+                        return {
+                          id,
+                          title,
+                          priceText,
+                          imageUrl: img?.src || null,
+                          lines,
+                        };
+                      }),
+                    ),
+                  (card) => card.id,
+                  { rounds: 8 },
+                );
+              });
+              return cards
+                .filter((card) => card.id && card.title && card.priceText)
+                .map((card) => ({
+                  id: card.id as string,
+                  title: card.title as string,
+                  priceText: card.priceText as string,
+                  imageUrl: card.imageUrl,
+                  lowestInDays: parseCardBadges(card.lines).lowestInDays,
+                  categoryHint,
+                  shipsFrom,
+                }));
+            } catch {
+              // One listing page failing must not block the others.
+              return [];
+            }
+          },
+        );
+        cardsPerPage.push(...perPage);
 
-          // The product page price is the default variant's; the listing's
-          // is what the deal page advertised. Prefer the page when read.
-          const price = details?.price ?? listingPrice;
-          const { price: _price, originalPrice, ...signals } = details ?? {};
-          return {
-            externalId: card.id,
-            title: card.title,
-            url,
-            imageUrl: card.imageUrl ?? undefined,
-            price,
-            listPrice: originalPrice,
-            currency: "EUR",
-            availability: "in_stock",
-            merchantId: "aliexpress",
-            categoryHint: card.categoryHint,
-            details: details
-              ? {
-                  ...signals,
-                  shipsFrom: card.shipsFrom,
-                  // AliExpress' own "lowest price in 90 days" badge: the
-                  // platform's claim, kept with its source.
-                  ...(card.lowestInDays
-                    ? {
-                        historicalLowPrice: price,
-                        historicalLowSource: `AliExpress, plus bas en ${card.lowestInDays} jours`,
-                      }
-                    : {}),
-                }
-              : undefined,
-          };
-        },
-      );
-      deals.push(...found.filter((deal): deal is RawDeal => !!deal));
-      return deals;
-    }, this.getCloudflareBinding?.());
+        // No-name products are dropped before anything is opened: they'd be
+        // rejected anyway, and the cap is better spent on comparable ones.
+        const candidates = interleave(cardsPerPage, (card) => card.id)
+          .filter((card) => context?.worthFetching?.(card.title) ?? true)
+          .slice(0, this.limit);
+        const toEnrich = candidates.filter(
+          (card) => !context || context.needsDetails(card.id),
+        ).length;
+        let enriched = 0;
+
+        const deals: RawDeal[] = [];
+        const found = await mapWithConcurrency(
+          candidates,
+          PAGE_CONCURRENCY,
+          async (card): Promise<RawDeal | undefined> => {
+            const listingPrice = parsePriceFr(card.priceText);
+            if (listingPrice === undefined) return undefined;
+            const url = `https://fr.aliexpress.com/item/${card.id}.html`;
+
+            let details:
+              | (DealDetails & { price?: number; originalPrice?: number })
+              | undefined;
+            if (!context || context.needsDetails(card.id)) {
+              details = await withPage(browser, (page) =>
+                this.fetchDetails(page, url),
+              ).catch(() => undefined);
+              context?.progress?.(
+                "Fiches produits (boutique, avis, livraison)",
+                ++enriched,
+                toEnrich,
+              );
+            }
+
+            // The product page price is the default variant's; the listing's
+            // is what the deal page advertised. Prefer the page when read.
+            const price = details?.price ?? listingPrice;
+            const { price: _price, originalPrice, ...signals } = details ?? {};
+            return {
+              externalId: card.id,
+              title: card.title,
+              url,
+              imageUrl: card.imageUrl ?? undefined,
+              price,
+              listPrice: originalPrice,
+              currency: "EUR",
+              availability: "in_stock",
+              merchantId: "aliexpress",
+              categoryHint: card.categoryHint,
+              details: details
+                ? {
+                    ...signals,
+                    shipsFrom: card.shipsFrom,
+                    // AliExpress' own "lowest price in 90 days" badge: the
+                    // platform's claim, kept with its source.
+                    ...(card.lowestInDays
+                      ? {
+                          historicalLowPrice: price,
+                          historicalLowSource: `AliExpress, plus bas en ${card.lowestInDays} jours`,
+                        }
+                      : {}),
+                  }
+                : undefined,
+            };
+          },
+        );
+        deals.push(...found.filter((deal): deal is RawDeal => !!deal));
+        return deals;
+      },
+      this.getCloudflareBinding?.(),
+      { source: this.id },
+    );
   }
 
   protected async fetchDetails(page: DealsPage, url: string) {

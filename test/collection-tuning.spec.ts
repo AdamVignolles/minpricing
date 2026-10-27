@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveTargets,
   sourceDue,
+  sourceEngines,
 } from "../src/api/services/collectionTuning.ts";
 
 describe("resolveTargets", () => {
@@ -83,5 +84,20 @@ describe("sourceDue", () => {
       reason: "disabled",
     });
     expect(sourceDue("amazon", hoursAgo(5), now, tuning).due).toBe(true);
+  });
+});
+
+describe("browser engines", () => {
+  it("reads only valid engines from the sources map", () => {
+    expect(
+      sourceEngines({
+        sources: {
+          a: { engine: "lightpanda" },
+          b: { engine: "chromium" },
+          c: {},
+          d: { engine: "firefox" as never },
+        },
+      }),
+    ).toEqual({ a: "lightpanda", b: "chromium" });
   });
 });

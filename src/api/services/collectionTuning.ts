@@ -19,6 +19,11 @@ export interface SourceTuning {
   enabled?: boolean;
   /** Run at most once every N hours (the hourly job skips it meanwhile). */
   everyHours?: number;
+  /**
+   * Browser used to read the source: "lightpanda" needs `LIGHTPANDA_WS_URL`
+   * and falls back to Chromium on error or empty result. Default chromium.
+   */
+  engine?: "chromium" | "lightpanda";
 }
 
 export interface CollectionTuning {
@@ -54,6 +59,19 @@ export function sourceDue(
   return elapsed >= hours * 3_600_000 - 10 * 60_000
     ? { due: true }
     : { due: false, reason: "not-yet" };
+}
+
+/** Source id to engine, for the entries that name one. */
+export function sourceEngines(
+  tuning: CollectionTuning,
+): Record<string, "chromium" | "lightpanda"> {
+  const engines: Record<string, "chromium" | "lightpanda"> = {};
+  for (const [id, entry] of Object.entries(tuning.sources ?? {})) {
+    if (entry.engine === "lightpanda" || entry.engine === "chromium") {
+      engines[id] = entry.engine;
+    }
+  }
+  return engines;
 }
 
 export function loadCollectionTuning(
@@ -94,6 +112,8 @@ export interface LoggedSourceRun {
   collected?: number;
   createdVisible?: number;
   error?: string;
+  /** Runs that fell back from Lightpanda to Chromium. */
+  lightpandaFallbacks?: number;
 }
 
 /**
