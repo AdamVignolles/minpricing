@@ -34,7 +34,10 @@
       "cron_utc": "0 7 * * *",
       "agent": "email-manager",
       "model": "claude-sonnet-5-5",
-      "connectors": ["Gmail", "Notion"],
+      "connectors": [
+        "Gmail",
+        "Notion"
+      ],
       "prompt_file": "gmail-morning.md",
       "enabled": true
     },
@@ -47,7 +50,11 @@
       "cron_utc": "15 7 * * *",
       "agent": "calendar-manager",
       "model": "claude-sonnet-5-5",
-      "connectors": ["Google-Calendar", "Gmail", "Notion"],
+      "connectors": [
+        "Google-Calendar",
+        "Gmail",
+        "Notion"
+      ],
       "prompt_file": "calendar-morning.md",
       "enabled": true
     }
