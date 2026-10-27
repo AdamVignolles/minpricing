@@ -55,7 +55,7 @@ export interface AgentReportSummary {
   summary?: string;
 }
 
-const root = () => process.cwd();
+const root = () => process.env.APP_FILES_DIR || process.cwd();
 const agentsDir = () => join(root(), "data", "agents");
 const reportsDir = () => join(agentsDir(), "reports");
 
