@@ -1,5 +1,5 @@
 import { defineConfig } from "alepha/cli/config";
-import { cloudflare, platform } from "alepha/cli/platform";
+import { bay, cloudflare, platform } from "alepha/cli/platform";
 
 export default defineConfig({
   // Only the stylesheet is set explicitly (with forward slashes): an
@@ -55,6 +55,15 @@ export default defineConfig({
     platform({
       environments: {
         production: cloudflare(), // workers.dev subdomain; pass { domain: "..." } for a custom one
+        // AWS VM running Bay. "minpricing-aws" is an alias in ~/.ssh/config
+        // (HostName ec2-13-38-216-109.eu-west-3.compute.amazonaws.com,
+        // User ubuntu, IdentityFile ~/.ssh/aws). The control socket sits
+        // under a non-default root, so it must be given.
+        bay: bay({
+          host: "minpricing-aws",
+          domain: "13.38.216.109.sslip.io",
+          socket: "/run/bay/control.sock",
+        }),
       },
     }),
   ],
