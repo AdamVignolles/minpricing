@@ -1,0 +1,10 @@
+[Unit]
+Description=DealRadar evening agents (selection, publishing, sources, debrief)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/bay/data/apps/minpricing-bay/data
+ExecStart=/opt/bay/data/apps/minpricing-bay/data/scripts/agents/evening.sh
+TimeoutStartSec=6h

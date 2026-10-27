@@ -49,7 +49,12 @@ function readEnv() {
   return env;
 }
 
-const env = readEnv();
+const env = {
+  ...readEnv(),
+  ...(process.env.DEALRADAR_BASE_URL
+    ? { DEALRADAR_BASE_URL: process.env.DEALRADAR_BASE_URL }
+    : {}),
+};
 const credentials = {
   username: env.ADMIN_USERNAME ?? "admin",
   password: env.ADMIN_PASSWORD ?? "admin",
@@ -68,8 +73,10 @@ let session; // { base, cookie }
 
 async function login() {
   if (session) return session;
-  for (const port of ports) {
-    const base = `http://localhost:${port}/api`;
+  const bases = env.DEALRADAR_BASE_URL
+    ? [`${env.DEALRADAR_BASE_URL.replace(/\/+$/, "")}/api`]
+    : ports.map((port) => `http://localhost:${port}/api`);
+  for (const base of bases) {
     try {
       const res = await fetch(`${base}/auth/login`, {
         method: "POST",
@@ -90,9 +97,7 @@ async function login() {
       // Not this port.
     }
   }
-  throw new Error(
-    `DealRadar server not reachable on ports ${ports.join(", ")}`,
-  );
+  throw new Error(`DealRadar server not reachable (${bases.join(", ")})`);
 }
 
 async function api(method, path) {
@@ -118,6 +123,7 @@ async function ensureServer() {
   } catch {
     // Start it below.
   }
+  if (env.DEALRADAR_BASE_URL) return { running: false, started: false };
   const log = openSync(join(outDir, "server.log"), "a");
   const child = spawn("npm run dev", {
     cwd: root,

@@ -1,0 +1,9 @@
+[Unit]
+Description=DealRadar evening agents, every day at 17:00 Paris time
+
+[Timer]
+OnCalendar=*-*-* 17:00:00 Europe/Paris
+Persistent=false
+
+[Install]
+WantedBy=timers.target
