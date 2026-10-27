@@ -376,6 +376,10 @@ export class CollectionService {
       cdiscount.urls,
       cdiscount.limit,
     );
+    (this.collectorsById.aliexpress as AliExpressCollector).setLimit(
+      resolveTargets([], this.env.ALIEXPRESS_DEALS_LIMIT, tuning.aliexpress)
+        .limit,
+    );
     configureBrowserEngines(sourceEngines(tuning));
     return tuning;
   }

@@ -4,8 +4,8 @@
   "updatedAt": "2026-10-24",
   "updatedBy": "deals-sources",
   "amazon": {
-    "limit": 250,
-    "bounds": [150, 300],
+    "limit": 100,
+    "bounds": [50, 300],
     "extraPages": {
       "electronics": {
         "url": "https://www.amazon.fr/deals?bubble-id=deals-collection-electronics",
@@ -22,8 +22,8 @@
     }
   },
   "cdiscount": {
-    "limit": 250,
-    "bounds": [150, 300],
+    "limit": 100,
+    "bounds": [50, 300],
     "extraPages": {
       "ecrans": {
         "url": "https://www.cdiscount.com/informatique/ecrans-informatiques/l-10732.html",
@@ -38,6 +38,10 @@
         "enabled": true
       }
     }
+  },
+  "aliexpress": {
+    "limit": 100,
+    "bounds": [50, 300]
   },
   "lockedSources": ["amazon", "amazon-watch", "cdiscount", "lenovo", "manual"],
   "sources": {

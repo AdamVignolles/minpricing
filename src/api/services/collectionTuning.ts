@@ -28,6 +28,7 @@ export interface SourceTuning {
 
 export interface CollectionTuning {
   amazon?: ShopTuning;
+  aliexpress?: ShopTuning;
   cdiscount?: ShopTuning;
   sources?: Record<string, SourceTuning>;
   /** Sources Adam wants kept: never skipped as disabled. */

@@ -51,6 +51,11 @@ export class AliExpressCollector implements DealSource {
     this.urls = Array.isArray(urls) ? urls : [urls];
   }
 
+  /** Max deals per run, set from `config/collection.json` before each run. */
+  setLimit(limit: number): void {
+    this.limit = limit;
+  }
+
   async discover(context?: DiscoverContext): Promise<RawDeal[]> {
     return withBrowser(
       async (browser) => {
