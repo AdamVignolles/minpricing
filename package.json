@@ -9,8 +9,8 @@
     "lint": "alepha lint",
     "typecheck": "alepha typecheck",
     "verify": "alepha verify",
-    "deploy:cloudflare": "alepha infra build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha infra db migrate --env production && alepha infra deploy --env production",
-    "build:cloudflare": "alepha infra build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha infra db migrate --env production",
+    "deploy:cloudflare": "alepha infra build --env cloudflare && node scripts/patch-cloudflare-browser-binding.mjs && alepha infra db migrate --env cloudflare && alepha infra deploy --env cloudflare",
+    "build:cloudflare": "alepha infra build --env cloudflare && node scripts/patch-cloudflare-browser-binding.mjs && alepha infra db migrate --env cloudflare",
     "dealabs:login": "node scripts/dealabs-login.mjs"
   },
   "dependencies": {

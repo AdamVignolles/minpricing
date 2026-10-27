@@ -54,9 +54,9 @@ export default defineConfig({
   plugins: [
     infra({
       environments: {
-        production: cloudflare(), // workers.dev subdomain; pass { domain: "..." } for a custom one
-        // Self-hosted Bay on the AWS VM (`alepha deploy --env bay`)
-        bay: bay({
+        cloudflare: cloudflare(), // workers.dev subdomain; pass { domain: "..." } for a custom one
+        // Self-hosted Bay on the AWS VM (`alepha deploy --env production`)
+        production: bay({
           host: "minpricing-bay",
           socket: "/run/bay/control.sock",
           domain: "13.38.216.109.sslip.io",

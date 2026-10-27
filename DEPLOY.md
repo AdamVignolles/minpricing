@@ -26,8 +26,8 @@ see `src/api/collectors/browser.ts`).
 ## First deploy
 
 ```bash
-npx alepha infra plan --env production   # preview what will be created
-npx alepha deploy --env production     # provisions D1/R2/KV + builds + migrates + deploys
+npx alepha infra plan --env cloudflare   # preview what will be created
+npx alepha deploy --env cloudflare     # provisions D1/R2/KV + builds + migrates + deploys
 ```
 
 This first `up` deploys successfully, but Amazon/Cdiscount will silently
@@ -48,19 +48,19 @@ npm run deploy:cloudflare
 
 This runs, in order:
 
-1. `alepha infra build --env production` — bundles the Worker and
+1. `alepha infra build --env cloudflare` — bundles the Worker and
    (re)writes `dist/wrangler.jsonc` from the app's resource declarations.
 2. `node scripts/patch-cloudflare-browser-binding.mjs` — adds
    `"browser": { "binding": "BROWSER" }` to that file. `alepha infra
    deploy` only ever merges `.vars` into it afterwards, so this survives.
-3. `alepha infra db migrate --env production` — applies any new D1 schema
+3. `alepha infra db migrate --env cloudflare` — applies any new D1 schema
    migrations.
-4. `alepha infra deploy --env production` — uploads the patched config.
+4. `alepha infra deploy --env cloudflare` — uploads the patched config.
 
 ## Inspecting a deployment
 
 ```bash
-npx alepha infra status --env production
+npx alepha infra status --env cloudflare
 ```
 
 ## Using Cloudflare's dashboard "Workers Builds" (git-push auto-deploy)
@@ -84,7 +84,7 @@ falling into its "no config found, let me guess your framework" wizard
 (the `Detected Project Settings: Framework: Hydrogen` error) — it now
 points straight at the real, already-built config instead.
 
-You still need to run `alepha deploy --env production` **once**,
+You still need to run `alepha deploy --env cloudflare` **once**,
 locally, before wiring this up: it's the only command that provisions the
 D1 database in the first place; the dashboard's build only ever
 regenerates config for resources that already exist.
@@ -175,7 +175,7 @@ the (non-existent-on-Workers) `playwright` path forever.
 
 ## Bay (VM)
 
-`npx alepha deploy --env bay` (host alias `minpricing-bay` in `~/.ssh/config`, secrets in `.env.production`).
+`npx alepha deploy --env production` (host alias `minpricing-bay` in `~/.ssh/config`, secrets in `.env.production`).
 
 One-time VM setup for the browser collectors and Dealabs publishing (the release ships without `playwright`):
 
