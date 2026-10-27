@@ -111,12 +111,15 @@ export class AppRouter {
     name: "home",
     lazy: () => import("./pages/DashboardPage.tsx"),
     loader: async () => {
-      const [overview, highlights, merchants] = await Promise.all([
-        this.stats.overview({}),
-        this.deals.highlights({ query: { size: 8 } }),
-        this.catalog.listMerchants({}),
-      ]);
-      return { overview, highlights, merchants };
+      const [overview, highlights, merchants, publications] = await Promise.all(
+        [
+          this.stats.overview({}),
+          this.deals.highlights({ query: { size: 8 } }),
+          this.catalog.listMerchants({}),
+          this.stats.publications({}),
+        ],
+      );
+      return { overview, highlights, merchants, publications };
     },
   });
 

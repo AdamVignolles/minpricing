@@ -311,6 +311,25 @@ export interface StatsOverview {
   sources: SourceStat[];
 }
 
+export interface PublicationStats {
+  posted: number;
+  postedLast7d: number;
+  pendingDrafts: number;
+  failedAttempts: number;
+  lastPostedAt?: string;
+  averageTemperature: number | null;
+  hotPosts: number;
+  totalPosts: number;
+  bestPosts: Array<{
+    id: string;
+    title: string;
+    temperature: number;
+    merchant?: string;
+    url: string;
+    publishedAt: string;
+  }>;
+}
+
 export interface DealsPage {
   content: Deal[];
   page: { number: number; size: number; totalElements?: number };

@@ -1,12 +1,14 @@
-import { z } from "alepha";
+import { $inject, z } from "alepha";
 import { $repository } from "alepha/orm";
 import { $action } from "alepha/server";
 
 import { categoryEntity } from "../entities/Category.ts";
 import { dealEntity } from "../entities/Deal.ts";
+import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { merchantEntity } from "../entities/Merchant.ts";
 import { sourceEntity } from "../entities/Source.ts";
 import { $adminSession } from "../services/AdminAuth.ts";
+import { MyDealabsPostsService } from "../services/MyDealabsPostsService.ts";
 
 const breakdownSchema = z.array(
   z.object({
@@ -47,6 +49,88 @@ export class StatsController {
   protected categories = $repository(categoryEntity);
   protected merchants = $repository(merchantEntity);
   protected sources = $repository(sourceEntity);
+  protected drafts = $repository(dealabsDraftEntity);
+  protected myPosts = $inject(MyDealabsPostsService);
+
+  /**
+   * How our Dealabs posts performed: publication counts from our own drafts,
+   * and the temperature of each post read from our public profile (cached 1 h,
+   * empty when `DEALABS_USERNAME` is unset).
+   */
+  publications = $action({
+    method: "GET",
+    path: "/stats/publications",
+    use: [$adminSession()],
+    schema: {
+      response: z.object({
+        posted: z.number(),
+        postedLast7d: z.number(),
+        pendingDrafts: z.number(),
+        failedAttempts: z.number(),
+        lastPostedAt: z.text().optional(),
+        /** Null until at least one of our posts could be read. */
+        averageTemperature: z.number().nullable(),
+        hotPosts: z.number(),
+        totalPosts: z.number(),
+        bestPosts: z.array(
+          z.object({
+            id: z.text(),
+            title: z.text(),
+            temperature: z.number(),
+            merchant: z.text().optional(),
+            url: z.text(),
+            publishedAt: z.text(),
+          }),
+        ),
+      }),
+    },
+    handler: async () => {
+      const [posted, pendingDrafts, failed, threads] = await Promise.all([
+        this.drafts.findMany({ where: { status: { eq: "posted" } } }),
+        this.drafts.count({ status: { eq: "draft" } }),
+        this.drafts.count({
+          status: { eq: "draft" },
+          lastPublishResult: { eq: "failed" },
+        }),
+        this.myPosts.posts().catch(() => []),
+      ]);
+
+      const now = Date.now();
+      const postedMs = (draft: (typeof posted)[number]) =>
+        new Date((draft.verifiedAt ?? draft.updatedAt) as string).getTime();
+      const times = posted.map(postedMs).filter(Number.isFinite);
+      const temperatures = threads.map((thread) => thread.temperature);
+
+      return {
+        posted: posted.length,
+        postedLast7d: times.filter((time) => now - time < 7 * DAY_MS).length,
+        pendingDrafts,
+        failedAttempts: failed,
+        lastPostedAt: times.length
+          ? new Date(Math.max(...times)).toISOString()
+          : undefined,
+        averageTemperature: temperatures.length
+          ? Math.round(
+              temperatures.reduce((sum, value) => sum + value, 0) /
+                temperatures.length,
+            )
+          : null,
+        hotPosts: threads.filter((thread) => thread.isHot).length,
+        totalPosts: threads.length,
+        bestPosts: [...threads]
+          .sort((a, b) => b.temperature - a.temperature)
+          .slice(0, 5)
+          .map((thread) => ({
+            id: thread.id,
+            title: thread.title,
+            temperature: Math.round(thread.temperature),
+            merchant: thread.merchant,
+            url: thread.url,
+            publishedAt: thread.publishedAt,
+          })),
+      };
+    },
+  });
 
   overview = $action({
     method: "GET",

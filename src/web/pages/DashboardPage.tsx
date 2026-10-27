@@ -21,7 +21,12 @@ import Icon from "../components/ui/Icon.tsx";
 import Section from "../components/ui/Section.tsx";
 import { EmptyState } from "../components/ui/States.tsx";
 import StatTile from "../components/ui/StatTile.tsx";
-import type { Deal, RefItem, StatsOverview } from "../types.ts";
+import type {
+  Deal,
+  PublicationStats,
+  RefItem,
+  StatsOverview,
+} from "../types.ts";
 
 export interface DashboardPageProps {
   overview: StatsOverview;
@@ -32,6 +37,7 @@ export interface DashboardPageProps {
     featured: Deal | null;
   };
   merchants: RefItem[];
+  publications: PublicationStats;
 }
 
 /**
@@ -111,6 +117,7 @@ const DashboardPage: FC<DashboardPageProps> = ({
   overview,
   highlights,
   merchants,
+  publications,
 }) => {
   const { totals, dealsPerDay, categories } = overview;
   const hasDeals = totals.activeDeals > 0;
@@ -209,7 +216,7 @@ const DashboardPage: FC<DashboardPageProps> = ({
         <StatTile
           label="Offres actives"
           value={totals.activeDeals}
-          icon="tag"
+          icon="package"
           hint={`${totals.newLast7d} sur les 7 derniers jours`}
         />
         <StatTile
@@ -234,6 +241,79 @@ const DashboardPage: FC<DashboardPageProps> = ({
           hint={`Sur ${totals.dealsWithDiscount} offres remisées`}
         />
       </SimpleGrid>
+
+      <Section
+        title="Résultats de nos publications"
+        description="Ce que nos posts Dealabs ont donné."
+      >
+        <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
+          <StatTile
+            label="Deals publiés"
+            value={publications.posted}
+            icon="package"
+            hint={`${publications.postedLast7d} sur les 7 derniers jours`}
+          />
+          <StatTile
+            label="Température moyenne"
+            value={
+              publications.averageTemperature === null
+                ? ""
+                : `${publications.averageTemperature}°`
+            }
+            empty={publications.averageTemperature === null}
+            icon="flame"
+            hint="Posts lus sur notre profil Dealabs (DEALABS_USERNAME)"
+          />
+          <StatTile
+            label="Deals « hot »"
+            value={`${publications.hotPosts} / ${publications.totalPosts}`}
+            icon="bolt"
+            hint="Posts ayant atteint la température « hot »"
+          />
+          <StatTile
+            label="Brouillons en attente"
+            value={publications.pendingDrafts}
+            icon="package"
+            hint={
+              publications.failedAttempts > 0
+                ? `${publications.failedAttempts} publication(s) échouée(s)`
+                : publications.lastPostedAt
+                  ? `Dernier post le ${f.date(publications.lastPostedAt)}`
+                  : undefined
+            }
+          />
+        </SimpleGrid>
+        {publications.bestPosts.length > 0 ? (
+          <Paper p="md">
+            <Stack gap="xs">
+              <Text fw={600}>Nos meilleurs posts</Text>
+              {publications.bestPosts.map((post) => (
+                <Group
+                  key={post.id}
+                  justify="space-between"
+                  wrap="nowrap"
+                  gap="sm"
+                >
+                  <Text
+                    component="a"
+                    href={post.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    fz="sm"
+                    lineClamp={1}
+                    style={{ minWidth: 0 }}
+                  >
+                    {post.title}
+                  </Text>
+                  <Badge color="orange" variant="light">
+                    {post.temperature}°
+                  </Badge>
+                </Group>
+              ))}
+            </Stack>
+          </Paper>
+        ) : null}
+      </Section>
 
       {highlights.bestDiscounts.length > 0 ? (
         <Section
