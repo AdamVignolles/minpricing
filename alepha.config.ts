@@ -59,7 +59,7 @@ export default defineConfig({
         production: bay({
           host: "minpricing-bay",
           socket: "/run/bay/control.sock",
-          domain: "13.38.216.109.sslip.io",
+          domain: "dealradar.vmh1.alepha.dev",
         }),
       },
     }),
