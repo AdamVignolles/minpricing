@@ -5,6 +5,7 @@ import {
   Group,
   Image,
   Modal,
+  NumberInput,
   Stack,
   Text,
   TextInput,
@@ -17,6 +18,10 @@ import { type FC, useState } from "react";
 import type { DealsController } from "../../../api/controllers/DealsController.ts";
 import * as f from "../ui/format.ts";
 import Icon from "../ui/Icon.tsx";
+
+type Saved = Awaited<
+  ReturnType<ReturnType<typeof useClient<DealsController>>["addFromLink"]>
+>;
 
 type Preview = NonNullable<
   Awaited<
@@ -33,22 +38,46 @@ export const AddDealByLink: FC = () => {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<Preview>();
   const [error, setError] = useState<string>();
+  const [needsManual, setNeedsManual] = useState(false);
+  const [manual, setManual] = useState<{
+    title: string;
+    price: number | "";
+    listPrice: number | "";
+  }>({ title: "", price: "", listPrice: "" });
+  const [saved, setSaved] = useState<Saved>();
 
   const reset = () => {
     setUrl("");
     setPreview(undefined);
     setError(undefined);
+    setNeedsManual(false);
+    setManual({ title: "", price: "", listPrice: "" });
+    setSaved(undefined);
     close();
   };
+
+  const manualEntry = () =>
+    needsManual && manual.title && manual.price !== ""
+      ? {
+          title: manual.title,
+          price: Number(manual.price),
+          listPrice:
+            manual.listPrice === "" ? undefined : Number(manual.listPrice),
+        }
+      : undefined;
 
   const check = async () => {
     setBusy(true);
     setError(undefined);
     setPreview(undefined);
+    setSaved(undefined);
     try {
-      const response = await deals.previewLink({ body: { url } });
+      const response = await deals.previewLink({
+        body: { url, manual: manualEntry() },
+      });
       setPreview(response.preview);
       setError(response.error);
+      setNeedsManual(Boolean(response.needsManual));
     } finally {
       setBusy(false);
     }
@@ -57,10 +86,13 @@ export const AddDealByLink: FC = () => {
   const save = async (force: boolean) => {
     setBusy(true);
     try {
-      const response = await deals.addFromLink({ body: { url, force } });
+      const response = await deals.addFromLink({
+        body: { url, force, manual: manualEntry() },
+      });
       if (response.dealId) {
-        reset();
-        void router.push(`/deals/${response.dealId}`);
+        setSaved(response);
+        setPreview(undefined);
+        setError(undefined);
       } else {
         setError(response.message ?? "Le deal n'a pas pu être ajouté.");
       }
@@ -115,6 +147,91 @@ export const AddDealByLink: FC = () => {
           {error && (
             <Alert color="red" icon={<Icon name="alert" size={16} />}>
               {error}
+            </Alert>
+          )}
+
+          {needsManual && (
+            <Stack gap="xs">
+              <TextInput
+                label="Titre"
+                value={manual.title}
+                onChange={(event) =>
+                  setManual({ ...manual, title: event.currentTarget.value })
+                }
+              />
+              <Group grow>
+                <NumberInput
+                  label="Prix (€)"
+                  min={0}
+                  decimalScale={2}
+                  value={manual.price}
+                  onChange={(value) =>
+                    setManual({
+                      ...manual,
+                      price: value === "" ? "" : Number(value),
+                    })
+                  }
+                />
+                <NumberInput
+                  label="Prix barré (€), optionnel"
+                  min={0}
+                  decimalScale={2}
+                  value={manual.listPrice}
+                  onChange={(value) =>
+                    setManual({
+                      ...manual,
+                      listPrice: value === "" ? "" : Number(value),
+                    })
+                  }
+                />
+              </Group>
+              <Text fz="xs" c="dimmed">
+                Renseigne le prix puis clique sur « Vérifier » pour continuer.
+              </Text>
+            </Stack>
+          )}
+
+          {saved && (
+            <Alert
+              color={saved.visible ? "green" : "yellow"}
+              title={
+                saved.result === "created" ? "Deal ajouté" : "Deal mis à jour"
+              }
+            >
+              <Stack gap="xs">
+                <Text fz="sm">{saved.title}</Text>
+                <Group gap="xs">
+                  <Badge variant="default">Score {saved.score ?? 0}/100</Badge>
+                  {saved.hotChance !== undefined && (
+                    <Badge variant="default">
+                      Chance d'atteindre 100° : {saved.hotChance} %
+                    </Badge>
+                  )}
+                  <Badge variant="default">
+                    {saved.hasDraft
+                      ? "Brouillon Dealabs créé"
+                      : "Pas de brouillon"}
+                  </Badge>
+                </Group>
+                {!saved.visible && (
+                  <Text fz="sm">
+                    Score sous le seuil de visibilité : le deal est enregistré
+                    mais masqué des listes.
+                  </Text>
+                )}
+                <Group>
+                  <Button
+                    size="xs"
+                    onClick={() => {
+                      const id = saved.dealId;
+                      reset();
+                      void router.push(`/deals/${id}`);
+                    }}
+                  >
+                    Ouvrir le deal{saved.hasDraft ? " et publier" : ""}
+                  </Button>
+                </Group>
+              </Stack>
             </Alert>
           )}
 

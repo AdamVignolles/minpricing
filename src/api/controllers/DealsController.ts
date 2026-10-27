@@ -22,6 +22,7 @@ import { ItadService } from "../services/ItadService.ts";
 import { keepaForDealPage } from "../services/keepa.ts";
 import {
   LinkDealService,
+  NeedsManualError,
   linkPreviewSchema,
 } from "../services/LinkDealService.ts";
 import { LinkError } from "../services/linkResolver.ts";
@@ -33,6 +34,13 @@ import {
   MIN_VISIBLE_SCORE,
   ScoringService,
 } from "../services/ScoringService.ts";
+
+const manualEntrySchema = z.object({
+  title: z.text({ size: "rich" }),
+  price: z.number().min(0),
+  listPrice: z.number().min(0).optional(),
+  imageUrl: z.text({ size: "rich" }).optional(),
+});
 
 /**
  * A deal as the console lists it: the stored row, plus whether it is
@@ -127,17 +135,26 @@ export class DealsController {
     path: "/deals/preview-link",
     use: [$adminSession()],
     schema: {
-      body: z.object({ url: z.text({ size: "rich" }) }),
+      body: z.object({
+        url: z.text({ size: "rich" }),
+        manual: manualEntrySchema.optional(),
+      }),
       response: z.object({
         preview: linkPreviewSchema.optional(),
         error: z.text({ size: "rich" }).optional(),
+        needsManual: z.boolean().optional(),
       }),
     },
     handler: async ({ body }) => {
       try {
-        return { preview: await this.linkDeals.preview(body.url) };
+        return {
+          preview: await this.linkDeals.preview(body.url, body.manual),
+        };
       } catch (error) {
-        return { error: this.linkErrorMessage(error) };
+        return {
+          error: this.linkErrorMessage(error),
+          needsManual: error instanceof NeedsManualError,
+        };
       }
     },
   });
@@ -150,21 +167,40 @@ export class DealsController {
       body: z.object({
         url: z.text({ size: "rich" }),
         force: z.boolean().optional(),
+        manual: manualEntrySchema.optional(),
       }),
       response: z.object({
         result: z.enum(["created", "updated", "rejected", "error"]),
         dealId: z.text().optional(),
         message: z.text({ size: "rich" }).optional(),
+        title: z.text({ size: "rich" }).optional(),
+        score: z.number().optional(),
+        hotChance: z.number().optional(),
+        visible: z.boolean().optional(),
+        hasDraft: z.boolean().optional(),
       }),
     },
     handler: async ({ body }) => {
       try {
         const saved = await this.linkDeals.save(body.url, {
           force: body.force,
+          manual: body.manual,
         });
-        return saved.result === "rejected"
-          ? { result: "rejected" as const, message: saved.reason }
-          : { result: saved.result, dealId: saved.dealId };
+        if (saved.result === "rejected") {
+          return { result: "rejected" as const, message: saved.reason };
+        }
+        const draft = await this.drafts.findOne({
+          where: { dealId: { eq: saved.dealId } },
+        });
+        return {
+          result: saved.result,
+          dealId: saved.dealId,
+          title: saved.title,
+          score: saved.score,
+          hotChance: saved.hotChance,
+          visible: (saved.score ?? 0) >= MIN_VISIBLE_SCORE,
+          hasDraft: Boolean(draft),
+        };
       } catch (error) {
         return {
           result: "error" as const,

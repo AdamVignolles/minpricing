@@ -1,6 +1,8 @@
 import { $inject, z } from "alepha";
 import { $repository } from "alepha/orm";
 
+import { AmazonCollector } from "../collectors/AmazonCollector.ts";
+import { withBrowser, withPage } from "../collectors/browser.ts";
 import type { RawDeal } from "../collectors/DealSource.ts";
 import { parseProductHtml } from "../collectors/genericProduct.ts";
 import { dealEntity } from "../entities/Deal.ts";
@@ -41,6 +43,20 @@ export const linkPreviewSchema = z.object({
   qualityIssue: z.text({ size: "rich" }).optional(),
   existingDealId: z.text().optional(),
 });
+
+export interface ManualEntry {
+  title: string;
+  price: number;
+  listPrice?: number;
+  imageUrl?: string;
+}
+
+/** The page gave no usable price: the UI then asks for it by hand. */
+export class NeedsManualError extends LinkError {
+  constructor(message: string) {
+    super("invalid-url", message);
+  }
+}
 
 const USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -107,31 +123,10 @@ export class LinkDealService {
     };
   }
 
-  protected async fetchGeneric(link: ResolvedLink): Promise<RawDeal> {
-    const response = await fetch(link.canonicalUrl, {
-      redirect: "follow",
-      headers: {
-        "user-agent": USER_AGENT,
-        "accept-language": "fr-FR,fr;q=0.9",
-        accept: "text/html",
-      },
-      signal: AbortSignal.timeout(20_000),
-    });
-    // A redirect must not lead somewhere we would refuse to fetch.
-    parseLink(response.url);
-    if (!response.ok) {
-      throw new LinkError(
-        "invalid-url",
-        `Le site a répondu ${response.status} : saisis le prix à la main.`,
-      );
-    }
-    const product = parseProductHtml(await response.text());
-    if (!product) {
-      throw new LinkError(
-        "invalid-url",
-        "Prix introuvable sur la page : saisis le prix à la main.",
-      );
-    }
+  protected toRaw(
+    link: ResolvedLink,
+    product: NonNullable<ReturnType<typeof parseProductHtml>>,
+  ): RawDeal {
     return {
       externalId: link.externalId,
       title: product.title,
@@ -146,21 +141,138 @@ export class LinkDealService {
     };
   }
 
-  protected async read(input: string): Promise<{
-    link: ResolvedLink;
-    raw: RawDeal;
-  }> {
-    const url = await this.expand(parseLink(input));
-    const link = resolveLink(url.href);
-    const raw =
-      link.sourceId === "steam"
-        ? await this.fetchSteam(link)
-        : await this.fetchGeneric(link);
-    return { link, raw };
+  protected async fetchHtml(link: ResolvedLink): Promise<string | undefined> {
+    try {
+      const response = await fetch(link.canonicalUrl, {
+        redirect: "follow",
+        headers: {
+          "user-agent": USER_AGENT,
+          "accept-language": "fr-FR,fr;q=0.9",
+          accept: "text/html",
+        },
+        signal: AbortSignal.timeout(20_000),
+      });
+      // A redirect must not lead somewhere we would refuse to fetch.
+      parseLink(response.url);
+      return response.ok ? await response.text() : undefined;
+    } catch (error) {
+      if (error instanceof LinkError) throw error;
+      return undefined;
+    }
   }
 
-  public async preview(input: string): Promise<LinkPreview> {
-    const { link, raw } = await this.read(input);
+  /** Same parser on the page as a real browser renders it. */
+  protected async browserHtml(link: ResolvedLink): Promise<string | undefined> {
+    try {
+      return await withBrowser((browser) =>
+        withPage(browser, async (page) => {
+          const response = await page.goto(link.canonicalUrl, {
+            waitUntil: "domcontentloaded",
+            timeout: 25_000,
+          });
+          if (!response?.ok()) return undefined;
+          return page.evaluate(
+            (_: undefined) => document.documentElement.outerHTML,
+          );
+        }),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  protected async fetchAmazon(
+    link: ResolvedLink,
+  ): Promise<RawDeal | undefined> {
+    try {
+      return await withBrowser((browser) =>
+        withPage(browser, async (page) => {
+          const priced = await new AmazonCollector([], 0).fetchPrice(
+            page,
+            link.canonicalUrl,
+          );
+          if (!priced) return undefined;
+          const page_ = await page.evaluate((_: undefined) => ({
+            title: document.querySelector("#productTitle")?.textContent?.trim(),
+            image: document
+              .querySelector<HTMLImageElement>("#landingImage")
+              ?.getAttribute("src"),
+          }));
+          if (!page_.title) return undefined;
+          return {
+            externalId: link.externalId,
+            title: page_.title,
+            url: link.canonicalUrl,
+            imageUrl: page_.image ?? undefined,
+            price: priced.price,
+            listPrice: priced.listPrice,
+            currency: "EUR",
+            availability: "in_stock" as const,
+            description: priced.description,
+            merchantId: "amazon",
+            details: priced.details,
+          };
+        }),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  protected async fetchGeneric(link: ResolvedLink): Promise<RawDeal> {
+    const plain = await this.fetchHtml(link);
+    let product = plain ? parseProductHtml(plain) : undefined;
+    if (!product) {
+      const rendered = await this.browserHtml(link);
+      product = rendered ? parseProductHtml(rendered) : undefined;
+    }
+    if (!product) {
+      throw new NeedsManualError(
+        "Prix introuvable sur la page (site bloqué ou page sans données produit) : saisis-le à la main.",
+      );
+    }
+    return this.toRaw(link, product);
+  }
+
+  protected async read(
+    input: string,
+    manual?: ManualEntry,
+  ): Promise<{ link: ResolvedLink; raw: RawDeal }> {
+    const url = await this.expand(parseLink(input));
+    const link = resolveLink(url.href);
+    if (manual) {
+      return {
+        link,
+        raw: {
+          externalId: link.externalId,
+          title: manual.title,
+          url: link.canonicalUrl,
+          imageUrl: manual.imageUrl,
+          price: manual.price,
+          listPrice:
+            manual.listPrice && manual.listPrice > manual.price
+              ? manual.listPrice
+              : undefined,
+          currency: "EUR",
+          availability: "in_stock",
+        },
+      };
+    }
+    if (link.sourceId === "steam") {
+      return { link, raw: await this.fetchSteam(link) };
+    }
+    if (link.sourceId === "amazon") {
+      const raw = await this.fetchAmazon(link);
+      if (raw) return { link, raw };
+    }
+    return { link, raw: await this.fetchGeneric(link) };
+  }
+
+  public async preview(
+    input: string,
+    manual?: ManualEntry,
+  ): Promise<LinkPreview> {
+    const { link, raw } = await this.read(input, manual);
     const existing = await this.deals.findOne({
       where: {
         and: [
@@ -191,13 +303,22 @@ export class LinkDealService {
     };
   }
 
-  public async save(input: string, options: { force?: boolean } = {}) {
-    const { link, raw } = await this.read(input);
+  public async save(
+    input: string,
+    options: { force?: boolean; manual?: ManualEntry } = {},
+  ) {
+    const { link, raw } = await this.read(input, options.manual);
+    const outcome = await this.collection.ingestSingle(link.sourceId, raw, {
+      skipGate: options.force,
+    });
+    if (outcome.result === "rejected") return outcome;
+    const deal = await this.deals.findById(outcome.dealId);
     return {
-      sourceId: link.sourceId,
-      ...(await this.collection.ingestSingle(link.sourceId, raw, {
-        skipGate: options.force,
-      })),
+      ...outcome,
+      title: deal?.title,
+      score: deal?.score,
+      hotChance: deal?.hotChance,
+      status: deal?.status,
     };
   }
 }
