@@ -14,6 +14,7 @@
     "dealabs:login": "node scripts/dealabs-login.mjs"
   },
   "dependencies": {
+    "@alepha/lore": "^0.30.0",
     "@cloudflare/puppeteer": "^1.4.0",
     "@mantine/charts": "^9.6.3",
     "@mantine/core": "^9.6.3",

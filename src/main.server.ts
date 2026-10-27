@@ -1,3 +1,4 @@
+import { AlephaSigil } from "@alepha/lore/sigil";
 import { Alepha, run } from "alepha";
 import { AlephaApiJobsQueue } from "alepha/api/jobs";
 
@@ -12,6 +13,9 @@ const alepha = Alepha.create();
 // with a headless browser and easily runs past the ~30s `waitUntil` budget
 // direct-mode dispatch gets on Workers; a queue consumer gets 15 minutes.
 alepha.with(AlephaApiJobsQueue);
+// Crash/telemetry reporting to Lore. Inert until `SIGIL_KEY` is set (minted by
+// `lore deploy`) and production-only, so dev and tests send nothing.
+alepha.with(AlephaSigil);
 alepha.with(ApiModule);
 alepha.with(WebModule);
 
