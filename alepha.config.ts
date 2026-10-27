@@ -1,5 +1,5 @@
 import { defineConfig } from "alepha/cli/config";
-import { cloudflare, platform } from "alepha/cli/platform";
+import { bay, cloudflare, infra } from "alepha/cli/infra";
 
 export default defineConfig({
   // Only the stylesheet is set explicitly (with forward slashes): an
@@ -42,7 +42,7 @@ export default defineConfig({
   //
   // meta: { version: pkg.version },
   //
-  // Deploy to Cloudflare in ~10s: `alepha platform up --env production`
+  // Deploy to Cloudflare in ~10s: `alepha deploy --env production`
   // Requires `wrangler login` once. D1, R2, KV, Queues and cron triggers
   // are auto-provisioned from your $repository / $storage / $cache / $job
   // declarations — no wrangler.toml to maintain.
@@ -52,9 +52,15 @@ export default defineConfig({
   // scripts/patch-cloudflare-browser-binding.mjs and DEPLOY.md for the
   // extra step this requires on every deploy after the first.
   plugins: [
-    platform({
+    infra({
       environments: {
         production: cloudflare(), // workers.dev subdomain; pass { domain: "..." } for a custom one
+        // Self-hosted Bay on the AWS VM (`alepha deploy --env bay`)
+        bay: bay({
+          host: "minpricing-bay",
+          socket: "/run/bay/control.sock",
+          domain: "13.38.216.109.sslip.io",
+        }),
       },
     }),
   ],

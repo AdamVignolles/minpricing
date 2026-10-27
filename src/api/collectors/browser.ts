@@ -1,3 +1,5 @@
+import { chromiumOptions } from "../services/appPaths.ts";
+
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -75,13 +77,74 @@ export async function withBrowser<T>(
   // module... [code: 10021]"), even though this branch never runs there.
   // A dynamic `import()` is only resolved if actually awaited, so it never
   // trips that check on the `cloudflareBinding` path above.
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  const browser = await acquireSharedBrowser();
   try {
     return await fn({ engine: "playwright", browser });
   } finally {
-    await browser.close();
+    await releaseSharedBrowser();
   }
+}
+
+/**
+ * One Chromium process shared by every source running at the same time
+ * (each `withBrowser` call used to launch its own: ~150-250 MB apiece).
+ * Closed when the last user is done, so nothing stays resident between runs.
+ */
+let sharedBrowser: Promise<import("playwright").Browser> | undefined;
+let sharedUsers = 0;
+
+async function acquireSharedBrowser(): Promise<import("playwright").Browser> {
+  sharedUsers++;
+  sharedBrowser ??= import("playwright")
+    .then(({ chromium }) => chromium.launch(chromiumOptions(true)))
+    .then((browser) => {
+      browser.on("disconnected", () => {
+        sharedBrowser = undefined;
+      });
+      return browser;
+    })
+    .catch((error) => {
+      sharedBrowser = undefined;
+      throw error;
+    });
+  try {
+    return await sharedBrowser;
+  } catch (error) {
+    sharedUsers--;
+    throw error;
+  }
+}
+
+async function releaseSharedBrowser(): Promise<void> {
+  if (--sharedUsers > 0) return;
+  const current = sharedBrowser;
+  sharedBrowser = undefined;
+  await (await current?.catch(() => undefined))?.close().catch(() => undefined);
+}
+
+/**
+ * App-wide cap on open pages, whatever the number of sources running at
+ * once. Each Chromium tab costs memory and CPU; on a small host the default
+ * of 3 is lowered with `BROWSER_MAX_PAGES`.
+ */
+const pageSlots = {
+  active: 0,
+  waiting: [] as Array<() => void>,
+  max: () => Math.max(1, Number(process.env.BROWSER_MAX_PAGES) || 3),
+};
+
+async function takePageSlot(): Promise<void> {
+  if (pageSlots.active >= pageSlots.max()) {
+    await new Promise<void>((resolve) => pageSlots.waiting.push(resolve));
+  } else {
+    pageSlots.active++;
+  }
+}
+
+function givePageSlot(): void {
+  const next = pageSlots.waiting.shift();
+  if (next) next();
+  else pageSlots.active--;
 }
 
 /**
@@ -166,6 +229,18 @@ export async function withPage<T>(
   handle: DealsBrowserHandle,
   fn: (page: DealsPage) => Promise<T>,
 ): Promise<T> {
+  await takePageSlot();
+  try {
+    return await openPage(handle, fn);
+  } finally {
+    givePageSlot();
+  }
+}
+
+async function openPage<T>(
+  handle: DealsBrowserHandle,
+  fn: (page: DealsPage) => Promise<T>,
+): Promise<T> {
   if (handle.engine === "cloudflare") {
     const context = await handle.browser.createBrowserContext();
     try {
@@ -189,6 +264,13 @@ export async function withPage<T>(
     await context.addInitScript(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
     });
+    // Prices are text: skipping images, fonts and media saves most of the
+    // bandwidth, memory and CPU of each page.
+    await context.route("**/*", (route) =>
+      ["image", "font", "media"].includes(route.request().resourceType())
+        ? route.abort()
+        : route.continue(),
+    );
     const page = await context.newPage();
     return await fn(page);
   } finally {

@@ -29,7 +29,10 @@ export class AuthController {
         body.password === this.credentials.ADMIN_PASSWORD;
 
       if (!valid) {
-        throw new HttpError({ status: 401, message: "Invalid credentials" });
+        throw new HttpError(
+          { status: 401 },
+          { message: "Invalid credentials" },
+        );
       }
 
       this.session.set(true);

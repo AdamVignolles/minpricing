@@ -96,4 +96,36 @@ export class PricingService {
       referencePrice,
     };
   }
+
+  /** Same figures as {@link getStats}, for many deals in one query. */
+  async getStatsMany(
+    deals: Array<{ id: string; currentPrice: number }>,
+  ): Promise<Map<string, PriceStats>> {
+    const out = new Map<string, PriceStats>();
+    if (deals.length === 0) return out;
+    const rows = await this.history.findMany({
+      where: { dealId: { inArray: deals.map((deal) => deal.id) } },
+    });
+    const byDeal = new Map<string, number[]>();
+    for (const row of rows) {
+      const list = byDeal.get(row.dealId) ?? [];
+      list.push(row.price);
+      byDeal.set(row.dealId, list);
+    }
+    for (const { id, currentPrice } of deals) {
+      const prices = byDeal.get(id) ?? [];
+      const min = prices.length ? Math.min(...prices) : currentPrice;
+      out.set(id, {
+        currentPrice,
+        minPrice: Math.min(min, currentPrice),
+        avgPrice: prices.length
+          ? prices.reduce((sum, price) => sum + price, 0) / prices.length
+          : currentPrice,
+        maxPrice: prices.length ? Math.max(...prices) : currentPrice,
+        isNewHistoricalMin: currentPrice <= min,
+        historyPoints: prices.length,
+      });
+    }
+    return out;
+  }
 }

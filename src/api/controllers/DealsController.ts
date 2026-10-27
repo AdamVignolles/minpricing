@@ -315,11 +315,13 @@ export class DealsController {
         }),
       ]);
 
+      const candidates = dropSameListings(topScored);
+      const allStats = await this.pricing.getStatsMany(candidates);
       const historicalLows: typeof topScored = [];
-      for (const deal of dropSameListings(topScored)) {
+      for (const deal of candidates) {
         if (historicalLows.length >= size) break;
-        const stats = await this.pricing.getStats(deal.id, deal.currentPrice);
-        if (stats.historyPoints > 1 && stats.isNewHistoricalMin) {
+        const stats = allStats.get(deal.id);
+        if (stats && stats.historyPoints > 1 && stats.isNewHistoricalMin) {
           historicalLows.push(deal);
         }
       }

@@ -9,8 +9,8 @@
     "lint": "alepha lint",
     "typecheck": "alepha typecheck",
     "verify": "alepha verify",
-    "deploy:cloudflare": "alepha platform build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform db migrate --env production && alepha platform deploy --env production",
-    "build:cloudflare": "alepha platform build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform db migrate --env production",
+    "deploy:cloudflare": "alepha infra build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha infra db migrate --env production && alepha infra deploy --env production",
+    "build:cloudflare": "alepha infra build --env production && node scripts/patch-cloudflare-browser-binding.mjs && alepha infra db migrate --env production",
     "dealabs:login": "node scripts/dealabs-login.mjs"
   },
   "dependencies": {
@@ -19,7 +19,7 @@
     "@mantine/core": "^9.6.3",
     "@mantine/hooks": "^9.6.3",
     "@mantine/notifications": "^9.6.3",
-    "alepha": "^0.30.0",
+    "alepha": "^0.33.0",
     "playwright": "^1.63.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

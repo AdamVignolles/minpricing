@@ -3,6 +3,7 @@ import { existsSync, statSync, unlinkSync } from "node:fs";
 import { $inject, Alepha } from "alepha";
 import { $logger } from "alepha/logger";
 
+import { chromiumOptions } from "./appPaths.ts";
 import { isDealabsLoggedOut, SESSION_PATH } from "./DealabsPublisherService.ts";
 
 /** How long the login window waits for you before giving up. */
@@ -44,7 +45,8 @@ export class DealabsSessionService {
   status(): DealabsSessionStatus {
     const connected = existsSync(SESSION_PATH);
     return {
-      available: !this.alepha.isServerless(),
+      available:
+        !this.alepha.isServerless() && process.env.BROWSER_HEADLESS !== "true",
       connected,
       savedAt: connected
         ? statSync(SESSION_PATH).mtime.toISOString()
@@ -55,7 +57,7 @@ export class DealabsSessionService {
 
   /** Opens the login window (no-op if one is already open). */
   startLogin(): DealabsSessionStatus {
-    if (this.alepha.isServerless()) {
+    if (this.alepha.isServerless() || process.env.BROWSER_HEADLESS === "true") {
       throw new Error(
         "La connexion Dealabs ouvre une fenêtre de navigateur sur la machine : disponible uniquement avec le serveur local.",
       );
@@ -81,7 +83,7 @@ export class DealabsSessionService {
 
   protected async runLogin(): Promise<void> {
     const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: false });
+    const browser = await chromium.launch(chromiumOptions(false));
     try {
       const context = await browser.newContext({
         locale: "fr-FR",

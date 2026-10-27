@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+
+import { appFile } from "./appPaths.ts";
 
 /**
  * Desirability: does the Dealabs community *want* this kind of product?
@@ -44,7 +45,7 @@ let cache:
  * fresh clone) → no desirability terms at all.
  */
 export function loadDesirability(
-  file = join(process.cwd(), "config", "desirability.json"),
+  file = appFile("config", "desirability.json"),
 ): DesirabilityWeights {
   try {
     const mtime = statSync(file).mtimeMs;

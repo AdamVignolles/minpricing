@@ -181,8 +181,8 @@ controllers → React console → Dealabs draft / auto-publish.
   before `freshAt` get their first-seen date at startup
   (`SeedService.backfillDealMetadata`, one `updateMany` with
   `sql\`"first_seen_at"\``): the dev server can add a new column itself,
-so a migration's own `UPDATE` may never run. Run summaries count new
-deals and, separately, the visible ones (`createdVisible`).
+  so a migration's own `UPDATE` may never run. Run summaries count new
+  deals and, separately, the visible ones (`createdVisible`).
 - **Greyed cards**: lists and the dashboard add `onDealabs` to each deal
   (`DealsController.withDealabsStatus`): « Publié par vous » for a
   published draft or one of our live posts read from our profile
@@ -334,7 +334,7 @@ deals and, separately, the visible ones (`createdVisible`).
   tables. New migrations under `migrations/sqlite/` are written by hand (or by
   driving Alepha's migration provider directly); check the SQL for an
   unexpected `DROP TABLE` and validate with `alepha db migrations check`.
-- **After the first deploy, never run `alepha platform up` again**: it
+- **After the first deploy, never run `alepha deploy` again**: it
   regenerates `dist/wrangler.jsonc` and drops the Browser Rendering binding the
   Amazon/Cdiscount collectors need. Use `npm run deploy:cloudflare`, which runs
   `scripts/patch-cloudflare-browser-binding.mjs` to restore it.

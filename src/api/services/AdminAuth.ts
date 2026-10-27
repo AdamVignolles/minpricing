@@ -70,10 +70,10 @@ export function $adminSession(): Middleware {
     handler: ({ next }) => {
       return async (...args: unknown[]) => {
         if (!session.get()) {
-          throw new HttpError({
-            status: 401,
-            message: "Authentication required",
-          });
+          throw new HttpError(
+            { status: 401 },
+            { message: "Authentication required" },
+          );
         }
         return next(...args);
       };

@@ -7,13 +7,14 @@ import { DateTimeProvider } from "alepha/datetime";
 import { $logger } from "alepha/logger";
 
 import type { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
+import { appFile, chromiumOptions } from "./appPaths.ts";
 import { dealabsTitle } from "./DealabsDraftService.ts";
 import { isSameProduct } from "./dealabsSearch.ts";
 import type { Deal } from "./DealTypes.ts";
 import { keepaChartForDeal } from "./keepa.ts";
 
-export const SESSION_PATH = join(process.cwd(), ".dealabs-session.json");
-const DEBUG_DIR = join(process.cwd(), ".dealabs-debug");
+export const SESSION_PATH = appFile(".dealabs-session.json");
+const DEBUG_DIR = appFile(".dealabs-debug");
 
 /** "Essentiel" step fields, in lookup order. */
 const TITLE_SELECTORS = [
@@ -203,7 +204,7 @@ export class DealabsPublisherService {
     // of fighting it we run a real, visible browser. If Cloudflare still
     // challenges it, you see the window and click the checkbox yourself,
     // same as during `npm run dealabs:login`.
-    const browser = await chromium.launch({ headless: false });
+    const browser = await chromium.launch(chromiumOptions(false));
 
     try {
       const context = await browser.newContext({
