@@ -3,7 +3,6 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import { ApiModule } from "../src/api/index.ts";
 import { LinkDealService } from "../src/api/services/LinkDealService.ts";
-import { SeedService } from "../src/api/services/SeedService.ts";
 
 const STEAM = {
   "620": {
@@ -27,7 +26,6 @@ test("preview writes nothing, save creates then dedupes", async () => {
     env: { ADMIN_USERNAME: "a", ADMIN_PASSWORD: "a" },
   }).with(ApiModule);
   await alepha.start();
-  await alepha.inject(SeedService).seedSources();
   const service = alepha.inject(LinkDealService);
   const deals = (service as unknown as { deals: { count(): Promise<number> } })
     .deals;
