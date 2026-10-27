@@ -149,7 +149,9 @@ export function takeLightpandaFallbacks(): Record<string, number> {
 function noteLightpandaFallback(source: string | undefined, why: string) {
   if (!source) return;
   lightpandaFallbacks.set(source, (lightpandaFallbacks.get(source) ?? 0) + 1);
-  console.warn(`[browser] ${source}: Lightpanda failed (${why}), using Chromium`);
+  console.warn(
+    `[browser] ${source}: Lightpanda failed (${why}), using Chromium`,
+  );
 }
 
 function isEmptyResult(result: unknown): boolean {
