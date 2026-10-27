@@ -11,7 +11,9 @@ import { AmazonCollector } from "../collectors/AmazonCollector.ts";
 import { AmazonWatchCollector } from "../collectors/AmazonWatchCollector.ts";
 import {
   type CloudflareBrowserBinding,
+  configureBrowserEngines,
   mapWithConcurrency,
+  takeLightpandaFallbacks,
 } from "../collectors/browser.ts";
 import { CarrefourCollector } from "../collectors/CarrefourCollector.ts";
 import { CdiscountCollector } from "../collectors/CdiscountCollector.ts";
@@ -60,6 +62,7 @@ import {
   loadCollectionTuning,
   resolveTargets,
   sourceDue,
+  sourceEngines,
 } from "./collectionTuning.ts";
 import { DealabsDraftService } from "./DealabsDraftService.ts";
 import { DealabsHistoryService } from "./DealabsHistoryService.ts";
@@ -372,6 +375,7 @@ export class CollectionService {
       cdiscount.urls,
       cdiscount.limit,
     );
+    configureBrowserEngines(sourceEngines(tuning));
     return tuning;
   }
 
@@ -467,6 +471,7 @@ export class CollectionService {
     durations: Map<string, number>,
     switchedOff: string[],
   ): void {
+    const fallbacks = takeLightpandaFallbacks();
     try {
       const dir = join(process.cwd(), "data", "agents");
       if (!existsSync(dir)) return;
@@ -484,6 +489,9 @@ export class CollectionService {
             updated: s.updated,
             rejected: s.rejected,
             ...(s.error ? { error: s.error.slice(0, 120) } : {}),
+            ...(fallbacks[s.sourceId]
+              ? { lightpandaFallbacks: fallbacks[s.sourceId] }
+              : {}),
           })),
         })}
 `,
