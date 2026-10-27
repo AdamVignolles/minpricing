@@ -22,6 +22,7 @@ import { useDebouncedValue, useDisclosure } from "@mantine/hooks";
 import { useRouter } from "alepha/react/router";
 import { type FC, useEffect, useMemo, useState } from "react";
 
+import AddDealByLink from "../components/deals/AddDealByLink.tsx";
 import DealGrid from "../components/deals/DealGrid.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
@@ -300,6 +301,7 @@ const DealsListPage: FC<DealsPageProps> = ({
             {total} offre{total > 1 ? "s" : ""} correspondant à votre recherche
           </Text>
         </Stack>
+        <AddDealByLink />
       </Group>
 
       <Group gap="sm" wrap="nowrap">

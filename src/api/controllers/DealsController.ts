@@ -20,6 +20,11 @@ import { predictDealHeat } from "../services/heatPrediction.ts";
 import { IdealoReferenceService } from "../services/IdealoReferenceService.ts";
 import { ItadService } from "../services/ItadService.ts";
 import { keepaForDealPage } from "../services/keepa.ts";
+import {
+  LinkDealService,
+  linkPreviewSchema,
+} from "../services/LinkDealService.ts";
+import { LinkError } from "../services/linkResolver.ts";
 import { MyDealabsPostsService } from "../services/MyDealabsPostsService.ts";
 import { PriceSeriesService } from "../services/PriceSeriesService.ts";
 import { PricingService } from "../services/PricingService.ts";
@@ -104,6 +109,7 @@ export class DealsController {
   protected idealoReference = $inject(IdealoReferenceService);
   protected itad = $inject(ItadService);
   protected alepha = $inject(Alepha);
+  protected linkDeals = $inject(LinkDealService);
 
   /** Same binding resolution as `CollectionService` — see `browser.ts`. */
   protected cloudflareBrowserBinding(): CloudflareBrowserBinding | undefined {
@@ -114,6 +120,63 @@ export class DealsController {
       | Record<string, unknown>
       | undefined;
     return cloudflareEnv?.BROWSER as CloudflareBrowserBinding | undefined;
+  }
+
+  previewLink = $action({
+    method: "POST",
+    path: "/deals/preview-link",
+    use: [$adminSession()],
+    schema: {
+      body: z.object({ url: z.text({ size: "rich" }) }),
+      response: z.object({
+        preview: linkPreviewSchema.optional(),
+        error: z.text({ size: "rich" }).optional(),
+      }),
+    },
+    handler: async ({ body }) => {
+      try {
+        return { preview: await this.linkDeals.preview(body.url) };
+      } catch (error) {
+        return { error: this.linkErrorMessage(error) };
+      }
+    },
+  });
+
+  addFromLink = $action({
+    method: "POST",
+    path: "/deals/from-link",
+    use: [$adminSession()],
+    schema: {
+      body: z.object({
+        url: z.text({ size: "rich" }),
+        force: z.boolean().optional(),
+      }),
+      response: z.object({
+        result: z.enum(["created", "updated", "rejected", "error"]),
+        dealId: z.text().optional(),
+        message: z.text({ size: "rich" }).optional(),
+      }),
+    },
+    handler: async ({ body }) => {
+      try {
+        const saved = await this.linkDeals.save(body.url, {
+          force: body.force,
+        });
+        return saved.result === "rejected"
+          ? { result: "rejected" as const, message: saved.reason }
+          : { result: saved.result, dealId: saved.dealId };
+      } catch (error) {
+        return {
+          result: "error" as const,
+          message: this.linkErrorMessage(error),
+        };
+      }
+    },
+  });
+
+  protected linkErrorMessage(error: unknown): string {
+    if (error instanceof LinkError) return error.message;
+    return "Impossible de lire cette page (site injoignable ou bloqué).";
   }
 
   list = $action({

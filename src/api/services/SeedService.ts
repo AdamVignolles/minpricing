@@ -37,6 +37,11 @@ export class SeedService {
         name: "Saisie manuelle",
         type: "manual" as const,
       },
+      {
+        id: "manual-link",
+        name: "Ajout par lien",
+        type: "manual" as const,
+      },
       { id: "steam", name: "Steam", type: "api" as const },
       {
         id: "amazon",

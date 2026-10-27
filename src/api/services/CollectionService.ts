@@ -891,6 +891,21 @@ export class CollectionService {
     return { referencePrice, idealoUrl: product.idealoUrl };
   }
 
+  /** Stores one deal added by hand from a link (see LinkDealService). */
+  public async ingestSingle(
+    sourceId: string,
+    rawDeal: RawDeal,
+    options: { skipGate?: boolean } = {},
+  ) {
+    const source = await this.sources.findById(sourceId);
+    return this.upsertDeal(
+      sourceId,
+      source?.type ?? "manual",
+      rawDeal,
+      options,
+    );
+  }
+
   /**
    * @returns true if a new deal was created, false if an existing one was updated.
    */
@@ -898,6 +913,7 @@ export class CollectionService {
     sourceId: string,
     sourceType: SourceReliability,
     rawDeal: RawDeal,
+    options: { skipGate?: boolean } = {},
   ): Promise<
     | { result: "created" | "updated"; dealId: string }
     | { result: "rejected"; reason: string }
@@ -916,21 +932,24 @@ export class CollectionService {
 
     // Quality gate first: a badly rated product or seller is never a good
     // deal. This run's facts when read, otherwise what's stored.
-    const reason = qualityIssue({
-      title: rawDeal.title,
-      sourceId,
-      productRating: rawDeal.details?.productRating ?? existing?.productRating,
-      productReviewCount:
-        rawDeal.details?.productReviewCount ?? existing?.productReviewCount,
-      soldByMerchant:
-        rawDeal.details?.soldByMerchant ?? existing?.soldByMerchant,
-      sellerRating: rawDeal.details?.sellerRating ?? existing?.sellerRating,
-      sellerSalesCount:
-        rawDeal.details?.sellerSalesCount ?? existing?.sellerSalesCount,
-      // A monthly plan's saving repeats every month: no euro floor.
-      price: rawDeal.billingPeriod ? undefined : rawDeal.price,
-      listPrice: rawDeal.billingPeriod ? undefined : rawDeal.listPrice,
-    });
+    const reason = options.skipGate
+      ? undefined
+      : qualityIssue({
+          title: rawDeal.title,
+          sourceId,
+          productRating:
+            rawDeal.details?.productRating ?? existing?.productRating,
+          productReviewCount:
+            rawDeal.details?.productReviewCount ?? existing?.productReviewCount,
+          soldByMerchant:
+            rawDeal.details?.soldByMerchant ?? existing?.soldByMerchant,
+          sellerRating: rawDeal.details?.sellerRating ?? existing?.sellerRating,
+          sellerSalesCount:
+            rawDeal.details?.sellerSalesCount ?? existing?.sellerSalesCount,
+          // A monthly plan's saving repeats every month: no euro floor.
+          price: rawDeal.billingPeriod ? undefined : rawDeal.price,
+          listPrice: rawDeal.billingPeriod ? undefined : rawDeal.listPrice,
+        });
     if (reason) {
       // Already stored: archive it so it leaves the console.
       if (existing && existing.status !== "archived") {
