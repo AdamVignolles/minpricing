@@ -17,8 +17,12 @@
  *   ledger [days]               what the agents published, as predicted
  *   sources-review [days]       yield/time per source + what goes hot on Dealabs (deals-sources)
  *   probe <url>                 can a candidate shop be read with plain fetch?
+ *   pull [--force]              remote mode: fetch configs/ledger/today's files
+ *                               (--force also drops unpushed config edits)
  *   push-config <name> [agent] [reason] [changelog.md]
  *                               remote mode: send a tuned config/<name> to the VM
+ *                               (refused, 409, if the VM's version changed since
+ *                               the last pull; sends the changelog's newest entry)
  *   push-proposal <file.md> [agent]
  *                               remote mode: send a code proposal to the VM
  *
@@ -1494,15 +1498,37 @@ const print = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 
 const startedAt = Date.now();
 
+/**
+ * What each config looked like on the VM when it was last pulled: push-config
+ * refuses to overwrite a server version that changed since (or was never
+ * pulled into this checkout, e.g. a fresh cloud clone).
+ */
+const configBaseFile = join(outDir, ".config-base.json");
+
 /** Remote mode: the VM's configs, ledger and today's files, into this checkout. */
 async function pullFromVm() {
+  const previous = existsSync(configBaseFile) ? readJson(configBaseFile) : {};
+  const base = {};
   for (const [name, file] of Object.entries(CONFIG_FILES)) {
+    const path = join(root, "config", file);
+    // An agent edit not pushed yet (file ≠ what we last pulled) is kept,
+    // with its old base, so push-config can still tell if the VM moved.
+    if (
+      previous[name] !== undefined &&
+      existsSync(path) &&
+      readFileSync(path, "utf8") !== previous[name]
+    ) {
+      base[name] = previous[name];
+      continue;
+    }
     const res = await api("GET", `/agent/config/${name}`);
     if (res.ok && typeof res.body?.content === "string") {
       mkdirSync(join(root, "config"), { recursive: true });
-      writeFileSync(join(root, "config", file), res.body.content);
+      writeFileSync(path, res.body.content);
+      base[name] = res.body.content;
     }
   }
+  writeFileSync(configBaseFile, JSON.stringify(base));
   const pulls = [
     "ledger.jsonl",
     ...DATA_KINDS.map((k) => `${k}-${today()}.json`),
@@ -1547,17 +1573,57 @@ async function pushToVm() {
   }
 }
 
+/** The newest entry of a changelog file (they are newest first). */
+function newestChangelogEntry(file) {
+  const text = readFileSync(file, "utf8");
+  const start = text.search(/^## /m);
+  if (start < 0) return undefined;
+  const next = text.slice(start + 3).search(/^## /m);
+  return (
+    next < 0 ? text.slice(start) : text.slice(start, start + 3 + next)
+  ).trim();
+}
+
 async function pushConfig(name, agent, reason, changelogFile) {
   if (!remote) throw new Error("push-config needs DEALRADAR_URL");
   if (!CONFIG_FILES[name]) {
     throw new Error(`unknown config: ${Object.keys(CONFIG_FILES).join(", ")}`);
   }
+  const content = readFileSync(
+    join(root, "config", CONFIG_FILES[name]),
+    "utf8",
+  );
+  const base = existsSync(configBaseFile)
+    ? readJson(configBaseFile)[name]
+    : undefined;
+  const current = await api("GET", `/agent/config/${name}`);
+  if (!current.ok) {
+    return { status: current.status, error: "cannot read the VM's version" };
+  }
+  if (current.body.content === content) {
+    return { status: 200, unchanged: true };
+  }
+  if (base === undefined || current.body.content !== base) {
+    return {
+      status: 409,
+      error:
+        base === undefined
+          ? `config/${CONFIG_FILES[name]} was never pulled from the VM in this checkout: run \`node scripts/agents/dealradar.mjs pull\`, redo the edit, then push-config again`
+          : `the VM's ${name} changed since it was pulled: run \`node scripts/agents/dealradar.mjs pull --force\`, redo the edit on the fresh version, then push-config again`,
+    };
+  }
   const res = await api("PUT", `/agent/config/${name}`, {
-    content: readFileSync(join(root, "config", CONFIG_FILES[name]), "utf8"),
+    content,
     agent: agent ?? "agent",
     reason,
-    changelog: changelogFile ? readFileSync(changelogFile, "utf8") : undefined,
+    changelog: changelogFile ? newestChangelogEntry(changelogFile) : undefined,
   });
+  if (res.ok) {
+    writeFileSync(
+      configBaseFile,
+      JSON.stringify({ ...readJson(configBaseFile), [name]: content }),
+    );
+  }
   return {
     status: res.status,
     ...(typeof res.body === "object" ? res.body : { body: res.body }),
@@ -1565,10 +1631,17 @@ async function pushConfig(name, agent, reason, changelogFile) {
 }
 
 try {
+  if (remote && command === "pull" && args.includes("--force")) {
+    writeFileSync(configBaseFile, "{}");
+  }
   if (remote && !["probe", "push-config", "push-proposal"].includes(command)) {
     await pullFromVm();
   }
   switch (command) {
+    case "pull":
+      if (!remote) throw new Error("pull needs DEALRADAR_URL");
+      print({ pulled: true, configs: Object.keys(readJson(configBaseFile)) });
+      break;
     case "ensure-server":
       print(await ensureServer());
       break;
@@ -1675,7 +1748,7 @@ try {
     }
     default:
       throw new Error(
-        "commands: ensure-server | report | shortlist | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days] | sources-review [days] | probe <url> | push-config <name> | push-proposal <file>",
+        "commands: ensure-server | report | shortlist | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days] | sources-review [days] | probe <url> | pull [--force] | push-config <name> | push-proposal <file>",
       );
   }
   if (remote && !["probe", "push-config", "push-proposal"].includes(command)) {
