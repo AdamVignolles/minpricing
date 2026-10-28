@@ -5,6 +5,7 @@ import { $logger } from "alepha/logger";
 import { $repository } from "alepha/orm";
 import { $action } from "alepha/server";
 
+import { collectionRunEntity } from "../entities/CollectionRun.ts";
 import { dealEntity } from "../entities/Deal.ts";
 import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { priceHistoryEntity } from "../entities/PriceHistory.ts";
@@ -53,6 +54,7 @@ export class AdminController {
   protected history = $repository(priceHistoryEntity);
   protected products = $repository(trackedProductEntity);
   protected jobs = $repository(jobExecutionEntity);
+  protected journalRuns = $repository(collectionRunEntity);
   protected log = $logger();
   protected collection = $inject(CollectionService);
   protected collectJob = $inject(CollectDealsJob);
@@ -171,6 +173,81 @@ export class AdminController {
           };
         }),
       };
+    },
+  });
+
+  /** The collection journal: one row per run, whatever its outcome. */
+  collectionJournal = $action({
+    method: "GET",
+    path: "/admin/journal",
+    use: [$adminSession()],
+    schema: {
+      query: z.object({ size: z.number().min(1).max(100).optional() }),
+      response: z.array(
+        z.object({
+          id: z.text(),
+          trigger: z.text(),
+          status: z.text(),
+          skipReason: z.text({ size: "rich" }).optional(),
+          startedAt: z.text(),
+          endedAt: z.text().optional(),
+          durationMs: z.number().nullable(),
+          error: z.text({ size: "rich" }).optional(),
+          switchedOff: z.array(z.text()),
+          results: z.array(
+            z.object({
+              id: z.text(),
+              ms: z.number().optional(),
+              collected: z.number(),
+              created: z.number(),
+              updated: z.number(),
+              rejected: z.number().optional(),
+              error: z.text({ size: "rich" }).optional(),
+              lightpandaFallbacks: z.number().optional(),
+            }),
+          ),
+        }),
+      ),
+    },
+    handler: async ({ query }) => {
+      const rows = await this.journalRuns.findMany({
+        orderBy: { column: "startedAt", direction: "desc" },
+        limit: query.size ?? 40,
+      });
+      const parse = <T>(text: string | undefined | null): T[] => {
+        try {
+          return text ? (JSON.parse(text) as T[]) : [];
+        } catch {
+          return [];
+        }
+      };
+      return rows.map((row) => {
+        const started = new Date(row.startedAt as string).getTime();
+        const ended = row.endedAt
+          ? new Date(row.endedAt as string).getTime()
+          : undefined;
+        return {
+          id: row.id,
+          trigger: row.trigger,
+          status: row.status,
+          skipReason: row.skipReason ?? undefined,
+          startedAt: String(row.startedAt),
+          endedAt: row.endedAt ? String(row.endedAt) : undefined,
+          durationMs: ended !== undefined ? ended - started : null,
+          error: row.error ?? undefined,
+          switchedOff: parse<string>(row.switchedOff),
+          results: parse<{
+            id: string;
+            ms?: number;
+            collected: number;
+            created: number;
+            updated: number;
+            rejected?: number;
+            error?: string;
+            lightpandaFallbacks?: number;
+          }>(row.results),
+        };
+      });
     },
   });
 

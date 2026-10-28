@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { $env, $inject, Alepha, z } from "alepha";
@@ -62,6 +62,11 @@ import { AmazonWatchService } from "./AmazonWatchService.ts";
 import { appFile } from "./appPaths.ts";
 import { AutoPublishService } from "./AutoPublishService.ts";
 import { CategorizationService } from "./CategorizationService.ts";
+import {
+  CollectionJournalService,
+  type RunSourceResult,
+  runStatusOf,
+} from "./CollectionJournalService.ts";
 import { CollectionProgressService } from "./CollectionProgressService.ts";
 import {
   type CollectionTuning,
@@ -167,6 +172,9 @@ export class CollectionService {
   protected sources = $repository(sourceEntity);
   protected trackedProducts = $repository(trackedProductEntity);
   protected deals = $repository(dealEntity);
+  protected journal = $inject(CollectionJournalService);
+  /** Lightpanda fallbacks of the run, kept for its journal row. */
+  protected lastFallbacks: Record<string, number> = {};
 
   protected pricing = $inject(PricingService);
   protected scoring = $inject(ScoringService);
@@ -399,8 +407,13 @@ export class CollectionService {
     // another run is still going, wherever it runs.
     if (await this.progress.isRunning()) {
       this.log.warn("Collection already running: this run is skipped.");
+      await this.journal.recordSkipped(
+        "schedule",
+        "Une collecte était déjà en cours.",
+      );
       return [];
     }
+    await this.journal.tidy();
     const tuning = this.applyCollectionTuning();
 
     // `config/collection.json` → `sources`: the deals-sources agent spaces
@@ -430,6 +443,11 @@ export class CollectionService {
 
     const summaries: CollectionSummary[] = [];
     const durations = new Map<string, number>();
+    const runId = await this.journal.open(
+      (await this.progress.get())?.trigger ?? "schedule",
+    );
+    let outcome: "done" | "cancelled" | "crashed" = "done";
+    let crash: string | undefined;
     setCollectionCancelled(false);
     // A stop request lands in the shared cache (from the API); this timer
     // turns it into the process flag and kills the shared browser.
@@ -466,6 +484,7 @@ export class CollectionService {
       if (isCollectionCancelled()) {
         // Partial listings must not expire deals that merely weren't reached.
         this.log.warn("Collection stopped on request.");
+        outcome = "cancelled";
         await this.progress.finish(false, true);
         return summaries;
       }
@@ -488,11 +507,39 @@ export class CollectionService {
         await this.publishBestDeals(runStartedAt);
       }
     } catch (error) {
+      outcome = "crashed";
+      crash = error instanceof Error ? error.message : String(error);
       await this.progress.finish(true);
       throw error;
     } finally {
       clearInterval(stopWatcher);
       setCollectionCancelled(false);
+      const fallbacks = { ...this.lastFallbacks, ...takeLightpandaFallbacks() };
+      this.lastFallbacks = {};
+      const results: RunSourceResult[] = summaries.map((s) => ({
+        id: s.sourceId,
+        ms: durations.get(s.sourceId),
+        collected: s.collected,
+        created: s.created,
+        createdVisible: s.createdVisible,
+        updated: s.updated,
+        rejected: s.rejected,
+        ...(s.error ? { error: s.error.slice(0, 200) } : {}),
+        ...(fallbacks[s.sourceId]
+          ? { lightpandaFallbacks: fallbacks[s.sourceId] }
+          : {}),
+      }));
+      await this.journal.close(runId, {
+        status:
+          outcome === "crashed"
+            ? "failed"
+            : outcome === "cancelled"
+              ? "cancelled"
+              : runStatusOf(results),
+        results,
+        switchedOff,
+        error: crash,
+      });
     }
     await this.progress.finish();
     return summaries;
@@ -510,9 +557,10 @@ export class CollectionService {
     switchedOff: string[],
   ): void {
     const fallbacks = takeLightpandaFallbacks();
+    this.lastFallbacks = fallbacks;
     try {
       const dir = appFile("data", "agents");
-      if (!existsSync(dir)) return;
+      mkdirSync(dir, { recursive: true });
       appendFileSync(
         join(dir, "collection-runs.jsonl"),
         `${JSON.stringify({
@@ -534,8 +582,8 @@ export class CollectionService {
         })}
 `,
       );
-    } catch {
-      // Best effort: the run itself matters, not its log line.
+    } catch (error) {
+      this.log.error("Could not append to collection-runs.jsonl", error);
     }
   }
 

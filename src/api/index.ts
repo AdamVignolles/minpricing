@@ -15,6 +15,7 @@ import { AgentsService } from "./services/AgentsService.ts";
 import { AmazonWatchService } from "./services/AmazonWatchService.ts";
 import { AutoPublishService } from "./services/AutoPublishService.ts";
 import { CategorizationService } from "./services/CategorizationService.ts";
+import { CollectionJournalService } from "./services/CollectionJournalService.ts";
 import { CollectionProgressService } from "./services/CollectionProgressService.ts";
 import { CollectionService } from "./services/CollectionService.ts";
 import { DealabsDraftService } from "./services/DealabsDraftService.ts";
@@ -64,6 +65,7 @@ export const ApiModule = $module({
     MarketReferenceService,
     DealabsHistoryService,
     DealPageCheckService,
+    CollectionJournalService,
     DealVerificationService,
     ItadService,
     SeedService,

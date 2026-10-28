@@ -36,6 +36,7 @@ import {
 
 import type { AdminController } from "../../api/controllers/AdminController.ts";
 import type { ProductsController } from "../../api/controllers/ProductsController.ts";
+import CollectionJournal from "../components/admin/CollectionJournal.tsx";
 import {
   COLLECTION_FINISHED_EVENT,
   COLLECTION_STARTED_EVENT,
@@ -413,6 +414,12 @@ const AdminPage: FC<AdminPageProps> = ({
               {products.length}
             </Badge>
           </Tabs.Tab>
+          <Tabs.Tab
+            value="journal"
+            leftSection={<Icon name="clock" size={14} />}
+          >
+            Journal des collectes
+          </Tabs.Tab>
           <Tabs.Tab value="logs" leftSection={<Icon name="clock" size={14} />}>
             Journaux
           </Tabs.Tab>
@@ -443,6 +450,10 @@ const AdminPage: FC<AdminPageProps> = ({
             }
             client={productsClient}
           />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="journal">
+          <CollectionJournal />
         </Tabs.Panel>
 
         <Tabs.Panel value="logs">
