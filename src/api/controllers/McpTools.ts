@@ -182,7 +182,7 @@ export class McpTools {
   get_collection_status = $tool({
     title: "Collecte en cours et récentes",
     description:
-      "Live progress of the current collection run (per source: status, step, counts) and the recent runs with their results.",
+      "Live progress of the current collection run (per source: status, step, counts) and the recent runs with their results (without their log lines).",
     annotations: readOnly,
     schema: {
       params: z.object({ runs: z.number().min(1).max(50).optional() }),
@@ -190,9 +190,9 @@ export class McpTools {
     handler: async ({ params }) => {
       const [progress, runs] = await Promise.all([
         this.admin.collectProgress.run(),
-        this.admin.runs.run({ query: { size: params.runs ?? 10 } }),
+        this.admin.runs.run({ query: { size: params.runs ?? 5 } }),
       ]);
-      return { progress, runs };
+      return { progress, runs: runs.map(({ logs: _logs, ...run }) => run) };
     },
   });
 
@@ -286,7 +286,7 @@ export class McpTools {
     description:
       "Our own deals on Dealabs (from our public profile, cached 1 h): title, price, temperature, comments, status and date.",
     annotations: readOnly,
-    handler: async () => ({ posts: await this.myPosts.posts() }),
+    handler: async () => ({ posts: await this.myPosts.postsNow() }),
   });
 
   get_dealabs_session = $tool({
