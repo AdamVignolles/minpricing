@@ -1106,8 +1106,17 @@ async function readProfile(user, pages = 3) {
 /** The first comments of a thread, read in a headless browser (the API refuses scripts). */
 async function readComments(urls) {
   if (urls.length === 0) return {};
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch();
+  let browser;
+  try {
+    const { chromium } = await import("playwright");
+    browser = await chromium.launch();
+  } catch (error) {
+    // Cloud routines have no Playwright/Chromium: posts without comments.
+    process.stderr.write(
+      `comments skipped (no browser: ${String(error).slice(0, 120)})\n`,
+    );
+    return undefined;
+  }
   const out = {};
   try {
     for (const url of urls) {
@@ -1182,8 +1191,10 @@ async function profileReview() {
     .sort((a, b) => a.temp - b.temp)
     .slice(0, 6);
   const fresh = await readComments(worth.map((p) => p.url));
-  for (const p of worth)
-    cache[p.id] = { count: p.comments, comments: fresh[p.url] ?? [] };
+  // Without a browser, leave the cache alone so a local run reads them later.
+  if (fresh)
+    for (const p of worth)
+      cache[p.id] = { count: p.comments, comments: fresh[p.url] ?? [] };
   writeFileSync(cacheFile, JSON.stringify(cache));
 
   const hot = posts.filter((p) => p.temp >= rules().learning.hotThreshold);
@@ -1207,6 +1218,12 @@ async function profileReview() {
       (p) =>
         `${p.publishedAt.slice(5, 16).replace("T", " ")} | ${p.temp}° | ${p.comments} comm. | ${p.status}${p.expired ? " · expiré" : ""}${p.flags.length ? ` · ${p.flags.join(", ")}` : ""} | ${byAgents(p) ? "agents" : "manuel"} | ${p.price} € | ${p.title}`,
     ),
+    ...(fresh
+      ? {}
+      : {
+          commentsNote:
+            "commentaires non lus (pas de navigateur ici) : seuls ceux déjà en cache sont listés",
+        }),
     comments: Object.fromEntries(
       posts
         .filter((p) => cache[p.id]?.comments?.length)
@@ -1615,25 +1632,42 @@ async function pushToVm() {
   );
   const dataBase = existsSync(dataBaseFile) ? readJson(dataBaseFile) : {};
   const toPush = new Set([...changedSince(outDir, kinds), ...localEdits]);
+  const pushed = [];
   for (const name of toPush) {
     if (!existsSync(join(outDir, name))) continue;
     const content = readFileSync(join(outDir, name), "utf8");
     if (sha1(content) === dataBase[name]) continue;
     const res = await api("PUT", `/agent/data/${name}`, { content, agent });
-    if (res.ok) dataBase[name] = sha1(content);
-    else process.stderr.write(`push ${name}: ${res.status}\n`);
+    if (res.ok) {
+      dataBase[name] = sha1(content);
+      pushed.push(name);
+    } else process.stderr.write(`push ${name}: ${res.status}\n`);
   }
-  writeFileSync(dataBaseFile, JSON.stringify(dataBase));
-  for (const name of changedSince(
-    join(outDir, "reports"),
-    /^[a-z0-9-]+\.md$/,
-  )) {
+  // Reports: anything written in the last 2 days that the VM hasn't got,
+  // whether before or during this command (routines write them, then pull).
+  const reportsDir = join(outDir, "reports");
+  const recent = Date.now() - 2 * 86_400_000;
+  const reports = existsSync(reportsDir)
+    ? readdirSync(reportsDir).filter(
+        (f) =>
+          /^[a-z0-9-]+\.md$/.test(f) &&
+          statSync(join(reportsDir, f)).mtimeMs >= recent,
+      )
+    : [];
+  for (const name of reports) {
+    const markdown = readFileSync(join(reportsDir, name), "utf8");
+    if (sha1(markdown) === dataBase[`reports/${name}`]) continue;
     const res = await api("PUT", `/agent/reports/${name.slice(0, -3)}`, {
-      markdown: readFileSync(join(outDir, "reports", name), "utf8"),
+      markdown,
       agent,
     });
-    if (!res.ok) process.stderr.write(`push report ${name}: ${res.status}\n`);
+    if (res.ok) {
+      dataBase[`reports/${name}`] = sha1(markdown);
+      pushed.push(`reports/${name}`);
+    } else process.stderr.write(`push report ${name}: ${res.status}\n`);
   }
+  writeFileSync(dataBaseFile, JSON.stringify(dataBase));
+  return pushed;
 }
 
 /** The newest entry of a changelog file (they are newest first). */
@@ -1815,7 +1849,9 @@ try {
       );
   }
   if (remote && !["probe", "push-config", "push-proposal"].includes(command)) {
-    await pushToVm();
+    const pushed = await pushToVm();
+    if (pushed.length)
+      process.stderr.write(`pushed to the VM: ${pushed.join(", ")}\n`);
   }
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : error}\n`);

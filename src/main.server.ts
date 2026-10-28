@@ -2,6 +2,7 @@ import { AlephaSigil } from "@alepha/lore/sigil";
 import { Alepha, run } from "alepha";
 import { AlephaApiJobsQueue } from "alepha/api/jobs";
 import { queueWorkerOptions } from "alepha/queue";
+import { bodyParserOptions } from "alepha/server";
 
 import { ApiModule } from "./api/index.ts";
 import { WebModule } from "./web/index.ts";
@@ -22,6 +23,9 @@ alepha.store.set(queueWorkerOptions, {
   maxInterval: 32000,
   concurrency: 2,
 });
+// The agents' files (`PUT /agent/data/*`, reports) go up to the 2 MB cap
+// `AgentFilesService` enforces; the framework default stops at 100 kB.
+alepha.store.set(bodyParserOptions, { inflate: true, limit: 2_500_000 });
 // Crash/telemetry reporting to Lore. Inert until `SIGIL_KEY` is set (minted by
 // `lore deploy`) and production-only, so dev and tests send nothing.
 alepha.with(AlephaSigil);
