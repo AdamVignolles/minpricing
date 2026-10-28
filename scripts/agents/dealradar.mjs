@@ -17,6 +17,19 @@
  *   ledger [days]               what the agents published, as predicted
  *   sources-review [days]       yield/time per source + what goes hot on Dealabs (deals-sources)
  *   probe <url>                 can a candidate shop be read with plain fetch?
+ *   push-config <name> [agent] [reason] [changelog.md]
+ *                               remote mode: send a tuned config/<name> to the VM
+ *   push-proposal <file.md> [agent]
+ *                               remote mode: send a code proposal to the VM
+ *
+ * Remote mode (`DEALRADAR_URL` + `DEALRADAR_TOKEN`, from the environment or
+ * .env): the same commands against the online app (Bay VM) instead of a
+ * local server — for the Claude cloud routines. Before a command, the
+ * configs, the ledger and today's files are pulled from the VM into this
+ * checkout; after it, today's files and reports it wrote are pushed back
+ * (`/api/agent/*`, see AgentApiController). Reads use the agent token on
+ * the console's GET endpoints; nothing can publish directly: publish-queue
+ * hands tonight's plan to the app's own schedule (`/api/agent/schedule`).
  */
 import { spawn } from "node:child_process";
 import {
@@ -24,7 +37,9 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -50,6 +65,32 @@ function readEnv() {
 }
 
 const env = readEnv();
+const remote = (process.env.DEALRADAR_URL ?? env.DEALRADAR_URL ?? "").replace(
+  /\/+$/,
+  "",
+);
+const agentToken = process.env.DEALRADAR_TOKEN ?? env.DEALRADAR_TOKEN ?? "";
+// The plan, the ledger and the file names are in Paris days, wherever the
+// routine runs.
+if (remote && !process.env.TZ) process.env.TZ = "Europe/Paris";
+/** Daily files the VM accepts (AGENT_DATA_FILE in agentConfig.ts). */
+const DATA_KINDS = [
+  "report",
+  "shortlist",
+  "queue",
+  "plan",
+  "published",
+  "stats",
+  "tune-stats",
+  "profile-review",
+  "sources-review",
+];
+const CONFIG_FILES = {
+  "publish-rules": "publish-rules.json",
+  desirability: "desirability.json",
+  collection: "collection.json",
+  "selection-lessons": "selection-lessons.md",
+};
 const credentials = {
   username: env.ADMIN_USERNAME ?? "admin",
   password: env.ADMIN_PASSWORD ?? "admin",
@@ -68,6 +109,21 @@ let session; // { base, cookie }
 
 async function login() {
   if (session) return session;
+  if (remote) {
+    if (!agentToken) throw new Error("DEALRADAR_TOKEN is not set");
+    const base = `${remote}/api`;
+    const res = await fetch(`${base}/agent/changes?limit=1`, {
+      headers: { authorization: `Bearer ${agentToken}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      throw new Error(
+        `DealRadar at ${remote} refused the token (${res.status})`,
+      );
+    }
+    session = { base, auth: `Bearer ${agentToken}` };
+    return session;
+  }
   for (const port of ports) {
     const base = `http://localhost:${port}/api`;
     try {
@@ -95,24 +151,31 @@ async function login() {
   );
 }
 
-async function api(method, path) {
-  const { base, cookie } = await login();
-  const res = await fetch(`${base}${path}`, {
+async function api(method, path, body) {
+  const { base, cookie, auth } = await login();
+  const init = {
     method,
-    headers: { cookie },
+    headers: {
+      ...(auth ? { authorization: auth } : { cookie }),
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
     signal: AbortSignal.timeout(10 * 60_000),
-  });
+  };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  const res = await fetch(`${base}${path}`, init);
   const text = await res.text();
-  let body;
+  let parsed;
   try {
-    body = JSON.parse(text);
+    parsed = JSON.parse(text);
   } catch {
-    body = text;
+    parsed = text;
   }
-  return { ok: res.ok, status: res.status, body };
+  return { ok: res.ok, status: res.status, body: parsed };
 }
 
 async function ensureServer() {
+  if (remote)
+    return { running: true, base: (await login()).base, remote: true };
   try {
     return { running: true, base: (await login()).base, started: false };
   } catch {
@@ -298,6 +361,13 @@ function atToday(hm) {
 }
 
 async function publish(dealId) {
+  if (remote) {
+    return {
+      result: "failed",
+      error:
+        "remote mode: agents don't publish directly — publish-queue hands the plan to the app",
+    };
+  }
   // The app checks the merchant page itself before posting (site up,
   // product there, price unchanged) and answers 422 when it isn't.
   const res = await api(
@@ -329,6 +399,21 @@ async function publishQueue(file, now = false) {
     ...(queue.items ?? []),
     ...(queue.backups ?? []),
   ];
+  if (remote) {
+    // The app draws the times and publishes at each one itself.
+    const res = await api("PUT", "/agent/schedule", {
+      ranked,
+      agent: process.env.DEALRADAR_AGENT ?? "deals-select",
+      reason: queue.reason ?? queue.summary,
+      ...(now ? { now: true } : {}),
+    });
+    if (!res.ok) {
+      throw new Error(
+        `schedule refused (${res.status}): ${JSON.stringify(res.body).slice(0, 400)}`,
+      );
+    }
+    return res.body;
+  }
   const planFile = fileOf("plan");
   if (!isPublishDay(r)) {
     const plan = {
@@ -1407,7 +1492,82 @@ async function probe(url) {
 const [command, ...args] = process.argv.slice(2);
 const print = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 
+const startedAt = Date.now();
+
+/** Remote mode: the VM's configs, ledger and today's files, into this checkout. */
+async function pullFromVm() {
+  for (const [name, file] of Object.entries(CONFIG_FILES)) {
+    const res = await api("GET", `/agent/config/${name}`);
+    if (res.ok && typeof res.body?.content === "string") {
+      mkdirSync(join(root, "config"), { recursive: true });
+      writeFileSync(join(root, "config", file), res.body.content);
+    }
+  }
+  const pulls = [
+    "ledger.jsonl",
+    ...DATA_KINDS.map((k) => `${k}-${today()}.json`),
+  ];
+  for (const name of pulls) {
+    const res = await api("GET", `/agent/data/${name}`);
+    if (res.ok && typeof res.body?.content === "string") {
+      writeFileSync(join(outDir, name), res.body.content);
+    }
+  }
+}
+
+const changedSince = (dir, pattern) =>
+  existsSync(dir)
+    ? readdirSync(dir).filter(
+        (f) => pattern.test(f) && statSync(join(dir, f)).mtimeMs >= startedAt,
+      )
+    : [];
+
+/** Remote mode: today's files and the reports this command wrote, to the VM. */
+async function pushToVm() {
+  const agent = process.env.DEALRADAR_AGENT ?? `dealradar.mjs ${command}`;
+  const kinds = new RegExp(
+    `^(${DATA_KINDS.join("|")})-\\d{4}-\\d{2}-\\d{2}\\.json$`,
+  );
+  for (const name of changedSince(outDir, kinds)) {
+    const res = await api("PUT", `/agent/data/${name}`, {
+      content: readFileSync(join(outDir, name), "utf8"),
+      agent,
+    });
+    if (!res.ok) process.stderr.write(`push ${name}: ${res.status}\n`);
+  }
+  for (const name of changedSince(
+    join(outDir, "reports"),
+    /^[a-z0-9-]+\.md$/,
+  )) {
+    const res = await api("PUT", `/agent/reports/${name.slice(0, -3)}`, {
+      markdown: readFileSync(join(outDir, "reports", name), "utf8"),
+      agent,
+    });
+    if (!res.ok) process.stderr.write(`push report ${name}: ${res.status}\n`);
+  }
+}
+
+async function pushConfig(name, agent, reason, changelogFile) {
+  if (!remote) throw new Error("push-config needs DEALRADAR_URL");
+  if (!CONFIG_FILES[name]) {
+    throw new Error(`unknown config: ${Object.keys(CONFIG_FILES).join(", ")}`);
+  }
+  const res = await api("PUT", `/agent/config/${name}`, {
+    content: readFileSync(join(root, "config", CONFIG_FILES[name]), "utf8"),
+    agent: agent ?? "agent",
+    reason,
+    changelog: changelogFile ? readFileSync(changelogFile, "utf8") : undefined,
+  });
+  return {
+    status: res.status,
+    ...(typeof res.body === "object" ? res.body : { body: res.body }),
+  };
+}
+
 try {
+  if (remote && !["probe", "push-config", "push-proposal"].includes(command)) {
+    await pullFromVm();
+  }
   switch (command) {
     case "ensure-server":
       print(await ensureServer());
@@ -1491,10 +1651,35 @@ try {
     case "ledger":
       print(readLedger(Number(args[0] ?? 60)));
       break;
+    case "push-config":
+      if (!args[0])
+        throw new Error(
+          "usage: push-config <name> [agent] [reason] [changelog.md]",
+        );
+      print(await pushConfig(args[0], args[1], args[2], args[3]));
+      break;
+    case "push-proposal": {
+      if (!remote) throw new Error("push-proposal needs DEALRADAR_URL");
+      if (!args[0]) throw new Error("usage: push-proposal <file.md> [agent]");
+      const slug = args[0]
+        .split(/[\\/]/)
+        .pop()
+        .replace(/^code-proposal-/, "")
+        .replace(/\.md$/, "");
+      const res = await api("PUT", `/agent/proposals/${slug}`, {
+        markdown: readFileSync(args[0], "utf8"),
+        agent: args[1] ?? "agent",
+      });
+      print({ status: res.status, slug });
+      break;
+    }
     default:
       throw new Error(
-        "commands: ensure-server | report | shortlist | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days] | sources-review [days] | probe <url>",
+        "commands: ensure-server | report | shortlist | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days] | sources-review [days] | probe <url> | push-config <name> | push-proposal <file>",
       );
+  }
+  if (remote && !["probe", "push-config", "push-proposal"].includes(command)) {
+    await pushToVm();
   }
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : error}\n`);

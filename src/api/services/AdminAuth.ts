@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+
 import {
   $env,
   $inject,
@@ -78,17 +80,92 @@ export function $adminCredentialsEnv() {
 export function $adminSession(): Middleware {
   const session = $adminSessionCookie();
   const alepha = $inject(Alepha);
+  const env = $agentTokenEnv();
 
   return createMiddleware({
     name: "$adminSession",
     handler: ({ next }) => {
       return async (...args: unknown[]) => {
         const request = alepha.store.get("alepha.http.request");
-        if (!session.get() && request?.metadata?.mcpAgent !== true) {
+        // The agent token reads (GET) like the console does; it never
+        // reaches an admin write — agents write only through `/agent/*`.
+        const agentRead =
+          request?.method === "GET" &&
+          hasAgentToken(request?.headers?.authorization, env.AGENT_TOKEN);
+        if (
+          !session.get() &&
+          request?.metadata?.mcpAgent !== true &&
+          !agentRead
+        ) {
           throw new HttpError({
             status: 401,
             message: "Authentication required",
           });
+        }
+        return next(...args);
+      };
+    },
+  });
+}
+
+/**
+ * `AGENT_TOKEN`: the bearer token the scheduled agents (Claude routines,
+ * `scripts/agents/dealradar.mjs` in remote mode) send. Unset = agent
+ * access off. Generate one with `openssl rand -hex 32`; shorter values
+ * are ignored so a placeholder can never open the API.
+ */
+export function $agentTokenEnv() {
+  return $env(
+    z.object({
+      AGENT_TOKEN: z.text({ default: "" }),
+    }),
+  );
+}
+
+export const AGENT_TOKEN_MIN_LENGTH = 32;
+
+/** Constant-time check of an `Authorization: Bearer …` header. */
+export function hasAgentToken(
+  header: string | string[] | undefined,
+  token: string,
+): boolean {
+  if (!token || token.length < AGENT_TOKEN_MIN_LENGTH) return false;
+  const value = Array.isArray(header) ? header[0] : header;
+  const match = value?.match(/^Bearer\s+(.+)$/i);
+  if (!match) return false;
+  const given = createHash("sha256").update(match[1].trim()).digest();
+  const expected = createHash("sha256").update(token).digest();
+  return timingSafeEqual(given, expected);
+}
+
+/**
+ * Gate of the agent write API (`/agent/*`): the agent token, or the admin
+ * session (so the console can edit tonight's plan too). The caller is
+ * stored as `request.metadata.agentCaller` for the audit trail.
+ */
+export function $agentAuth(): Middleware {
+  const session = $adminSessionCookie();
+  const alepha = $inject(Alepha);
+  const env = $agentTokenEnv();
+
+  return createMiddleware({
+    name: "$agentAuth",
+    handler: ({ next }) => {
+      return async (...args: unknown[]) => {
+        const request = alepha.store.get("alepha.http.request");
+        const agent = hasAgentToken(
+          request?.headers?.authorization,
+          env.AGENT_TOKEN,
+        );
+        if (!agent && !session.get()) {
+          throw new HttpError({
+            status: 401,
+            message: "Agent token or admin session required",
+          });
+        }
+        if (request) {
+          request.metadata ??= {};
+          request.metadata.agentCaller = agent ? "agent" : "admin";
         }
         return next(...args);
       };
