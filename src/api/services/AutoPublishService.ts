@@ -106,6 +106,11 @@ export class AutoPublishService {
   /** One publish at a time: the button and the run share one browser flow. */
   protected busy = false;
 
+  /** A publish is in progress (button, run or schedule). */
+  get isBusy(): boolean {
+    return this.busy;
+  }
+
   get enabled(): boolean {
     return this.env.AUTO_PUBLISH;
   }

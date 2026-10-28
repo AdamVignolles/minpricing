@@ -295,6 +295,35 @@ deals and, separately, the visible ones (`createdVisible`).
   counts them in the score's figures or the prediction, and, in
   `isSameProduct`, bundles/roundups, a short name without its model code,
   and kids vs adult sizes.
+- **Agent API** (`AgentApiController`, `AgentFilesService`,
+  `services/agentConfig.ts`): `AGENT_TOKEN` (Bearer, ≥ 32 chars) opens
+  the console's GETs (`$adminSession` lets it through on GET only) and
+  `/agent/*` — never an admin write. `PUT /agent/config/:name`
+  (publish-rules, desirability, collection, selection-lessons) is checked
+  against the file's own bounds (locked: `bounds`, `adamPreferences`,
+  `publishDays`, `window`, `lockedSources`, page URLs…; 422 otherwise),
+  keeps `<name>.previous.*`, inserts the changelog entry in
+  `docs/*-changelog.md` and writes an `agent_writes` audit row
+  (`GET /agent/changes`, MCP `get_agent_changes`). Reports, code
+  proposals and whitelisted daily files (`data/agents/<kind>-<date>.json`)
+  go through `/agent/reports|proposals|data`. All files live under
+  `appDir()` (Bay's persistent `APP_FILES_DIR`). `dealradar.mjs` in remote
+  mode (`DEALRADAR_URL` + `DEALRADAR_TOKEN`) pulls configs and today's
+  files before a command and pushes back what it wrote; `push-config` /
+  `push-proposal` send edits; `publish` is refused.
+- **Publishing schedule** (`PublishScheduleService`, `PublishScheduleJob`
+  every 5 min, entity `publish_schedule`): `PUT /agent/schedule` (what
+  `publish-queue` sends in remote mode) hands the ranked deals over; the
+  app draws 2–5 times in the rules' window `minGapMinutes` apart (Paris
+  time, `services/publishPlan.ts`) or takes explicit `times`, `now`
+  or `dryRun` (page check only). Each due entry tries up to 4 deals of the
+  ranking through `AutoPublishService.publishDeal` — never one already
+  tried today, category caps, `perDay.max` and `AUTO_PUBLISH_MAX_PER_DAY`
+  — and appends to `data/agents/ledger.jsonl` (script format) and
+  `published-<date>.json`. Entries > 3 h late are skipped; no Dealabs
+  session = skipped. Shown, cancelled and moved in the Agents page
+  (« Ce soir »), MCP `get_publish_schedule`. The jobs queue runs 2 workers
+  (`main.server.ts`) so a long collection doesn't hold a publishing time.
 - **Speed**: `runAll()` runs sources in parallel (`COLLECT_SOURCE_CONCURRENCY`,
   default 3, heavy ones first); Amazon/Cdiscount/AliExpress open product
   pages 3 at a time and listing pages 2 at a time (`mapWithConcurrency` in

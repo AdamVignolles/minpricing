@@ -25,6 +25,9 @@ import type {
   AgentsService,
   WeightRow,
 } from "../../api/services/AgentsService.ts";
+import TonightPlan, {
+  type TonightPlanData,
+} from "../components/agents/TonightPlan.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
 import Markdown from "../components/ui/Markdown.tsx";
@@ -40,6 +43,7 @@ export interface AgentsPageProps {
   reports: AgentReportSummary[];
   report?: { id: string; markdown: string };
   categories: RefItem[];
+  tonight: TonightPlanData;
   tab?: string;
 }
 
@@ -143,6 +147,7 @@ const AgentsPage: FC<AgentsPageProps> = ({
   reports,
   report,
   categories,
+  tonight,
   tab,
 }) => {
   const [reportFilter, setReportFilter] = useState<string>("all");
@@ -188,7 +193,7 @@ const AgentsPage: FC<AgentsPageProps> = ({
           </Title>
           <Text fz="sm" c="dimmed">
             Ce que les agents DealRadar ont choisi, publié, appris et réglé —
-            chaque soir, en local.
+            chaque soir, sur le serveur.
           </Text>
         </Stack>
         <Group gap="xs">
@@ -288,6 +293,9 @@ const AgentsPage: FC<AgentsPageProps> = ({
         {/* ── Activité ── */}
         <Tabs.Panel value="activite">
           <Grid gap="lg">
+            <Grid.Col span={12}>
+              <TonightPlan initial={tonight} />
+            </Grid.Col>
             <Grid.Col span={{ base: 12, md: 4 }}>
               <Section
                 title="Soirées"

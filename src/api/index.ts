@@ -2,6 +2,7 @@ import { $module } from "alepha";
 import { AlephaMcp, StreamableHttpMcpTransport } from "alepha/mcp";
 
 import { AdminController } from "./controllers/AdminController.ts";
+import { AgentApiController } from "./controllers/AgentApiController.ts";
 import { AgentsController } from "./controllers/AgentsController.ts";
 import { AuthController } from "./controllers/AuthController.ts";
 import { CatalogController } from "./controllers/CatalogController.ts";
@@ -11,9 +12,12 @@ import { KeepaController } from "./controllers/KeepaController.ts";
 import { McpOAuthController } from "./controllers/McpOAuthController.ts";
 import { McpTools } from "./controllers/McpTools.ts";
 import { ProductsController } from "./controllers/ProductsController.ts";
+import { PublishScheduleController } from "./controllers/PublishScheduleController.ts";
 import { SourcesController } from "./controllers/SourcesController.ts";
 import { StatsController } from "./controllers/StatsController.ts";
 import { CollectDealsJob } from "./jobs/CollectDealsJob.ts";
+import { PublishScheduleJob } from "./jobs/PublishScheduleJob.ts";
+import { AgentFilesService } from "./services/AgentFilesService.ts";
 import { AgentsService } from "./services/AgentsService.ts";
 import { AmazonWatchService } from "./services/AmazonWatchService.ts";
 import { AutoPublishService } from "./services/AutoPublishService.ts";
@@ -31,6 +35,7 @@ import { McpOAuthService } from "./services/McpOAuthService.ts";
 import { MyDealabsPostsService } from "./services/MyDealabsPostsService.ts";
 import { PriceSeriesService } from "./services/PriceSeriesService.ts";
 import { PricingService } from "./services/PricingService.ts";
+import { PublishScheduleService } from "./services/PublishScheduleService.ts";
 import { ScoringService } from "./services/ScoringService.ts";
 import { SeedService } from "./services/SeedService.ts";
 
@@ -54,11 +59,17 @@ export const ApiModule = $module({
     StatsController,
     KeepaController,
     AgentsController,
+    // agent write API (AGENT_TOKEN): bounded configs, reports, plan
+    AgentApiController,
+    PublishScheduleController,
     // jobs
     CollectDealsJob,
+    PublishScheduleJob,
     // services
     CollectionService,
     AgentsService,
+    AgentFilesService,
+    PublishScheduleService,
     CollectionProgressService,
     AutoPublishService,
     PricingService,

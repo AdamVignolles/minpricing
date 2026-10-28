@@ -11,6 +11,7 @@ import type { CatalogController } from "../api/controllers/CatalogController.ts"
 import type { DealsController } from "../api/controllers/DealsController.ts";
 import type { DraftsController } from "../api/controllers/DraftsController.ts";
 import type { ProductsController } from "../api/controllers/ProductsController.ts";
+import type { PublishScheduleController } from "../api/controllers/PublishScheduleController.ts";
 import type { SourcesController } from "../api/controllers/SourcesController.ts";
 import type { StatsController } from "../api/controllers/StatsController.ts";
 
@@ -53,6 +54,7 @@ export class AppRouter {
   stats = $client<StatsController>();
   auth = $client<AuthController>();
   agents = $client<AgentsController>();
+  publishSchedule = $client<PublishScheduleController>();
 
   head = $head({
     title: "DealRadar",
@@ -182,10 +184,11 @@ export class AppRouter {
     },
     lazy: () => import("./pages/AgentsPage.tsx"),
     loader: async ({ query }) => {
-      const [overview, reports, categories] = await Promise.all([
+      const [overview, reports, categories, tonight] = await Promise.all([
         this.agents.agentsOverview({}),
         this.agents.agentReportList({}),
         this.catalog.listCategories({}),
+        this.publishSchedule.publishPlan({ query: {} }),
       ]);
       const reportId = query.report ?? reports[0]?.id;
       const report = reportId
@@ -193,7 +196,14 @@ export class AppRouter {
             .agentReportDetail({ params: { id: reportId } })
             .catch(() => undefined)
         : undefined;
-      return { overview, reports, report, categories, tab: query.tab };
+      return {
+        overview,
+        reports,
+        report,
+        categories,
+        tonight,
+        tab: query.tab,
+      };
     },
   });
 

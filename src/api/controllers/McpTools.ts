@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { $inject, z } from "alepha";
 import { $tool } from "alepha/mcp";
 
+import { AgentFilesService } from "../services/AgentFilesService.ts";
 import { appDir } from "../services/appDir.ts";
 import { MyDealabsPostsService } from "../services/MyDealabsPostsService.ts";
+import { PublishScheduleService } from "../services/PublishScheduleService.ts";
 import { AdminController } from "./AdminController.ts";
 import { AgentsController } from "./AgentsController.ts";
 import { DealsController } from "./DealsController.ts";
@@ -82,6 +84,8 @@ export class McpTools {
   protected sources = $inject(SourcesController);
   protected stats = $inject(StatsController);
   protected myPosts = $inject(MyDealabsPostsService);
+  protected agentFiles = $inject(AgentFilesService);
+  protected publishSchedule = $inject(PublishScheduleService);
 
   search_deals = $tool({
     title: "Rechercher des deals",
@@ -194,6 +198,30 @@ export class McpTools {
       ]);
       return { progress, runs: runs.map(({ logs: _logs, ...run }) => run) };
     },
+  });
+
+  get_agent_changes = $tool({
+    title: "Modifications des agents",
+    description:
+      "Audit trail of what the scheduled agents changed through the agent API (configs, reports, proposals, tonight's publishing plan): who, when, why, and which values moved.",
+    annotations: readOnly,
+    schema: {
+      params: z.object({ limit: z.number().min(1).max(200).optional() }),
+    },
+    handler: async ({ params }) => this.agentFiles.changes(params.limit ?? 30),
+  });
+
+  get_publish_schedule = $tool({
+    title: "Plan de publication",
+    description:
+      "Tonight's publishing plan run by the app (or another Paris day's, YYYY-MM-DD): each planned time, its status (planned/running/done/skipped/cancelled/failed), the deal published or tried, the result and why; plus the ranked deals it draws from.",
+    annotations: readOnly,
+    schema: {
+      params: z.object({
+        date: z.text({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }).optional(),
+      }),
+    },
+    handler: async ({ params }) => this.publishSchedule.list(params.date),
   });
 
   get_stats = $tool({
