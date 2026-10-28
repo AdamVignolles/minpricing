@@ -1618,6 +1618,7 @@ async function pushToVm() {
   for (const name of toPush) {
     if (!existsSync(join(outDir, name))) continue;
     const content = readFileSync(join(outDir, name), "utf8");
+    if (sha1(content) === dataBase[name]) continue;
     const res = await api("PUT", `/agent/data/${name}`, { content, agent });
     if (res.ok) dataBase[name] = sha1(content);
     else process.stderr.write(`push ${name}: ${res.status}\n`);
