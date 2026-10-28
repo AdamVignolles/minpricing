@@ -175,10 +175,6 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
   );
   const [verifying, setVerifying] = useState(false);
   const [autoPublishing, setAutoPublishing] = useState(false);
-  /** Unknown until the connection row has loaded: don't block meanwhile. */
-  const [dealabsConnected, setDealabsConnected] = useState<boolean | null>(
-    null,
-  );
 
   /**
    * Idealo's own price-history chart, fetched live the moment this page
@@ -944,9 +940,7 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                     setCurrent({ ...current, body: event.currentTarget.value })
                   }
                 />
-                <DealabsConnection
-                  onStatus={(status) => setDealabsConnected(status.connected)}
-                />
+                <DealabsConnection />
 
                 <Group gap="sm">
                   <Button

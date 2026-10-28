@@ -1,4 +1,11 @@
-import { $env, createMiddleware, type Middleware, z } from "alepha";
+import {
+  $env,
+  $inject,
+  Alepha,
+  createMiddleware,
+  type Middleware,
+  z,
+} from "alepha";
 import { HttpError } from "alepha/server";
 import { $cookie } from "alepha/server/cookies";
 
@@ -61,15 +68,23 @@ export function $adminCredentialsEnv() {
  * there are no credentials to compare on every request, just "is the
  * signed cookie present and valid", and signature verification is already
  * timing-safe inside `ServerCookiesProvider`.
+ *
+ * Also lets through a call made from a read-only MCP tool (`McpTools.ts`):
+ * the `/mcp` request was already checked for a valid OAuth token by
+ * `McpOAuthController.gate`, which flags it `mcpAgent`. The flag only
+ * exists on `/mcp` requests, so it never opens any other HTTP route, and
+ * the tools only call GET actions.
  */
 export function $adminSession(): Middleware {
   const session = $adminSessionCookie();
+  const alepha = $inject(Alepha);
 
   return createMiddleware({
     name: "$adminSession",
     handler: ({ next }) => {
       return async (...args: unknown[]) => {
-        if (!session.get()) {
+        const request = alepha.store.get("alepha.http.request");
+        if (!session.get() && request?.metadata?.mcpAgent !== true) {
           throw new HttpError({
             status: 401,
             message: "Authentication required",

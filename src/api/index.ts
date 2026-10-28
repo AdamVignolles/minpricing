@@ -1,4 +1,5 @@
 import { $module } from "alepha";
+import { AlephaMcp, StreamableHttpMcpTransport } from "alepha/mcp";
 
 import { AdminController } from "./controllers/AdminController.ts";
 import { AgentsController } from "./controllers/AgentsController.ts";
@@ -7,6 +8,8 @@ import { CatalogController } from "./controllers/CatalogController.ts";
 import { DealsController } from "./controllers/DealsController.ts";
 import { DraftsController } from "./controllers/DraftsController.ts";
 import { KeepaController } from "./controllers/KeepaController.ts";
+import { McpOAuthController } from "./controllers/McpOAuthController.ts";
+import { McpTools } from "./controllers/McpTools.ts";
 import { ProductsController } from "./controllers/ProductsController.ts";
 import { SourcesController } from "./controllers/SourcesController.ts";
 import { StatsController } from "./controllers/StatsController.ts";
@@ -24,6 +27,7 @@ import { HotWatchlistService } from "./services/HotWatchlistService.ts";
 import { IdealoReferenceService } from "./services/IdealoReferenceService.ts";
 import { ItadService } from "./services/ItadService.ts";
 import { MarketReferenceService } from "./services/MarketReferenceService.ts";
+import { McpOAuthService } from "./services/McpOAuthService.ts";
 import { MyDealabsPostsService } from "./services/MyDealabsPostsService.ts";
 import { PriceSeriesService } from "./services/PriceSeriesService.ts";
 import { PricingService } from "./services/PricingService.ts";
@@ -32,7 +36,13 @@ import { SeedService } from "./services/SeedService.ts";
 
 export const ApiModule = $module({
   name: "minpricing.api",
+  imports: [AlephaMcp],
   services: [
+    // read-only MCP for Claude (OAuth login with the admin credentials)
+    StreamableHttpMcpTransport,
+    McpOAuthController,
+    McpOAuthService,
+    McpTools,
     // controllers
     AuthController,
     DealsController,

@@ -318,6 +318,19 @@ deals and, separately, the visible ones (`createdVisible`).
   (`src/api/services/AdminAuth.ts`); every other controller guards its actions
   with `$adminSession()`. (`.env.example` still describes this as HTTP Basic
   Auth — that is outdated.) `test/admin-auth.spec.ts` covers the gate.
+- **MCP (read-only, for Claude)**: `POST /mcp` (Alepha `StreamableHttpMcpTransport`)
+  serves the tools of `controllers/McpTools.ts` — deals, detail, history,
+  sources, collection progress, stats, agent shortlist/reports, config files
+  (by name only), our Dealabs posts, session status. Every tool is
+  `readOnlyHint`; none writes, publishes or starts a run. Most call the
+  console's GET actions, which `$adminSession()` lets through when the
+  `/mcp` request carried a valid token (`request.metadata.mcpAgent`).
+  Auth is a stateless single-admin OAuth 2.1 server
+  (`McpOAuthController` + `McpOAuthService`: HMAC-signed tokens from
+  `APP_SECRET`, dynamic client registration, PKCE S256, codes 5 min and
+  single use, access 1 h, refresh 30 d; no table). Connect in claude.ai →
+  Settings → Connectors → custom connector `https://<host>/mcp`, then log in
+  with the admin credentials on the DealRadar page. `test/mcp.spec.ts`.
 - **Web**: `src/web/AppRouter.ts` declares `$page` routes and one
   `$client<Controller>()` per backend controller; pages are lazy-loaded.
   New controllers must be registered in `src/api/index.ts` and get a matching
