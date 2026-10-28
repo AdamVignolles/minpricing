@@ -114,7 +114,8 @@ export interface Deal {
 /** Live state of a collection run (see `/admin/collect/progress`). */
 export interface CollectionProgress {
   runId: string;
-  status: "running" | "done" | "failed";
+  status: "running" | "done" | "failed" | "cancelled";
+  cancelRequested?: boolean;
   startedAt: string;
   finishedAt?: string;
   updatedAt: string;

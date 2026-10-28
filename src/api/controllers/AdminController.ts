@@ -279,6 +279,28 @@ export class AdminController {
     },
   });
 
+  /** Asks the run in progress to stop: nothing new starts, browsers close. */
+  stopCollection = $action({
+    method: "POST",
+    path: "/admin/collect/stop",
+    use: [$adminSession()],
+    schema: {
+      response: z.object({
+        stopped: z.boolean(),
+        message: z.text(),
+      }),
+    },
+    handler: async () => {
+      const stopped = await this.progress.requestCancel();
+      return {
+        stopped,
+        message: stopped
+          ? "Arrêt demandé : la collecte se termine."
+          : "Aucune collecte en cours.",
+      };
+    },
+  });
+
   /**
    * Live state of the current (or last) collection run, polled by the
    * console's progress sidebar. `null` until a first run has started.
@@ -294,7 +316,8 @@ export class AdminController {
         progress: z
           .object({
             runId: z.text(),
-            status: z.enum(["running", "done", "failed"]),
+            status: z.enum(["running", "done", "failed", "cancelled"]),
+            cancelRequested: z.boolean().optional(),
             startedAt: z.text(),
             finishedAt: z.text().optional(),
             updatedAt: z.text(),

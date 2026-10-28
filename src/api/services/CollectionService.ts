@@ -11,10 +11,15 @@ import { AmazonCollector } from "../collectors/AmazonCollector.ts";
 import { AmazonWatchCollector } from "../collectors/AmazonWatchCollector.ts";
 import {
   type CloudflareBrowserBinding,
+  closeSharedBrowser,
   configureBrowserEngines,
   mapWithConcurrency,
   takeLightpandaFallbacks,
 } from "../collectors/browser.ts";
+import {
+  isCollectionCancelled,
+  setCollectionCancelled,
+} from "../collectors/cancellation.ts";
 import { CarrefourCollector } from "../collectors/CarrefourCollector.ts";
 import { CdiscountCollector } from "../collectors/CdiscountCollector.ts";
 import type {
@@ -425,6 +430,17 @@ export class CollectionService {
 
     const summaries: CollectionSummary[] = [];
     const durations = new Map<string, number>();
+    setCollectionCancelled(false);
+    // A stop request lands in the shared cache (from the API); this timer
+    // turns it into the process flag and kills the shared browser.
+    const stopWatcher = setInterval(() => {
+      void this.progress.cancelRequested().then(async (requested) => {
+        if (requested && !isCollectionCancelled()) {
+          setCollectionCancelled(true);
+          await closeSharedBrowser();
+        }
+      });
+    }, 1_000);
     try {
       // Sources are independent sites: run several at once instead of one
       // after the other (that alone took a run from ~25 min to the length
@@ -438,6 +454,7 @@ export class CollectionService {
         ordered,
         this.env.COLLECT_SOURCE_CONCURRENCY,
         async (source) => {
+          if (isCollectionCancelled()) return;
           await this.progress.sourceStarted(source.id);
           const startedAt = Date.now();
           const summary = await this.runOne(source.id);
@@ -446,6 +463,12 @@ export class CollectionService {
           await this.progress.sourceFinished(source.id, summary);
         },
       );
+      if (isCollectionCancelled()) {
+        // Partial listings must not expire deals that merely weren't reached.
+        this.log.warn("Collection stopped on request.");
+        await this.progress.finish(false, true);
+        return summaries;
+      }
       // Switched-off sources list nothing any more: their deals expire too.
       await this.expireUnseen([
         ...summaries,
@@ -467,6 +490,9 @@ export class CollectionService {
     } catch (error) {
       await this.progress.finish(true);
       throw error;
+    } finally {
+      clearInterval(stopWatcher);
+      setCollectionCancelled(false);
     }
     await this.progress.finish();
     return summaries;
@@ -703,6 +729,18 @@ export class CollectionService {
         }
       }
 
+      if (isCollectionCancelled()) {
+        // Offers already saved stay; the slow enrichments are skipped.
+        return {
+          sourceId: source.id,
+          collected: rawDeals.length,
+          created,
+          updated,
+          rejected,
+          error: "Arrêtée avant la fin.",
+        };
+      }
+
       // Cross-merchant check (same EAN elsewhere), then rescore whatever
       // it touched. After the upserts, so a brand-new deal's EAN is already
       // stored and can be looked up in this very run.
@@ -770,6 +808,15 @@ export class CollectionService {
         rejected,
       };
     } catch (error) {
+      if (isCollectionCancelled()) {
+        return {
+          sourceId: source.id,
+          collected: 0,
+          created: 0,
+          updated: 0,
+          error: "Arrêtée avant la fin.",
+        };
+      }
       const fullMessage =
         error instanceof Error ? error.message : String(error);
       this.log.error(

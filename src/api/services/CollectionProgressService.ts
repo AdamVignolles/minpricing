@@ -42,7 +42,9 @@ export interface ProgressEvent {
 /** A collection run as the sidebar shows it. */
 export interface CollectionProgress {
   runId: string;
-  status: "running" | "done" | "failed";
+  status: "running" | "done" | "failed" | "cancelled";
+  /** A stop was asked; the run winds down and ends as "cancelled". */
+  cancelRequested?: boolean;
   startedAt: string;
   finishedAt?: string;
   /** Heartbeat: a "running" run not updated for minutes has died. */
@@ -228,12 +230,54 @@ export class CollectionProgressService {
     this.scheduleFlush();
   }
 
-  async finish(failed = false): Promise<void> {
+  /**
+   * Asks the running run to stop. Written to the shared cache so it works
+   * whichever isolate runs the job; the run polls {@link cancelRequested}.
+   */
+  async requestCancel(): Promise<boolean> {
+    const stored = await this.store.get("current").catch(() => undefined);
+    if (stored?.status !== "running") return false;
+    stored.cancelRequested = true;
+    stored.events.push({
+      at: this.dateTime.nowISOString(),
+      level: "warn",
+      message: "Arrêt demandé : plus aucune page n'est ouverte.",
+    });
+    if (this.state?.runId === stored.runId) {
+      this.state.cancelRequested = true;
+      this.event("Arrêt demandé : plus aucune page n'est ouverte.");
+    }
+    await this.store.set("current", stored).catch(() => undefined);
+    return true;
+  }
+
+  async cancelRequested(): Promise<boolean> {
+    if (this.state?.cancelRequested) return true;
+    const stored = await this.store.get("current").catch(() => undefined);
+    return (
+      !!stored?.cancelRequested &&
+      (!this.state || stored.runId === this.state.runId)
+    );
+  }
+
+  async finish(failed = false, cancelled = false): Promise<void> {
     if (!this.state) return;
-    this.state.status = failed ? "failed" : "done";
+    this.state.status = cancelled ? "cancelled" : failed ? "failed" : "done";
     this.state.finishedAt = this.dateTime.nowISOString();
     this.state.currentSourceId = undefined;
-    this.event(failed ? "Collecte interrompue." : "Collecte terminée.");
+    for (const source of this.state.sources) {
+      if (source.status === "pending" || source.status === "running") {
+        source.status = cancelled ? "failed" : source.status;
+        if (cancelled) source.error = "Arrêtée avant la fin.";
+      }
+    }
+    this.event(
+      cancelled
+        ? "Collecte arrêtée."
+        : failed
+          ? "Collecte interrompue."
+          : "Collecte terminée.",
+    );
     await this.flush();
   }
 

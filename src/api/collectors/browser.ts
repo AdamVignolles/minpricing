@@ -1,4 +1,8 @@
 import { chromiumOptions } from "../services/appPaths.ts";
+import {
+  CollectionCancelledError,
+  isCollectionCancelled,
+} from "./cancellation.ts";
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -192,6 +196,13 @@ async function acquireSharedBrowser(): Promise<import("playwright").Browser> {
   }
 }
 
+/** Kills the shared Chromium: pages open on it fail at once. */
+export async function closeSharedBrowser(): Promise<void> {
+  const current = sharedBrowser;
+  sharedBrowser = undefined;
+  await (await current?.catch(() => undefined))?.close().catch(() => undefined);
+}
+
 async function releaseSharedBrowser(): Promise<void> {
   if (--sharedUsers > 0) return;
   const current = sharedBrowser;
@@ -306,8 +317,10 @@ export async function withPage<T>(
   handle: DealsBrowserHandle,
   fn: (page: DealsPage) => Promise<T>,
 ): Promise<T> {
+  if (isCollectionCancelled()) throw new CollectionCancelledError();
   await takePageSlot();
   try {
+    if (isCollectionCancelled()) throw new CollectionCancelledError();
     return await openPage(handle, fn);
   } finally {
     givePageSlot();
@@ -393,7 +406,7 @@ export async function mapWithConcurrency<T, R>(
   const workers = Array.from(
     { length: Math.max(1, Math.min(limit, items.length)) },
     async () => {
-      while (next < items.length) {
+      while (next < items.length && !isCollectionCancelled()) {
         const index = next++;
         results[index] = await fn(items[index], index);
       }

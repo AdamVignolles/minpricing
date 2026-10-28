@@ -324,6 +324,7 @@ const CollectionProgressAside: FC<{
   polledAt: number;
   onClose: () => void;
 }> = ({ progress, nextRunAt, polledAt, onClose }) => {
+  const admin = useClient<AdminController>();
   const running = progress?.status === "running";
   const [filter, setFilter] = useState<"all" | "warn">("all");
   // Live clock while running (elapsed time, durations); sampled in an
@@ -417,19 +418,43 @@ const CollectionProgressAside: FC<{
           <Badge
             variant="light"
             color={
-              running ? "blue" : progress.status === "failed" ? "red" : "teal"
+              running
+                ? "blue"
+                : progress.status === "failed"
+                  ? "red"
+                  : progress.status === "cancelled"
+                    ? "orange"
+                    : "teal"
             }
             leftSection={running ? <Loader size={10} color="blue" /> : null}
           >
             {running
-              ? "En cours"
+              ? progress.cancelRequested
+                ? "Arrêt en cours"
+                : "En cours"
               : progress.status === "failed"
                 ? "Interrompue"
-                : "Terminée"}
+                : progress.status === "cancelled"
+                  ? "Arrêtée"
+                  : "Terminée"}
           </Badge>
           <Badge variant="outline" color="gray">
             {progress.trigger === "manual" ? "Manuelle" : "Planifiée"}
           </Badge>
+          {running && !progress.cancelRequested ? (
+            <Button
+              size="compact-xs"
+              color="red"
+              variant="light"
+              onClick={() => {
+                if (window.confirm("Arrêter la collecte en cours ?")) {
+                  void admin.stopCollection({});
+                }
+              }}
+            >
+              Arrêter
+            </Button>
+          ) : null}
         </Group>
         <Text fz="xs" c="dimmed" className="tnum">
           Démarrée à {time(progress.startedAt)} ·{" "}
