@@ -290,7 +290,11 @@ deals and, separately, the visible ones (`createdVisible`).
   (`deals-sources`: yield per source vs what goes hot on Dealabs →
   `config/collection.json`, `probe` of new shops, source proposals for
   `deals-code`), and an evening debrief (`deals-debrief`: our Dealabs profile and its comments → `config/selection-lessons.md`, desirability, collection, small rule steps, Notion analysis). Everything
-  deterministic is in `scripts/agents/dealradar.mjs`; Claude only judges. The Dealabs
+  deterministic is in `scripts/agents/dealradar.mjs`; Claude only judges. The cloud
+  routines' health (`services/agentHealth.ts`: each slot must leave its
+  dated file — queue, sources/debrief/bilan report — within 90 min, plus
+  what it changed) is served by `GET /agents/health`, the MCP tool
+  `get_agent_health` and the « Routines planifiées » card of the Agents page. The Dealabs
   history stores our own threads tagged `mine` (`DEALABS_USERNAME`) but never
   counts them in the score's figures or the prediction, and, in
   `isSameProduct`, bundles/roundups, a short name without its model code,

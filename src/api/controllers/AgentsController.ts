@@ -2,6 +2,7 @@ import { $inject, z } from "alepha";
 import { $action, HttpError } from "alepha/server";
 
 import { $adminSession } from "../services/AdminAuth.ts";
+import { AgentFilesService } from "../services/AgentFilesService.ts";
 import { AgentsService } from "../services/AgentsService.ts";
 
 const rich = () => z.text({ size: "rich" });
@@ -19,6 +20,44 @@ const shop = z.object({
  */
 export class AgentsController {
   protected agents = $inject(AgentsService);
+  protected files = $inject(AgentFilesService);
+
+  /**
+   * Each scheduled cloud routine: its last slot, whether it left its file
+   * (ok), may still be running, or missed it — and what it changed.
+   */
+  agentsHealth = $action({
+    method: "GET",
+    path: "/agents/health",
+    use: [$adminSession()],
+    schema: {
+      response: z.object({
+        generatedAt: z.text(),
+        routines: z.array(
+          z.object({
+            id: z.text(),
+            name: z.text(),
+            schedule: z.text(),
+            lastSlot: z.text(),
+            lastRun: z.text().optional(),
+            status: z.enum(["ok", "running", "missed"]),
+            files: z.array(z.text()),
+            changes: z.array(z.text()),
+          }),
+        ),
+      }),
+    },
+    handler: async () => {
+      const now = new Date();
+      const writes = await this.files.decisionsSince(
+        new Date(now.getTime() - 8 * 86_400_000),
+      );
+      return {
+        generatedAt: now.toISOString(),
+        routines: this.agents.health(now, writes),
+      };
+    },
+  });
 
   agentsOverview = $action({
     method: "GET",

@@ -269,6 +269,14 @@ export class McpTools {
     },
   });
 
+  get_agent_health = $tool({
+    title: "Santé des agents",
+    description:
+      "Each scheduled cloud routine (sélection, sources, bilan, revue): its last slot, whether it ran (left its dated file on the server), may still be running, or MISSED it, and the configs/proposals/schedules it changed. Check this first when something looks off.",
+    annotations: readOnly,
+    handler: () => this.agents.agentsHealth.run(),
+  });
+
   get_agent_report = $tool({
     title: "Rapport d'agent",
     description:

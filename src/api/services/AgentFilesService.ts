@@ -157,6 +157,24 @@ export class AgentFilesService {
     return existsSync(file) ? readFileSync(file, "utf8") : undefined;
   }
 
+  /** Configs, proposals and schedules written since `since` (agent health). */
+  async decisionsSince(since: Date) {
+    const rows = await this.writes.findMany({
+      where: {
+        createdAt: { gte: since.toISOString() },
+        kind: { inArray: ["config", "proposal", "schedule"] },
+      },
+      orderBy: { column: "createdAt", direction: "desc" },
+      limit: 500,
+    });
+    return rows.map(({ agent, kind, target, createdAt }) => ({
+      agent,
+      kind,
+      target,
+      createdAt: String(createdAt),
+    }));
+  }
+
   async changes(limit = 50) {
     const rows = await this.writes.findMany({
       orderBy: { column: "createdAt", direction: "desc" },

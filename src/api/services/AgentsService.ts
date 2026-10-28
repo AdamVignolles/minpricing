@@ -1,6 +1,12 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import {
+  type AgentWriteRow,
+  ROUTINES,
+  type RoutineHealth,
+  routineHealth,
+} from "./agentHealth.ts";
 import { appDir } from "./appDir.ts";
 
 /**
@@ -343,6 +349,14 @@ export class AgentsService {
         const [title, ...body] = block.split(/\r?\n/);
         return { source, title: title.trim(), body: body.join("\n").trim() };
       });
+  }
+
+  health(now: Date, writes: AgentWriteRow[]): RoutineHealth[] {
+    const mtimeOf = (path: string) => {
+      const file = join(agentsDir(), path);
+      return existsSync(file) ? statSync(file).mtime : undefined;
+    };
+    return ROUTINES.map((spec) => routineHealth(spec, now, mtimeOf, writes));
   }
 
   reports(): AgentReportSummary[] {

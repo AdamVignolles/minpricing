@@ -20,11 +20,13 @@ import {
 import { Link } from "alepha/react/router";
 import { type FC, useMemo, useState } from "react";
 
+import type { RoutineHealth } from "../../api/services/agentHealth.ts";
 import type {
   AgentReportSummary,
   AgentsService,
   WeightRow,
 } from "../../api/services/AgentsService.ts";
+import RoutinesHealth from "../components/agents/RoutinesHealth.tsx";
 import TonightPlan, {
   type TonightPlanData,
 } from "../components/agents/TonightPlan.tsx";
@@ -44,6 +46,7 @@ export interface AgentsPageProps {
   report?: { id: string; markdown: string };
   categories: RefItem[];
   tonight: TonightPlanData;
+  health?: RoutineHealth[];
   tab?: string;
 }
 
@@ -148,6 +151,7 @@ const AgentsPage: FC<AgentsPageProps> = ({
   report,
   categories,
   tonight,
+  health,
   tab,
 }) => {
   const [reportFilter, setReportFilter] = useState<string>("all");
@@ -209,6 +213,15 @@ const AgentsPage: FC<AgentsPageProps> = ({
           </Tooltip>
         </Group>
       </Group>
+
+      {health?.length ? (
+        <Section
+          title="Routines planifiées"
+          description="Chaque routine cloud laisse un fichier daté sur le serveur ; sans lui, 90 min après son créneau, elle est marquée manquée."
+        >
+          <RoutinesHealth routines={health} />
+        </Section>
+      ) : null}
 
       <SimpleGrid cols={{ base: 2, md: 3, lg: 5 }} spacing="md">
         <StatTile

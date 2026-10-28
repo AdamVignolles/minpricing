@@ -184,12 +184,14 @@ export class AppRouter {
     },
     lazy: () => import("./pages/AgentsPage.tsx"),
     loader: async ({ query }) => {
-      const [overview, reports, categories, tonight] = await Promise.all([
-        this.agents.agentsOverview({}),
-        this.agents.agentReportList({}),
-        this.catalog.listCategories({}),
-        this.publishSchedule.publishPlan({ query: {} }),
-      ]);
+      const [overview, reports, categories, tonight, health] =
+        await Promise.all([
+          this.agents.agentsOverview({}),
+          this.agents.agentReportList({}),
+          this.catalog.listCategories({}),
+          this.publishSchedule.publishPlan({ query: {} }),
+          this.agents.agentsHealth({}).catch(() => undefined),
+        ]);
       const reportId = query.report ?? reports[0]?.id;
       const report = reportId
         ? await this.agents
@@ -202,6 +204,7 @@ export class AppRouter {
         report,
         categories,
         tonight,
+        health: health?.routines,
         tab: query.tab,
       };
     },
