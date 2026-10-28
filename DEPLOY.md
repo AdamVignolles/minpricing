@@ -26,8 +26,8 @@ see `src/api/collectors/browser.ts`).
 ## First deploy
 
 ```bash
-npx alepha platform plan --env production   # preview what will be created
-npx alepha platform up --env production     # provisions D1/R2/KV + builds + migrates + deploys
+npx alepha platform plan --env cloudflare   # preview what will be created
+npx alepha platform up --env cloudflare     # provisions D1/R2/KV + builds + migrates + deploys
 ```
 
 This first `up` deploys successfully, but Amazon/Cdiscount will silently
@@ -48,19 +48,19 @@ npm run deploy:cloudflare
 
 This runs, in order:
 
-1. `alepha platform build --env production` — bundles the Worker and
+1. `alepha platform build --env cloudflare` — bundles the Worker and
    (re)writes `dist/wrangler.jsonc` from the app's resource declarations.
 2. `node scripts/patch-cloudflare-browser-binding.mjs` — adds
    `"browser": { "binding": "BROWSER" }` to that file. `alepha platform
 deploy` only ever merges `.vars` into it afterwards, so this survives.
-3. `alepha platform db migrate --env production` — applies any new D1 schema
+3. `alepha platform db migrate --env cloudflare` — applies any new D1 schema
    migrations.
-4. `alepha platform deploy --env production` — uploads the patched config.
+4. `alepha platform deploy --env cloudflare` — uploads the patched config.
 
 ## Inspecting a deployment
 
 ```bash
-npx alepha platform status --env production
+npx alepha platform status --env cloudflare
 ```
 
 ## Using Cloudflare's dashboard "Workers Builds" (git-push auto-deploy)
@@ -84,7 +84,7 @@ falling into its "no config found, let me guess your framework" wizard
 (the `Detected Project Settings: Framework: Hydrogen` error) — it now
 points straight at the real, already-built config instead.
 
-You still need to run `alepha platform up --env production` **once**,
+You still need to run `alepha platform up --env cloudflare` **once**,
 locally, before wiring this up: it's the only command that provisions the
 D1 database in the first place; the dashboard's build only ever
 regenerates config for resources that already exist.

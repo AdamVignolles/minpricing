@@ -54,7 +54,7 @@ export default defineConfig({
   plugins: [
     platform({
       environments: {
-        production: cloudflare(), // workers.dev subdomain; pass { domain: "..." } for a custom one
+        cloudflare: cloudflare(), // workers.dev subdomain; pass { domain: "..." } for a custom one
         // AWS VM running Bay. "minpricing-aws" is an alias in ~/.ssh/config
         // (HostName ec2-13-38-216-109.eu-west-3.compute.amazonaws.com,
         // User ubuntu, IdentityFile ~/.ssh/aws). The control socket sits
@@ -62,6 +62,12 @@ export default defineConfig({
         bay: bay({
           host: "minpricing-aws",
           domain: "13.38.216.109.sslip.io",
+          socket: "/run/bay/control.sock",
+        }),
+        // The copy Lore created for the same VM (what dealradar.vmh1 serves).
+        production: bay({
+          host: "minpricing-aws",
+          domain: "dealradar.vmh1.alepha.dev",
           socket: "/run/bay/control.sock",
         }),
       },

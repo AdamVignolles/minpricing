@@ -329,7 +329,7 @@ export class DealabsPublisherService {
       );
     }
 
-    const deadline = Date.now() + 120_000;
+    const deadline = Date.now() + 240_000;
     while ((await isChallenge()) && Date.now() < deadline) {
       await page.waitForTimeout(1_000);
     }
