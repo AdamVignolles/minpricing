@@ -52,6 +52,7 @@ import { dealEntity } from "../entities/Deal.ts";
 import { sourceEntity } from "../entities/Source.ts";
 import { trackedProductEntity } from "../entities/TrackedProduct.ts";
 import { AmazonWatchService } from "./AmazonWatchService.ts";
+import { appDir } from "./appDir.ts";
 import { AutoPublishService } from "./AutoPublishService.ts";
 import { CategorizationService } from "./CategorizationService.ts";
 import { CollectionProgressService } from "./CollectionProgressService.ts";
@@ -468,7 +469,7 @@ export class CollectionService {
     switchedOff: string[],
   ): void {
     try {
-      const dir = join(process.cwd(), "data", "agents");
+      const dir = join(appDir(), "data", "agents");
       if (!existsSync(dir)) return;
       appendFileSync(
         join(dir, "collection-runs.jsonl"),

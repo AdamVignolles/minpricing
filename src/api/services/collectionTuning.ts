@@ -1,6 +1,8 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { appDir } from "./appDir.ts";
+
 /**
  * `config/collection.json`: how much the Amazon and Cdiscount collectors
  * read, re-read before each run so the local agents can steer the
@@ -56,7 +58,7 @@ export function sourceDue(
 }
 
 export function loadCollectionTuning(
-  file = join(process.cwd(), "config", "collection.json"),
+  file = join(appDir(), "config", "collection.json"),
 ): CollectionTuning {
   try {
     return JSON.parse(readFileSync(file, "utf8"));
@@ -101,7 +103,7 @@ export interface LoggedSourceRun {
  * one line per run). Empty when there is no log (Workers, fresh clone).
  */
 export function lastLoggedRuns(
-  file = join(process.cwd(), "data", "agents", "collection-runs.jsonl"),
+  file = join(appDir(), "data", "agents", "collection-runs.jsonl"),
   tailBytes = 256 * 1024,
 ): Map<string, LoggedSourceRun> {
   const runs = new Map<string, LoggedSourceRun>();

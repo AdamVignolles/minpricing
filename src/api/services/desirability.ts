@@ -1,6 +1,8 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { appDir } from "./appDir.ts";
+
 /**
  * Desirability: does the Dealabs community *want* this kind of product?
  * The heat model's base rates know the category and the discount, not the
@@ -44,7 +46,7 @@ let cache:
  * fresh clone) → no desirability terms at all.
  */
 export function loadDesirability(
-  file = join(process.cwd(), "config", "desirability.json"),
+  file = join(appDir(), "config", "desirability.json"),
 ): DesirabilityWeights {
   try {
     const mtime = statSync(file).mtimeMs;

@@ -1,6 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { appDir } from "./appDir.ts";
+
 /**
  * What the local agents did, read from the files they write
  * (`data/agents/`, `config/`, `docs/*changelog.md`) for the console's
@@ -55,7 +57,7 @@ export interface AgentReportSummary {
   summary?: string;
 }
 
-const root = () => process.cwd();
+const root = () => appDir();
 const agentsDir = () => join(root(), "data", "agents");
 const reportsDir = () => join(agentsDir(), "reports");
 

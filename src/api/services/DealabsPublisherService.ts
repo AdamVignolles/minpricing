@@ -7,6 +7,7 @@ import { DateTimeProvider } from "alepha/datetime";
 import { $logger } from "alepha/logger";
 
 import type { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
+import { appDir } from "./appDir.ts";
 import { dealabsTitle } from "./DealabsDraftService.ts";
 import { isSameProduct } from "./dealabsSearch.ts";
 import type { Deal } from "./DealTypes.ts";
@@ -17,8 +18,8 @@ import {
   SCREEN_VIEWPORT,
 } from "./RemoteScreenService.ts";
 
-export const SESSION_PATH = join(process.cwd(), ".dealabs-session.json");
-const DEBUG_DIR = join(process.cwd(), ".dealabs-debug");
+export const SESSION_PATH = join(appDir(), ".dealabs-session.json");
+const DEBUG_DIR = join(appDir(), ".dealabs-debug");
 
 /** "Essentiel" step fields, in lookup order. */
 const TITLE_SELECTORS = [
