@@ -977,10 +977,7 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                       variant="filled"
                       color="signal"
                       loading={autoPublishing}
-                      disabled={
-                        current.status === "posted" ||
-                        dealabsConnected === false
-                      }
+                      disabled={current.status === "posted"}
                       rightSection={<Icon name="bolt" size={16} />}
                       onClick={() => void autoPublish()}
                     >
@@ -999,10 +996,11 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                   <>
                     <Text size="xs" c="dimmed">
                       Vérification de la page du marchand, puis ouverture de
-                      Dealabs sur le serveur. Si Dealabs affiche une
-                      vérification « je ne suis pas un robot », cochez-la
-                      vous-même dans l'écran ci-dessous, le reste continue tout
-                      seul.
+                      Dealabs sur le serveur. Si la session a expiré, la
+                      connexion Dealabs s'ouvre ici : connectez-vous dans
+                      l'écran ci-dessous (10 min max) et la publication reprend
+                      toute seule. Même chose pour une case « je ne suis pas un
+                      robot ».
                     </Text>
                     <RemoteScreen hint="Suivez la publication en direct. Si une case « je ne suis pas un robot » apparaît, cliquez dessus dans l'image." />
                   </>

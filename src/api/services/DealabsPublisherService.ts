@@ -18,6 +18,11 @@ import {
   SCREEN_VIEWPORT,
 } from "./RemoteScreenService.ts";
 
+const LOGIN_WAIT_MS = 10 * 60_000;
+
+/** A person can see the browser (local desktop, or the server's virtual display). */
+const isAttended = () => process.platform !== "linux" || !!process.env.DISPLAY;
+
 export const SESSION_PATH = join(appDir(), ".dealabs-session.json");
 const DEBUG_DIR = join(appDir(), ".dealabs-debug");
 
@@ -186,7 +191,8 @@ export class DealabsPublisherService {
       );
     }
 
-    if (!existsSync(SESSION_PATH)) {
+    const hasSession = existsSync(SESSION_PATH);
+    if (!hasSession && !isAttended()) {
       throw new Error(
         "Pas de session Dealabs : cliquez sur « Se connecter à Dealabs », connectez-vous dans la fenêtre qui s'ouvre, puis réessayez.",
       );
@@ -213,7 +219,7 @@ export class DealabsPublisherService {
 
     try {
       const context = await browser.newContext({
-        storageState: SESSION_PATH,
+        ...(hasSession ? { storageState: SESSION_PATH } : {}),
         locale: "fr-FR",
         viewport: SCREEN_VIEWPORT,
       });
@@ -229,9 +235,8 @@ export class DealabsPublisherService {
         await this.waitOutCloudflareChallenge(page);
 
         if (await this.isLoggedOut(page)) {
-          throw new Error(
-            "La session Dealabs a expiré : cliquez sur « Se connecter à Dealabs » pour vous reconnecter.",
-          );
+          await this.waitForLogin(page);
+          await context.storageState({ path: SESSION_PATH });
         }
 
         await this.openSubmissionForm(page);
@@ -327,8 +332,7 @@ export class DealabsPublisherService {
     // Without any display nobody can click the checkbox (the console's
     // « écran distant » needs the server's virtual display, DISPLAY=:99):
     // don't make the console wait minutes for nothing.
-    const attended = process.platform !== "linux" || !!process.env.DISPLAY;
-    if (!attended) {
+    if (!isAttended()) {
       await page.waitForTimeout(10_000);
       if (!(await isChallenge())) {
         return;
@@ -373,6 +377,51 @@ export class DealabsPublisherService {
     } catch {
       return "(failed to capture debug snapshot)";
     }
+  }
+
+  /**
+   * Session missing or expired: rather than failing and making you start a
+   * separate login, open Dealabs' login dialog in this same window (shown
+   * in the console's « écran distant ») and carry on with the publication
+   * once you've logged in. Never fills credentials itself.
+   */
+  protected async waitForLogin(page: import("playwright").Page): Promise<void> {
+    if (!isAttended()) {
+      throw new Error(
+        "La session Dealabs a expiré : cliquez sur « Se connecter à Dealabs » pour vous reconnecter.",
+      );
+    }
+    this.screen.attach(page, "Connectez-vous à Dealabs pour publier");
+    await page
+      .getByText("Continuer sans accepter", { exact: false })
+      .first()
+      .click({ timeout: 3_000 })
+      .catch(() => undefined);
+    await page
+      .getByText("Connexion ou inscription", { exact: false })
+      .first()
+      .click({ timeout: 5_000 })
+      .catch(() => undefined);
+
+    const deadline = Date.now() + LOGIN_WAIT_MS;
+    let loggedInChecks = 0;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(2_000);
+      const loggedOut = await this.isLoggedOut(page).catch(() => true);
+      const ready = await page
+        .evaluate(() => document.readyState === "complete")
+        .catch(() => false);
+      // Two checks in a row: a page mid-navigation also briefly lacks the
+      // login button.
+      loggedInChecks = !loggedOut && ready ? loggedInChecks + 1 : 0;
+      if (loggedInChecks >= 2) {
+        this.screen.attach(page, "Publication sur Dealabs");
+        return;
+      }
+    }
+    throw new Error(
+      "Connexion à Dealabs non faite dans les 10 minutes : relancez la publication automatique et connectez-vous dans l'écran distant.",
+    );
   }
 
   protected isLoggedOut(page: import("playwright").Page): Promise<boolean> {
