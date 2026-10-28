@@ -30,6 +30,7 @@ import type { DraftsController } from "../../api/controllers/DraftsController.ts
 import DealabsConnection from "../components/deals/DealabsConnection.tsx";
 import DealAnalysis from "../components/deals/DealAnalysis.tsx";
 import DealImage from "../components/deals/DealImage.tsx";
+import DealVerification from "../components/deals/DealVerification.tsx";
 import KeepaChart from "../components/deals/KeepaChart.tsx";
 import PriceHistoryPanel from "../components/deals/PriceHistoryPanel.tsx";
 import StoreHistoryChart from "../components/deals/StoreHistoryChart.tsx";
@@ -494,6 +495,7 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                 {deal.status === "active" ? "Offre active" : "Offre expirée"}
               </Badge>
             </Group>
+            <DealVerification deal={deal} />
 
             <Title order={1} fz={{ base: "1.4rem", sm: "1.75rem" }} lh={1.2}>
               {deal.title}

@@ -6,13 +6,12 @@ import { $repository } from "alepha/orm";
 import { dealEntity } from "../entities/Deal.ts";
 import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { DealabsDraftService } from "./DealabsDraftService.ts";
-import { DealabsHistoryService } from "./DealabsHistoryService.ts";
 import {
   DealabsDuplicateError,
   DealabsPublisherService,
 } from "./DealabsPublisherService.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
-import { DealPageCheckService } from "./DealPageCheckService.ts";
+import { DealVerificationService } from "./DealVerificationService.ts";
 import { PriceSeriesService } from "./PriceSeriesService.ts";
 import { sameListingKey } from "./sameListing.ts";
 
@@ -84,9 +83,8 @@ export class AutoPublishService {
   protected draftService = $inject(DealabsDraftService);
   protected publisher = $inject(DealabsPublisherService);
   protected session = $inject(DealabsSessionService);
-  protected dealabsHistory = $inject(DealabsHistoryService);
   protected priceSeries = $inject(PriceSeriesService);
-  protected pageCheck = $inject(DealPageCheckService);
+  protected verification = $inject(DealVerificationService);
   protected env = $env(
     z.object({
       AUTO_PUBLISH: z.boolean().default(false),
@@ -147,26 +145,20 @@ export class AutoPublishService {
     this.busy = true;
     try {
       const deal = await this.deals.getById(dealId);
-      // Same product already live on Dealabs (another link, colour or
-      // shop) at our price or cheaper: posting it again is a duplicate.
-      // Checked before any browser opens; nothing is recorded on the
-      // draft — it's still publishable once that deal expires.
-      const duplicate = await this.dealabsHistory
-        .findLiveDuplicate(deal)
-        .catch(() => undefined);
-      if (duplicate) {
+      // One gate for every publish path: Dealabs duplicate, then the
+      // merchant page (up, in stock, still at our price). Positive
+      // failures also clean the deal up (see DealVerificationService).
+      const verification = await this.verification.verify(dealId);
+      if (verification.verdict === "already-on-dealabs") {
         throw new DealabsDuplicateError(
-          `Déjà en ligne sur Dealabs à ${duplicate.price.toFixed(2).replace(".", ",")} € (${Math.round(duplicate.temperature)}°), pas de republication`,
-          duplicate.url,
+          `${verification.reason}, pas de republication`,
+          verification.duplicate?.url ?? "",
         );
       }
-      // A moderator clicks the link before validating: the merchant page
-      // must be up, the product there and still at our price.
-      if (this.pageCheck.enabled) {
-        const verdict = await this.pageCheck.check(deal);
-        if (!verdict.ok) {
-          throw new DealNotAvailableError(`Pas publié : ${verdict.reason}`);
-        }
+      if (verification.verdict !== "ok") {
+        throw new DealNotAvailableError(
+          `Pas publié : ${verification.reason ?? verification.verdict}`,
+        );
       }
       // A draft generated while the deal had no description has an empty
       // one: rebuild it from the deal now (never empty, see render()).

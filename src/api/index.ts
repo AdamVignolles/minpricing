@@ -20,6 +20,7 @@ import { CollectionService } from "./services/CollectionService.ts";
 import { DealabsDraftService } from "./services/DealabsDraftService.ts";
 import { DealabsHistoryService } from "./services/DealabsHistoryService.ts";
 import { DealPageCheckService } from "./services/DealPageCheckService.ts";
+import { DealVerificationService } from "./services/DealVerificationService.ts";
 import { HotWatchlistService } from "./services/HotWatchlistService.ts";
 import { IdealoReferenceService } from "./services/IdealoReferenceService.ts";
 import { ItadService } from "./services/ItadService.ts";
@@ -63,6 +64,7 @@ export const ApiModule = $module({
     MarketReferenceService,
     DealabsHistoryService,
     DealPageCheckService,
+    DealVerificationService,
     ItadService,
     SeedService,
   ],

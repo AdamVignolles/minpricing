@@ -220,6 +220,7 @@ export class DealPageCheckService {
       return {
         ok: false,
         reason: `page marchand impossible à charger (${message.slice(0, 120)})`,
+        kind: "unreachable",
       };
     }
     const verdict = assessDealPage(snapshot, deal);

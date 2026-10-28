@@ -18,9 +18,27 @@ export interface DealPageSnapshot {
   availability?: string;
 }
 
+/**
+ * Why a page check failed. `gone`, `out-of-stock` and `price-changed` are
+ * positive evidence; `unreachable` (5xx, maintenance, load error) and
+ * `blocked` (no price readable) are "unknown".
+ */
+export type DealPageFailureKind =
+  | "gone"
+  | "out-of-stock"
+  | "price-changed"
+  | "unreachable"
+  | "blocked";
+
 export type DealPageVerdict =
   | { ok: true; matchedPrice?: number }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      kind: DealPageFailureKind;
+      /** The price the page shows instead, for `price-changed`. */
+      observedPrice?: number;
+    };
 
 const MAINTENANCE =
   /maintenance in progress|en maintenance|site (?:est )?temporairement indisponible|temporarily unavailable|we'?ll be back soon|service unavailable/i;
@@ -67,6 +85,7 @@ export function assessDealPage(
     return {
       ok: false,
       reason: `page introuvable chez le marchand (${page.status})`,
+      kind: "gone",
     };
   }
   const head = `${page.title}\n${page.text.slice(0, 3000)}`;
@@ -74,25 +93,32 @@ export function assessDealPage(
     return {
       ok: false,
       reason: `site marchand indisponible ou en maintenance${page.status >= 500 ? ` (${page.status})` : ""}`,
+      kind: "unreachable",
     };
   }
   if (GONE.test(head)) {
     return {
       ok: false,
       reason: "le produit n'est plus disponible chez le marchand",
+      kind: "gone",
     };
   }
   if (page.availability && OUT_OF_STOCK_SCHEMA.test(page.availability)) {
     return {
       ok: false,
       reason: "produit en rupture de stock (indiqué par la page)",
+      kind: "out-of-stock",
     };
   }
   if (
     !page.availability?.match(/InStock|PreOrder/i) &&
     OUT_OF_STOCK.test(page.text.slice(0, 20_000))
   ) {
-    return { ok: false, reason: "produit en rupture de stock" };
+    return {
+      ok: false,
+      reason: "produit en rupture de stock",
+      kind: "out-of-stock",
+    };
   }
 
   if (deal.currentPrice <= 0) return { ok: true };
@@ -100,6 +126,7 @@ export function assessDealPage(
     return {
       ok: false,
       reason: "prix introuvable sur la page (page bloquée ou non chargée)",
+      kind: "blocked",
     };
   }
   const tolerance = Math.max(0.01, deal.currentPrice * 0.01);
@@ -115,5 +142,7 @@ export function assessDealPage(
   return {
     ok: false,
     reason: `le prix a changé : ${deal.currentPrice.toFixed(2)} € attendu, la page affiche ${closest.toFixed(2)} €`,
+    kind: "price-changed",
+    observedPrice: closest,
   };
 }

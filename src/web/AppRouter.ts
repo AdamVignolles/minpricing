@@ -179,10 +179,11 @@ export class AppRouter {
     },
     lazy: () => import("./pages/AgentsPage.tsx"),
     loader: async ({ query }) => {
-      const [overview, reports, categories] = await Promise.all([
+      const [overview, reports, categories, removed] = await Promise.all([
         this.agents.agentsOverview({}),
         this.agents.agentReportList({}),
         this.catalog.listCategories({}),
+        this.agents.removedBeforePosting({}),
       ]);
       const reportId = query.report ?? reports[0]?.id;
       const report = reportId
@@ -190,7 +191,14 @@ export class AppRouter {
             .agentReportDetail({ params: { id: reportId } })
             .catch(() => undefined)
         : undefined;
-      return { overview, reports, report, categories, tab: query.tab };
+      return {
+        overview,
+        reports,
+        report,
+        categories,
+        removed,
+        tab: query.tab,
+      };
     },
   });
 

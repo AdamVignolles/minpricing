@@ -40,6 +40,15 @@ export interface AgentsPageProps {
   reports: AgentReportSummary[];
   report?: { id: string; markdown: string };
   categories: RefItem[];
+  removed: Array<{
+    id: string;
+    title: string;
+    sourceId: string;
+    verdict: string;
+    reason?: string;
+    verifiedAt: string;
+    status: string;
+  }>;
   tab?: string;
 }
 
@@ -143,6 +152,7 @@ const AgentsPage: FC<AgentsPageProps> = ({
   reports,
   report,
   categories,
+  removed,
   tab,
 }) => {
   const [reportFilter, setReportFilter] = useState<string>("all");
@@ -278,12 +288,65 @@ const AgentsPage: FC<AgentsPageProps> = ({
             </Badge>
           </Tabs.Tab>
           <Tabs.Tab
+            value="retires"
+            leftSection={<Icon name="refresh" size={14} />}
+          >
+            Retirés avant publication
+            <Badge size="xs" variant="light" ml={6}>
+              {removed.length}
+            </Badge>
+          </Tabs.Tab>
+          <Tabs.Tab
             value="reglages"
             leftSection={<Icon name="refresh" size={14} />}
           >
             Historique des réglages
           </Tabs.Tab>
         </Tabs.List>
+
+        {/* ── Retirés avant publication ── */}
+        <Tabs.Panel value="retires">
+          <Section
+            title="Retirés avant publication"
+            description="Deals refusés par la vérification (14 derniers jours) : produit indisponible, rupture, prix changé ou déjà sur Dealabs."
+          >
+            <Paper p="md">
+              {removed.length === 0 ? (
+                <Text fz="sm" c="dimmed">
+                  Aucun deal refusé sur les 14 derniers jours.
+                </Text>
+              ) : (
+                <Stack gap="sm">
+                  {removed.map((deal) => (
+                    <Group key={deal.id} justify="space-between" wrap="nowrap">
+                      <div style={{ minWidth: 0 }}>
+                        <Text
+                          fz="sm"
+                          component={Link}
+                          href={`/deals/${deal.id}`}
+                          lineClamp={1}
+                        >
+                          {deal.title}
+                        </Text>
+                        <Text fz="xs" c="dimmed">
+                          {f.titleize(deal.sourceId)} ·{" "}
+                          {deal.reason ?? deal.verdict} ·{" "}
+                          {f.dateTime(deal.verifiedAt)}
+                        </Text>
+                      </div>
+                      <Badge
+                        variant="light"
+                        color={deal.status === "expired" ? "gray" : "orange"}
+                      >
+                        {deal.status === "expired" ? "Retiré" : "Bloqué"}
+                      </Badge>
+                    </Group>
+                  ))}
+                </Stack>
+              )}
+            </Paper>
+          </Section>
+        </Tabs.Panel>
 
         {/* ── Activité ── */}
         <Tabs.Panel value="activite">

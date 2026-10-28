@@ -38,6 +38,10 @@ export interface Deal {
   freshReason?: "new" | "price-drop";
   /** Price before that drop. */
   droppedFrom?: number;
+  /** Last pre-post verification: when, verdict and French reason. */
+  verifiedAt?: string;
+  verifyVerdict?: string;
+  verifyReason?: string;
   lastSeenAt: string;
   status: string;
   score: number;

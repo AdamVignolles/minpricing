@@ -1,6 +1,8 @@
 import { $inject, z } from "alepha";
+import { $repository } from "alepha/orm";
 import { $action, HttpError } from "alepha/server";
 
+import { dealEntity } from "../entities/Deal.ts";
 import { $adminSession } from "../services/AdminAuth.ts";
 import { AgentsService } from "../services/AgentsService.ts";
 
@@ -19,6 +21,54 @@ const shop = z.object({
  */
 export class AgentsController {
   protected agents = $inject(AgentsService);
+  protected deals = $repository(dealEntity);
+
+  /**
+   * Deals the pre-post verification refused or removed in the last 14 days,
+   * newest first, with the reason — the "why didn't it go out?" list.
+   */
+  removedBeforePosting = $action({
+    method: "GET",
+    path: "/agents/removed",
+    use: [$adminSession()],
+    schema: {
+      response: z.array(
+        z.object({
+          id: z.text(),
+          title: rich(),
+          sourceId: z.text(),
+          verdict: z.text(),
+          reason: rich().optional(),
+          verifiedAt: z.text(),
+          status: z.text(),
+        }),
+      ),
+    },
+    handler: async () => {
+      const since = Date.now() - 14 * 86_400_000;
+      const rows = await this.deals.findMany({
+        where: { verifyVerdict: { ne: "ok" } },
+        orderBy: { column: "verifiedAt", direction: "desc" },
+        limit: 100,
+      });
+      return rows
+        .filter(
+          (deal) =>
+            deal.verifyVerdict &&
+            deal.verifiedAt &&
+            new Date(deal.verifiedAt).getTime() >= since,
+        )
+        .map((deal) => ({
+          id: deal.id,
+          title: deal.title,
+          sourceId: deal.sourceId,
+          verdict: deal.verifyVerdict ?? "",
+          reason: deal.verifyReason || undefined,
+          verifiedAt: new Date(deal.verifiedAt ?? 0).toISOString(),
+          status: deal.status,
+        }));
+    },
+  });
 
   agentsOverview = $action({
     method: "GET",

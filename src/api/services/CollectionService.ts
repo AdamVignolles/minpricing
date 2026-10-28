@@ -68,6 +68,7 @@ import {
 import { DealabsDraftService } from "./DealabsDraftService.ts";
 import { DealabsHistoryService } from "./DealabsHistoryService.ts";
 import { DEFAULT_MERCHANT_BY_SOURCE } from "./DealTypes.ts";
+import { DealVerificationService } from "./DealVerificationService.ts";
 import { freshnessOnUpdate } from "./freshness.ts";
 import { predictDealHeat } from "./heatPrediction.ts";
 import { HotWatchlistService } from "./HotWatchlistService.ts";
@@ -97,6 +98,8 @@ const HEAVY_SOURCES = [
 /** Top-potential deals whose Dealabs status is re-checked each run. */
 const TOP_LIVE_CHECKS = 20;
 const TOP_LIVE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+/** Visible top deals whose merchant page is re-verified per run, every 6 h. */
+const TOP_VERIFY_CHECKS = 5;
 
 /** A deal unlisted for this long is considered over (see `expireUnseen`). */
 const EXPIRE_AFTER_MS = 48 * 60 * 60 * 1000;
@@ -167,6 +170,7 @@ export class CollectionService {
   protected idealoReference = $inject(IdealoReferenceService);
   protected marketReference = $inject(MarketReferenceService);
   protected dealabsHistory = $inject(DealabsHistoryService);
+  protected verification = $inject(DealVerificationService);
   protected itad = $inject(ItadService);
   protected priceSeries = $inject(PriceSeriesService);
   protected hotWatchlist = $inject(HotWatchlistService);
@@ -454,6 +458,9 @@ export class CollectionService {
       ]);
       this.logRun(runStartedAt, summaries, durations, switchedOff);
       await this.refreshTopOnDealabs(sources);
+      await this.verification
+        .recheckTop(TOP_VERIFY_CHECKS, TOP_LIVE_MAX_AGE_MS)
+        .catch(() => []);
       if (this.autoPublish.enabled) {
         await this.publishBestDeals(runStartedAt);
       }

@@ -13,7 +13,7 @@ import {
 import { DealabsDraftService } from "../services/DealabsDraftService.ts";
 import { DealabsDuplicateError } from "../services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../services/DealabsSessionService.ts";
-import { DealPageCheckService } from "../services/DealPageCheckService.ts";
+import { DealVerificationService } from "../services/DealVerificationService.ts";
 
 const draftResponseSchema = dealabsDraftEntity.schema;
 
@@ -35,12 +35,13 @@ export class DraftsController {
   protected draftService = $inject(DealabsDraftService);
   protected dealabsSession = $inject(DealabsSessionService);
   protected autoPublisher = $inject(AutoPublishService);
-  protected pageCheck = $inject(DealPageCheckService);
+  protected verification = $inject(DealVerificationService);
   protected deals = $repository(dealEntity);
 
   /**
-   * Dry run of the pre-publish check: opens the merchant page and says
-   * whether the deal could go to Dealabs now. Publishes nothing.
+   * "Vérifier maintenant": runs the full pre-publish verification (Dealabs
+   * and merchant page), forced past the 10-minute cache, and records it on
+   * the deal. Publishes nothing; a gone or out-of-stock deal is expired.
    */
   publishCheck = $action({
     method: "GET",
@@ -50,25 +51,24 @@ export class DraftsController {
       params: z.object({ id: z.text() }),
       response: z.object({
         ok: z.boolean(),
+        verdict: z.text(),
         reason: z.text({ size: "rich" }).optional(),
-        matchedPrice: z.number().optional(),
-        status: z.number().optional(),
-        title: z.text({ size: "rich" }).optional(),
-        prices: z.array(z.number()).optional(),
-        availability: z.text().optional(),
+        observedPrice: z.number().optional(),
+        duplicateUrl: z.text().optional(),
+        verifiedAt: z.text(),
       }),
     },
     handler: async ({ params }) => {
-      const deal = await this.deals.getById(params.id);
-      const verdict = await this.pageCheck.check(deal);
+      const result = await this.verification.verify(params.id, {
+        force: true,
+      });
       return {
-        ok: verdict.ok,
-        reason: verdict.ok ? undefined : verdict.reason,
-        matchedPrice: verdict.ok ? verdict.matchedPrice : undefined,
-        status: verdict.snapshot?.status,
-        title: verdict.snapshot?.title.slice(0, 200),
-        prices: verdict.snapshot?.prices,
-        availability: verdict.snapshot?.availability,
+        ok: result.verdict === "ok",
+        verdict: result.verdict,
+        reason: result.reason,
+        observedPrice: result.observedPrice,
+        duplicateUrl: result.duplicate?.url,
+        verifiedAt: new Date().toISOString(),
       };
     },
   });

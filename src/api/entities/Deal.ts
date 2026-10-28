@@ -130,6 +130,14 @@ export const dealEntity = $entity({
     /** Price before that drop, for the card's "Prix en baisse". */
     droppedFrom: z.number().optional(),
     itadCheckedAt: z.datetime().optional(),
+    /**
+     * Last pre-post verification (see `DealVerificationService`): when it
+     * ran, what it concluded (`ok`, `gone`, `out-of-stock`, `price-changed`,
+     * `already-on-dealabs`, `blocked`, `unreachable`) and why, in French.
+     */
+    verifiedAt: z.datetime().optional(),
+    verifyVerdict: z.text().optional(),
+    verifyReason: z.text({ size: "rich" }).optional(),
     /** "month" for plans and boxes: `currentPrice` is a monthly price. */
     billingPeriod: z.enum(["month"]).meta({ mode: "text" }).optional(),
     currency: db.default(z.text(), "EUR"),
