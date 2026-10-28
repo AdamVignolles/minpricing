@@ -316,6 +316,19 @@ export class DealabsPublisherService {
       return;
     }
 
+    // Without a real display (a server, Playwright falls back to a virtual
+    // one) nobody can click the checkbox: don't make the console wait 2 min.
+    const attended = process.platform !== "linux" || !!process.env.DISPLAY;
+    if (!attended) {
+      await page.waitForTimeout(10_000);
+      if (!(await isChallenge())) {
+        return;
+      }
+      throw new Error(
+        "Dealabs demande une vérification anti-robot (Cloudflare) que le serveur ne peut pas valider : publiez depuis un poste local (npm run dev + « Se connecter à Dealabs ») ou copiez le brouillon à la main.",
+      );
+    }
+
     const deadline = Date.now() + 120_000;
     while ((await isChallenge()) && Date.now() < deadline) {
       await page.waitForTimeout(1_000);
