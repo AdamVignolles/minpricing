@@ -6,6 +6,7 @@ import { type FC, useCallback, useEffect, useRef, useState } from "react";
 import type { DraftsController } from "../../../api/controllers/DraftsController.ts";
 import * as f from "../ui/format.ts";
 import Icon from "../ui/Icon.tsx";
+import RemoteScreen from "./RemoteScreen.tsx";
 
 export interface DealabsSessionStatus {
   available: boolean;
@@ -20,9 +21,10 @@ export interface DealabsSessionStatus {
 
 /**
  * Dealabs connection for auto-publish, without any terminal command:
- * « Se connecter à Dealabs » opens a login window on this computer, the
- * session is saved on its own once you're logged in there, and this row
- * follows it live. Reports the connected state up so the auto-publish
+ * « Se connecter à Dealabs » opens a login window on the server — shown
+ * here as an « écran distant » when the server is the VM —, the session
+ * is saved on its own once you're logged in there, and this row follows
+ * it live. Reports the connected state up so the auto-publish
  * button can wait for it.
  */
 const DealabsConnection: FC<{
@@ -150,11 +152,14 @@ const DealabsConnection: FC<{
       </Group>
 
       {waiting ? (
-        <Text fz="xs" c="dimmed">
-          Une fenêtre Dealabs vient de s'ouvrir sur cet ordinateur :
-          connectez-vous dedans (email, mot de passe, vérification éventuelle).
-          Elle se fermera toute seule une fois connecté.
-        </Text>
+        <>
+          <Text fz="xs" c="dimmed">
+            Une fenêtre Dealabs vient de s'ouvrir sur le serveur :
+            connectez-vous dedans (email, mot de passe, vérification
+            éventuelle). Elle se fermera toute seule une fois connecté.
+          </Text>
+          <RemoteScreen hint="Cliquez sur « Connexion ou inscription » si besoin, puis sur chaque champ et tapez-le ci-dessous. La session s'enregistre toute seule une fois connecté." />
+        </>
       ) : null}
       {status.login?.state === "failed" ||
       status.login?.state === "cancelled" ? (

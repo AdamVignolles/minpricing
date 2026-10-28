@@ -14,6 +14,10 @@ import { DealabsDraftService } from "../services/DealabsDraftService.ts";
 import { DealabsDuplicateError } from "../services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../services/DealabsSessionService.ts";
 import { DealPageCheckService } from "../services/DealPageCheckService.ts";
+import {
+  REMOTE_KEYS,
+  RemoteScreenService,
+} from "../services/RemoteScreenService.ts";
 
 const draftResponseSchema = dealabsDraftEntity.schema;
 
@@ -30,12 +34,22 @@ const sessionStatusSchema = z.object({
     .optional(),
 });
 
+const screenSchema = z.object({
+  active: z.boolean(),
+  label: z.text().optional(),
+  url: z.text({ size: "long" }).optional(),
+  image: z.text({ maxLength: 4_000_000 }).optional(),
+  width: z.number(),
+  height: z.number(),
+});
+
 export class DraftsController {
   protected drafts = $repository(dealabsDraftEntity);
   protected draftService = $inject(DealabsDraftService);
   protected dealabsSession = $inject(DealabsSessionService);
   protected autoPublisher = $inject(AutoPublishService);
   protected pageCheck = $inject(DealPageCheckService);
+  protected screen = $inject(RemoteScreenService);
   protected deals = $repository(dealEntity);
 
   /**
@@ -101,6 +115,54 @@ export class DraftsController {
           message: error instanceof Error ? error.message : String(error),
         });
       }
+    },
+  });
+
+  /**
+   * « Écran distant »: a picture of the Dealabs window the server has open
+   * (login or publishing), for when that window is on the VM's virtual
+   * display. Polled by the console while a login or a publish runs.
+   */
+  dealabsScreen = $action({
+    method: "GET",
+    path: "/dealabs/screen",
+    use: [$adminSession()],
+    schema: { response: screenSchema },
+    handler: () => this.screen.snapshot(),
+  });
+
+  /**
+   * Your input on that window: a click (window pixels), a scroll, some
+   * text, or one key. The text goes straight to the page, never logged.
+   */
+  dealabsScreenInput = $action({
+    method: "POST",
+    path: "/dealabs/screen/input",
+    use: [$adminSession()],
+    schema: {
+      body: z.object({
+        click: z.object({ x: z.number(), y: z.number() }).optional(),
+        scroll: z.number().optional(),
+        text: z.text({ size: "long", trim: false }).optional(),
+        key: z.enum(REMOTE_KEYS).optional(),
+      }),
+      response: screenSchema,
+    },
+    handler: async ({ body }) => {
+      try {
+        if (body.click) await this.screen.click(body.click.x, body.click.y);
+        if (body.scroll) await this.screen.scroll(body.scroll);
+        if (body.text) await this.screen.type(body.text);
+        if (body.key) await this.screen.press(body.key);
+      } catch (error) {
+        throw new HttpError({
+          status: 409,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      // Let the page react before the picture goes back.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return this.screen.snapshot();
     },
   });
 

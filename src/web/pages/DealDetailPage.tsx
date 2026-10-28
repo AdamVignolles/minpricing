@@ -32,6 +32,7 @@ import DealAnalysis from "../components/deals/DealAnalysis.tsx";
 import DealImage from "../components/deals/DealImage.tsx";
 import KeepaChart from "../components/deals/KeepaChart.tsx";
 import PriceHistoryPanel from "../components/deals/PriceHistoryPanel.tsx";
+import RemoteScreen from "../components/deals/RemoteScreen.tsx";
 import StoreHistoryChart from "../components/deals/StoreHistoryChart.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
@@ -968,7 +969,7 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                     Publier sur Dealabs
                   </Button>
                   <Tooltip
-                    label="Se connecte avec la session Dealabs enregistrée (npm run dealabs:login), ouvre une fenêtre de navigateur visible (résolvez le Cloudflare si besoin), remplit le formulaire et clique sur publier à votre place."
+                    label="Se connecte avec la session Dealabs enregistrée, ouvre Dealabs sur le serveur (visible ici en écran distant), remplit le formulaire et clique sur publier à votre place."
                     multiline
                     w={280}
                   >
@@ -995,11 +996,16 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                 ) : null}
 
                 {autoPublishing && (
-                  <Text size="xs" c="dimmed">
-                    Une fenêtre de navigateur va s'ouvrir sur cette machine — si
-                    Dealabs affiche une vérification "je ne suis pas un robot",
-                    cochez-la vous-même, le reste continue tout seul.
-                  </Text>
+                  <>
+                    <Text size="xs" c="dimmed">
+                      Vérification de la page du marchand, puis ouverture de
+                      Dealabs sur le serveur. Si Dealabs affiche une
+                      vérification « je ne suis pas un robot », cochez-la
+                      vous-même dans l'écran ci-dessous, le reste continue tout
+                      seul.
+                    </Text>
+                    <RemoteScreen hint="Suivez la publication en direct. Si une case « je ne suis pas un robot » apparaît, cliquez dessus dans l'image." />
+                  </>
                 )}
 
                 <Divider

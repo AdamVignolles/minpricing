@@ -4,6 +4,11 @@ import { $inject, Alepha } from "alepha";
 import { $logger } from "alepha/logger";
 
 import { isDealabsLoggedOut, SESSION_PATH } from "./DealabsPublisherService.ts";
+import {
+  launchVisibleBrowser,
+  RemoteScreenService,
+  SCREEN_VIEWPORT,
+} from "./RemoteScreenService.ts";
 
 /** How long the login window waits for you before giving up. */
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
@@ -25,11 +30,14 @@ export interface DealabsSessionStatus {
 /**
  * Logs into Dealabs from the console, without any terminal command.
  *
- * « Se connecter à Dealabs » opens a real, visible browser window on this
- * machine at Dealabs' login. You log in there yourself — password, 2FA,
+ * « Se connecter à Dealabs » opens a real, visible browser window on the
+ * server at Dealabs' login. You log in there yourself — password, 2FA,
  * captcha, whatever Dealabs asks — and the window notices on its own once
  * you're in, saves the session to `.dealabs-session.json` and closes.
- * Auto-publish then reuses that session. The app never sees your password.
+ * Auto-publish then reuses that session. On the VM the window is on a
+ * virtual display, shown in the console by `RemoteScreenService`: your
+ * typing passes through the app to the window, it is never logged or
+ * stored.
  *
  * Why a separate window rather than the browser tab you're using: a web
  * page can't read another site's cookies (they're httpOnly, and the
@@ -39,6 +47,7 @@ export interface DealabsSessionStatus {
 export class DealabsSessionService {
   protected log = $logger();
   protected alepha = $inject(Alepha);
+  protected screen = $inject(RemoteScreenService);
   protected login?: DealabsSessionStatus["login"];
 
   status(): DealabsSessionStatus {
@@ -80,16 +89,17 @@ export class DealabsSessionService {
   }
 
   protected async runLogin(): Promise<void> {
-    const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: false });
+    const browser = await launchVisibleBrowser();
     try {
       const context = await browser.newContext({
         locale: "fr-FR",
+        viewport: SCREEN_VIEWPORT,
         // Start from the current session when there is one: if it's still
         // valid, there's nothing to do and the window closes right away.
         ...(existsSync(SESSION_PATH) ? { storageState: SESSION_PATH } : {}),
       });
       const page = await context.newPage();
+      this.screen.attach(page, "Connexion à Dealabs");
       await page.goto("https://www.dealabs.com/", {
         waitUntil: "domcontentloaded",
         timeout: 30_000,

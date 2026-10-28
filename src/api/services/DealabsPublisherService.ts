@@ -11,6 +11,11 @@ import { dealabsTitle } from "./DealabsDraftService.ts";
 import { isSameProduct } from "./dealabsSearch.ts";
 import type { Deal } from "./DealTypes.ts";
 import { keepaChartForDeal } from "./keepa.ts";
+import {
+  launchVisibleBrowser,
+  RemoteScreenService,
+  SCREEN_VIEWPORT,
+} from "./RemoteScreenService.ts";
 
 export const SESSION_PATH = join(process.cwd(), ".dealabs-session.json");
 const DEBUG_DIR = join(process.cwd(), ".dealabs-debug");
@@ -163,6 +168,7 @@ export class DealabsPublisherService {
   protected log = $logger();
   protected alepha = $inject(Alepha);
   protected dateTime = $inject(DateTimeProvider);
+  protected screen = $inject(RemoteScreenService);
 
   /**
    * @param chartImageUrl price-history picture for the top of the
@@ -196,21 +202,22 @@ export class DealabsPublisherService {
       );
     }
 
-    const { chromium } = await import("playwright");
     // Headless was silently caught by Dealabs' Cloudflare bot-check (a
     // "prove you're human" checkbox) even with a valid logged-in session —
     // this project also never tries to bypass anti-bot/CAPTCHA, so instead
     // of fighting it we run a real, visible browser. If Cloudflare still
     // challenges it, you see the window and click the checkbox yourself,
     // same as during `npm run dealabs:login`.
-    const browser = await chromium.launch({ headless: false });
+    const browser = await launchVisibleBrowser();
 
     try {
       const context = await browser.newContext({
         storageState: SESSION_PATH,
         locale: "fr-FR",
+        viewport: SCREEN_VIEWPORT,
       });
       const page = await context.newPage();
+      this.screen.attach(page, "Publication sur Dealabs");
 
       try {
         await page.goto("https://www.dealabs.com/bons-plans", {
@@ -316,8 +323,9 @@ export class DealabsPublisherService {
       return;
     }
 
-    // Without a real display (a server, Playwright falls back to a virtual
-    // one) nobody can click the checkbox: don't make the console wait 2 min.
+    // Without any display nobody can click the checkbox (the console's
+    // « écran distant » needs the server's virtual display, DISPLAY=:99):
+    // don't make the console wait minutes for nothing.
     const attended = process.platform !== "linux" || !!process.env.DISPLAY;
     if (!attended) {
       await page.waitForTimeout(10_000);
