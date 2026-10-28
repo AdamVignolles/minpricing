@@ -36,39 +36,44 @@ export async function launchVisibleBrowser(): Promise<Browser> {
   return chromium.launch({
     headless: false,
     env: { ...process.env, HOME: home },
-    // Dealabs' ad iframes otherwise get one renderer process each (~15),
-    // which exhausts the Bay app's task and memory caps on the VM.
-    args: ["--renderer-process-limit=2"],
+    // Keep cross-site frames in the page's process: the Bay app's task and
+    // memory caps on the VM can't afford one ~100 MB renderer per frame.
+    args: [
+      "--renderer-process-limit=2",
+      "--disable-site-isolation-trials",
+      "--disable-features=IsolateOrigins,site-per-process",
+    ],
   });
 }
 
 /** Frames the Dealabs window may load: Dealabs, its robot check and logins. */
-const ALLOWED_FRAME_HOSTS =
-  /(^|\.)(dealabs\.com|pepper\.com|cloudflare\.com|google\.com|gstatic\.com|recaptcha\.net|hcaptcha\.com|apple\.com|facebook\.com)$/;
+/**
+ * Hosts the Dealabs window may load: Dealabs itself, its robot checks
+ * (Cloudflare, reCAPTCHA, hCaptcha) and the « Se connecter avec » login
+ * providers. Everything else on a Dealabs page is ads, bidding and tracking.
+ */
+const ALLOWED_HOSTS =
+  /(^|\.)(dealabs\.com|pepper\.com|pepperstatic\.com|cloudflare\.com|google\.com|googleapis\.com|gstatic\.com|recaptcha\.net|hcaptcha\.com|apple\.com|facebook\.com|fbcdn\.net)$/;
 
 /**
- * Skips third-party iframes (ads, trackers) in the Dealabs window: with
- * site isolation each one is its own ~100 MB Chrome process, ~20 on a
- * Dealabs page — more than the VM's app budget. Only sub-frame documents
- * are blocked; the page itself, its scripts and any robot-check or login
- * frame load normally.
+ * Blocks third-party requests (ads, header bidding, trackers) in the Dealabs
+ * window. With a saved session's consent cookies a Dealabs page loads ~40
+ * of them and ~20 ad iframes, each its own ~100 MB Chrome process — more
+ * than the VM's app budget. Measured on the VM: 23 renderers → 2 with this
+ * and the shared-process flags in `launchVisibleBrowser`. Robot checks and
+ * login providers stay allowed.
  */
-export async function skipThirdPartyFrames(
+export async function blockThirdParty(
   context: import("playwright").BrowserContext,
 ): Promise<void> {
   await context.route("**/*", (route) => {
-    const request = route.request();
+    let host = "";
     try {
-      if (
-        request.resourceType() === "document" &&
-        request.frame().parentFrame() &&
-        !ALLOWED_FRAME_HOSTS.test(new URL(request.url()).hostname)
-      ) {
-        return route.abort();
-      }
+      host = new URL(route.request().url()).hostname;
     } catch {
-      // Service-worker requests have no frame: let them through.
+      // data:/blob: URLs have no host: let them through.
     }
+    if (host && !ALLOWED_HOSTS.test(host)) return route.abort();
     return route.continue();
   });
 }

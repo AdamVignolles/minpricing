@@ -16,7 +16,7 @@ import {
   launchVisibleBrowser,
   RemoteScreenService,
   SCREEN_VIEWPORT,
-  skipThirdPartyFrames,
+  blockThirdParty,
 } from "./RemoteScreenService.ts";
 
 const LOGIN_WAIT_MS = 10 * 60_000;
@@ -224,7 +224,7 @@ export class DealabsPublisherService {
         locale: "fr-FR",
         viewport: SCREEN_VIEWPORT,
       });
-      await skipThirdPartyFrames(context);
+      await blockThirdParty(context);
       const page = await context.newPage();
       this.screen.attach(page, "Publication sur Dealabs");
 

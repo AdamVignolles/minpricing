@@ -8,7 +8,7 @@ import {
   launchVisibleBrowser,
   RemoteScreenService,
   SCREEN_VIEWPORT,
-  skipThirdPartyFrames,
+  blockThirdParty,
 } from "./RemoteScreenService.ts";
 
 /** How long the login window waits for you before giving up. */
@@ -127,7 +127,7 @@ export class DealabsSessionService {
         // valid, there's nothing to do and the window closes right away.
         ...(existsSync(SESSION_PATH) ? { storageState: SESSION_PATH } : {}),
       });
-      await skipThirdPartyFrames(context);
+      await blockThirdParty(context);
       const page = await context.newPage();
       this.screen.attach(page, "Connexion à Dealabs");
       await page.goto("https://www.dealabs.com/", {
