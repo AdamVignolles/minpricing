@@ -49,9 +49,28 @@ export class DealabsSessionService {
   protected alepha = $inject(Alepha);
   protected screen = $inject(RemoteScreenService);
   protected login?: DealabsSessionStatus["login"];
+  /** The login is happening in a window opened by the publisher. */
+  protected sharedWindow = false;
 
   status(): DealabsSessionStatus {
     const connected = existsSync(SESSION_PATH);
+    if (
+      this.sharedWindow &&
+      this.login?.state === "waiting" &&
+      !this.screen.isActive()
+    ) {
+      this.sharedWindow = false;
+      const saved =
+        connected &&
+        statSync(SESSION_PATH).mtime.toISOString() > this.login.startedAt;
+      this.login = saved
+        ? { ...this.login, state: "saved" }
+        : {
+            ...this.login,
+            state: "cancelled",
+            message: "Fenêtre Dealabs fermée avant la connexion.",
+          };
+    }
     return {
       available: !this.alepha.isServerless(),
       connected,
@@ -71,9 +90,18 @@ export class DealabsSessionService {
     }
     if (this.login?.state !== "waiting") {
       this.login = { state: "waiting", startedAt: new Date().toISOString() };
+      // A publication already has the Dealabs window open (and is waiting
+      // for this very login): log in there instead of starting a second
+      // browser, which the VM has no room for.
+      if (this.screen.isActive()) {
+        this.sharedWindow = true;
+        return this.status();
+      }
       void this.runLogin().catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        this.log.warn(`Dealabs login failed: ${message}`);
+        const full = error instanceof Error ? error.message : String(error);
+        this.log.warn(`Dealabs login failed: ${full}`);
+        // Playwright appends pages of browser logs: keep the first line.
+        const message = full.split("\n")[0].split(" Browser logs:")[0];
         this.login = { ...this.login!, state: "failed", message };
       });
     }

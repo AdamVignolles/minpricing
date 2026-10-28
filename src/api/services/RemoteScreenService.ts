@@ -36,6 +36,9 @@ export async function launchVisibleBrowser(): Promise<Browser> {
   return chromium.launch({
     headless: false,
     env: { ...process.env, HOME: home },
+    // Dealabs' ad iframes otherwise get one renderer process each (~15),
+    // which exhausts the Bay app's task and memory caps on the VM.
+    args: ["--renderer-process-limit=2"],
   });
 }
 
@@ -64,6 +67,11 @@ export class RemoteScreenService {
       this.page = undefined;
       this.label = undefined;
     }
+  }
+
+  /** A Dealabs window is open right now (login or publication). */
+  isActive(): boolean {
+    return !!this.activePage();
   }
 
   async snapshot(): Promise<RemoteScreenSnapshot> {
