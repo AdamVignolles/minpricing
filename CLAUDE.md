@@ -309,8 +309,12 @@ deals and, separately, the visible ones (`createdVisible`).
   go through `/agent/reports|proposals|data`. All files live under
   `appDir()` (Bay's persistent `APP_FILES_DIR`). `dealradar.mjs` in remote
   mode (`DEALRADAR_URL` + `DEALRADAR_TOKEN`) pulls configs and today's
-  files before a command and pushes back what it wrote; `push-config` /
-  `push-proposal` send edits; `publish` is refused.
+  files before a command and pushes back what it wrote (data files and
+  the last 2 days' reports by sha1, `.data-base.json`); `push-config` /
+  `push-proposal` send edits; `publish` is refused. Without a local DB it
+  queries `GET /agent/dataset` (in-memory SQLite), and `profile-review`
+  has the VM read Dealabs comments in its browser
+  (`POST /agent/dealabs-comments`, Dealabs thread URLs only, 6 max).
 - **Publishing schedule** (`PublishScheduleService`, `PublishScheduleJob`
   every 5 min, entity `publish_schedule`): `PUT /agent/schedule` (what
   `publish-queue` sends in remote mode) hands the ranked deals over; the

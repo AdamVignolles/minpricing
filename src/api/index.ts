@@ -24,6 +24,7 @@ import { AutoPublishService } from "./services/AutoPublishService.ts";
 import { CategorizationService } from "./services/CategorizationService.ts";
 import { CollectionProgressService } from "./services/CollectionProgressService.ts";
 import { CollectionService } from "./services/CollectionService.ts";
+import { DealabsCommentsService } from "./services/DealabsCommentsService.ts";
 import { DealabsDraftService } from "./services/DealabsDraftService.ts";
 import { DealabsHistoryService } from "./services/DealabsHistoryService.ts";
 import { DealPageCheckService } from "./services/DealPageCheckService.ts";
@@ -82,6 +83,7 @@ export const ApiModule = $module({
     DealabsDraftService,
     IdealoReferenceService,
     MarketReferenceService,
+    DealabsCommentsService,
     DealabsHistoryService,
     DealPageCheckService,
     ItadService,

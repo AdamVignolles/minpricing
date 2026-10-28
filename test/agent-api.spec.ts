@@ -250,6 +250,28 @@ describe("agent API", () => {
     ).toBe(404);
   });
 
+  test("Dealabs comments: thread URLs only, 6 at most, token required", async () => {
+    const thread = "https://www.dealabs.com/bons-plans/x-1";
+    expect(
+      (await call("POST", "/agent/dealabs-comments", { urls: [thread] }, ""))
+        .status,
+    ).toBe(401);
+    expect(
+      (
+        await call("POST", "/agent/dealabs-comments", {
+          urls: ["http://169.254.169.254/latest/meta-data"],
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call("POST", "/agent/dealabs-comments", {
+          urls: Array.from({ length: 7 }, (_, i) => `${thread}${i}`),
+        })
+      ).status,
+    ).toBe(400);
+  });
+
   test("the dataset serves the rows tune-stats and sources-review query", async () => {
     expect((await call("GET", "/agent/dataset", undefined, "")).status).toBe(
       401,

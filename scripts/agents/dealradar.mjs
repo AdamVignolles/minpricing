@@ -1106,6 +1106,13 @@ async function readProfile(user, pages = 3) {
 /** The first comments of a thread, read in a headless browser (the API refuses scripts). */
 async function readComments(urls) {
   if (urls.length === 0) return {};
+  if (remote) {
+    // Cloud routines have no browser: the VM reads them in its own.
+    const res = await api("POST", "/agent/dealabs-comments", { urls });
+    if (res.ok && res.body?.comments) return res.body.comments;
+    process.stderr.write(`comments skipped (VM: ${res.status})\n`);
+    return undefined;
+  }
   let browser;
   try {
     const { chromium } = await import("playwright");
@@ -1222,7 +1229,7 @@ async function profileReview() {
       ? {}
       : {
           commentsNote:
-            "commentaires non lus (pas de navigateur ici) : seuls ceux déjà en cache sont listés",
+            "commentaires non lus (ni navigateur ici, ni réponse du serveur) : seuls ceux déjà en cache sont listés",
         }),
     comments: Object.fromEntries(
       posts

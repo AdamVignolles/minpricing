@@ -11,6 +11,10 @@ import { $agentAuth } from "../services/AdminAuth.ts";
 import { isAgentConfigName } from "../services/agentConfig.ts";
 import { AgentFilesService } from "../services/AgentFilesService.ts";
 import { appDir } from "../services/appDir.ts";
+import {
+  DealabsCommentsService,
+  isDealabsThreadUrl,
+} from "../services/DealabsCommentsService.ts";
 
 const rich = () => z.text({ size: "rich" });
 /** File contents: up to the 2 MB cap enforced by `AgentFilesService`. */
@@ -34,6 +38,7 @@ const who = {
 export class AgentApiController {
   protected alepha = $inject(Alepha);
   protected files = $inject(AgentFilesService);
+  protected comments = $inject(DealabsCommentsService);
   protected deals = $repository(dealEntity);
   protected sources = $repository(sourceEntity);
 
@@ -255,6 +260,34 @@ export class AgentApiController {
             .slice(-1_900_000)
         : "";
       return { deals, sources, collectionRuns };
+    },
+  });
+
+  /**
+   * The first comments of our Dealabs threads, read in the VM's browser:
+   * `profile-review` in a cloud routine (no Playwright there). Dealabs
+   * thread URLs only, 6 at most per call (~10 s each).
+   */
+  agentDealabsComments = $action({
+    method: "POST",
+    path: "/agent/dealabs-comments",
+    use: [$agentAuth()],
+    schema: {
+      body: z.object({ urls: z.array(z.text({ maxLength: 500 })) }),
+      response: z.object({ comments: z.record(z.text(), z.array(z.text())) }),
+    },
+    handler: async ({ body }) => {
+      const urls = [...new Set(body.urls)];
+      if (urls.length > 6 || !urls.every(isDealabsThreadUrl)) {
+        throw new HttpError({
+          status: 400,
+          message: "6 URLs de fils Dealabs au plus",
+        });
+      }
+      if (this.alepha.isServerless()) {
+        throw new HttpError({ status: 503, message: "pas de navigateur ici" });
+      }
+      return { comments: await this.comments.read(urls) };
     },
   });
 }
