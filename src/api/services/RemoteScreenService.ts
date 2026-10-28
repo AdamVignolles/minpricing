@@ -42,6 +42,37 @@ export async function launchVisibleBrowser(): Promise<Browser> {
   });
 }
 
+/** Frames the Dealabs window may load: Dealabs, its robot check and logins. */
+const ALLOWED_FRAME_HOSTS =
+  /(^|\.)(dealabs\.com|pepper\.com|cloudflare\.com|google\.com|gstatic\.com|recaptcha\.net|hcaptcha\.com|apple\.com|facebook\.com)$/;
+
+/**
+ * Skips third-party iframes (ads, trackers) in the Dealabs window: with
+ * site isolation each one is its own ~100 MB Chrome process, ~20 on a
+ * Dealabs page — more than the VM's app budget. Only sub-frame documents
+ * are blocked; the page itself, its scripts and any robot-check or login
+ * frame load normally.
+ */
+export async function skipThirdPartyFrames(
+  context: import("playwright").BrowserContext,
+): Promise<void> {
+  await context.route("**/*", (route) => {
+    const request = route.request();
+    try {
+      if (
+        request.resourceType() === "document" &&
+        request.frame().parentFrame() &&
+        !ALLOWED_FRAME_HOSTS.test(new URL(request.url()).hostname)
+      ) {
+        return route.abort();
+      }
+    } catch {
+      // Service-worker requests have no frame: let them through.
+    }
+    return route.continue();
+  });
+}
+
 /**
  * The console's view of the Dealabs window when the server has no screen
  * you can look at (the VM): the login and the publisher register their
