@@ -1,9 +1,16 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { $inject, Alepha, z } from "alepha";
+import { $repository } from "alepha/orm";
 import { $action, HttpError } from "alepha/server";
 
+import { dealEntity } from "../entities/Deal.ts";
+import { sourceEntity } from "../entities/Source.ts";
 import { $agentAuth } from "../services/AdminAuth.ts";
 import { isAgentConfigName } from "../services/agentConfig.ts";
 import { AgentFilesService } from "../services/AgentFilesService.ts";
+import { appDir } from "../services/appDir.ts";
 
 const rich = () => z.text({ size: "rich" });
 /** File contents: up to the 2 MB cap enforced by `AgentFilesService`. */
@@ -27,6 +34,8 @@ const who = {
 export class AgentApiController {
   protected alepha = $inject(Alepha);
   protected files = $inject(AgentFilesService);
+  protected deals = $repository(dealEntity);
+  protected sources = $repository(sourceEntity);
 
   protected caller(agent: string): string {
     const request = this.alepha.store.get("alepha.http.request");
@@ -172,5 +181,80 @@ export class AgentApiController {
         ...row,
         createdAt: String(row.createdAt),
       })),
+  });
+
+  /**
+   * The read-only rows `dealradar.mjs` `tune-stats` and `sources-review`
+   * query (same column names as the database), plus the collection run
+   * log: in remote mode the script loads them into an in-memory SQLite and
+   * runs its usual queries, so the cloud routines get the same figures.
+   * Deals seen within `days`, plus any with a stored Dealabs history
+   * (threads trimmed to url/title/temperature/mine).
+   */
+  agentDataset = $action({
+    method: "GET",
+    path: "/agent/dataset",
+    use: [$agentAuth()],
+    schema: {
+      query: z.object({ days: z.number().optional() }),
+      response: z.object({
+        deals: z.array(z.any()),
+        sources: z.array(z.any()),
+        collectionRuns: big(),
+      }),
+    },
+    handler: async ({ query }) => {
+      const days = Math.min(Math.max(query.days ?? 30, 1), 120);
+      const since = Date.now() - days * 86_400_000;
+      const trimHistory = (raw?: string) => {
+        if (!raw || raw === "[]") return undefined;
+        try {
+          const list = JSON.parse(raw) as Array<Record<string, unknown>>;
+          return JSON.stringify(
+            list.map((t) => ({
+              url: t.url,
+              title: t.title,
+              temperature: t.temperature,
+              mine: t.mine,
+            })),
+          );
+        } catch {
+          return undefined;
+        }
+      };
+      const deals = (await this.deals.findMany({}))
+        .map((d) => ({
+          source_id: d.sourceId,
+          category_id: d.categoryId ?? null,
+          status: d.status,
+          score: d.score ?? null,
+          hot_chance: d.hotChance ?? null,
+          last_seen_at: new Date(d.lastSeenAt).getTime(),
+          dealabs_history: trimHistory(d.dealabsHistory) ?? null,
+        }))
+        .filter((d) => d.last_seen_at >= since || d.dealabs_history);
+      const sources = (await this.sources.findMany({})).map((s) => ({
+        id: s.id,
+        enabled: s.enabled ? 1 : 0,
+        last_error: s.lastError ?? null,
+      }));
+      const runsFile = join(
+        appDir(),
+        "data",
+        "agents",
+        "collection-runs.jsonl",
+      );
+      const collectionRuns = existsSync(runsFile)
+        ? readFileSync(runsFile, "utf8")
+            .split(/\r?\n/)
+            .filter((line) => {
+              const at = line.match(/"at":"([^"]+)"/)?.[1];
+              return at !== undefined && new Date(at).getTime() >= since;
+            })
+            .join("\n")
+            .slice(-1_900_000)
+        : "";
+      return { deals, sources, collectionRuns };
+    },
   });
 }

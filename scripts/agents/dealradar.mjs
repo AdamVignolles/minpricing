@@ -18,7 +18,9 @@
  *   sources-review [days]       yield/time per source + what goes hot on Dealabs (deals-sources)
  *   probe <url>                 can a candidate shop be read with plain fetch?
  *   pull [--force]              remote mode: fetch configs/ledger/today's files
- *                               (--force also drops unpushed config edits)
+ *                               (--force also drops unpushed config edits
+ *                               and today's files edited locally; without it
+ *                               such files are kept and pushed back)
  *   push-config <name> [agent] [reason] [changelog.md]
  *                               remote mode: send a tuned config/<name> to the VM
  *                               (refused, 409, if the VM's version changed since
@@ -36,6 +38,7 @@
  * hands tonight's plan to the app's own schedule (`/api/agent/schedule`).
  */
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
@@ -818,6 +821,47 @@ async function stats(days = 28) {
   };
 }
 
+/**
+ * The deals/sources tables tune-stats and sources-review query: the local
+ * SQLite file, or in remote mode an in-memory copy of the columns they use
+ * (`GET /agent/dataset`), which also refreshes collection-runs.jsonl.
+ */
+async function openDealsDb() {
+  const { DatabaseSync } = await import("node:sqlite");
+  if (!remote) {
+    const dbFile = (env.DATABASE_URL ?? "sqlite://./data/dev.db").replace(
+      /^sqlite:\/\//,
+      "",
+    );
+    return new DatabaseSync(resolve(root, dbFile), { readOnly: true });
+  }
+  const res = await api("GET", "/agent/dataset?days=60");
+  if (!res.ok) throw new Error(`dataset: HTTP ${res.status}`);
+  const db = new DatabaseSync(":memory:");
+  db.exec(`CREATE TABLE deals (source_id TEXT, category_id TEXT, status TEXT,
+    score REAL, hot_chance REAL, last_seen_at INTEGER, dealabs_history TEXT);
+    CREATE TABLE sources (id TEXT, enabled INTEGER, last_error TEXT);`);
+  const insertDeal = db.prepare(
+    "INSERT INTO deals VALUES (?, ?, ?, ?, ?, ?, ?)",
+  );
+  for (const d of res.body.deals) {
+    insertDeal.run(
+      d.source_id,
+      d.category_id,
+      d.status,
+      d.score,
+      d.hot_chance,
+      d.last_seen_at,
+      d.dealabs_history,
+    );
+  }
+  const insertSource = db.prepare("INSERT INTO sources VALUES (?, ?, ?)");
+  for (const s of res.body.sources)
+    insertSource.run(s.id, s.enabled, s.last_error);
+  writeFileSync(join(outDir, "collection-runs.jsonl"), res.body.collectionRuns);
+  return db;
+}
+
 /** Same normalisation as src/api/services/desirability.ts. */
 const words = (text) =>
   ` ${text
@@ -834,12 +878,7 @@ const words = (text) =>
  * suggested weight; and what each shop/category yields for selection.
  */
 async function tuneStats() {
-  const { DatabaseSync } = await import("node:sqlite");
-  const dbFile = (env.DATABASE_URL ?? "sqlite://./data/dev.db").replace(
-    /^sqlite:\/\//,
-    "",
-  );
-  const db = new DatabaseSync(resolve(root, dbFile), { readOnly: true });
+  const db = await openDealsDb();
   const desirability = readJson(join(root, "config", "desirability.json"));
   const collection = readJson(join(root, "config", "collection.json"));
   const r = rules();
@@ -1259,12 +1298,7 @@ async function readDealabsListing(path, pages, spacingMs = 1_500) {
  * on Dealabs, by merchant and category, and which of it we don't cover.
  */
 async function sourcesReview(days = 7) {
-  const { DatabaseSync } = await import("node:sqlite");
-  const dbFile = (env.DATABASE_URL ?? "sqlite://./data/dev.db").replace(
-    /^sqlite:\/\//,
-    "",
-  );
-  const db = new DatabaseSync(resolve(root, dbFile), { readOnly: true });
+  const db = await openDealsDb();
   const r = rules();
   const collection = readJson(join(root, "config", "collection.json"));
   const since = Date.now() - days * 86_400_000;
@@ -1296,7 +1330,13 @@ async function sourcesReview(days = 7) {
     ? readFileSync(runsFile, "utf8")
         .split(/\r?\n/)
         .filter(Boolean)
-        .map((line) => JSON.parse(line))
+        .flatMap((line) => {
+          try {
+            return [JSON.parse(line)];
+          } catch {
+            return [];
+          }
+        })
         .filter((run) => new Date(run.at).getTime() >= since)
     : [];
   const runStats = {};
@@ -1504,6 +1544,11 @@ const startedAt = Date.now();
  * pulled into this checkout, e.g. a fresh cloud clone).
  */
 const configBaseFile = join(outDir, ".config-base.json");
+/** Remote mode: sha1 of each data file as last pulled from / pushed to the VM. */
+const dataBaseFile = join(outDir, ".data-base.json");
+const sha1 = (text) => createHash("sha1").update(text).digest("hex");
+/** Today's files edited locally since the last pull (e.g. by the Write tool): kept and pushed. */
+const localEdits = new Set();
 
 /** Remote mode: the VM's configs, ledger and today's files, into this checkout. */
 async function pullFromVm() {
@@ -1533,12 +1578,26 @@ async function pullFromVm() {
     "ledger.jsonl",
     ...DATA_KINDS.map((k) => `${k}-${today()}.json`),
   ];
+  const dataBase = existsSync(dataBaseFile) ? readJson(dataBaseFile) : {};
   for (const name of pulls) {
+    const file = join(outDir, name);
+    const local = existsSync(file) ? readFileSync(file, "utf8") : undefined;
+    if (
+      name !== "ledger.jsonl" &&
+      !(command === "pull" && args.includes("--force")) &&
+      local !== undefined &&
+      sha1(local) !== dataBase[name]
+    ) {
+      localEdits.add(name);
+      continue;
+    }
     const res = await api("GET", `/agent/data/${name}`);
     if (res.ok && typeof res.body?.content === "string") {
-      writeFileSync(join(outDir, name), res.body.content);
+      writeFileSync(file, res.body.content);
+      dataBase[name] = sha1(res.body.content);
     }
   }
+  writeFileSync(dataBaseFile, JSON.stringify(dataBase));
 }
 
 const changedSince = (dir, pattern) =>
@@ -1554,13 +1613,16 @@ async function pushToVm() {
   const kinds = new RegExp(
     `^(${DATA_KINDS.join("|")})-\\d{4}-\\d{2}-\\d{2}\\.json$`,
   );
-  for (const name of changedSince(outDir, kinds)) {
-    const res = await api("PUT", `/agent/data/${name}`, {
-      content: readFileSync(join(outDir, name), "utf8"),
-      agent,
-    });
-    if (!res.ok) process.stderr.write(`push ${name}: ${res.status}\n`);
+  const dataBase = existsSync(dataBaseFile) ? readJson(dataBaseFile) : {};
+  const toPush = new Set([...changedSince(outDir, kinds), ...localEdits]);
+  for (const name of toPush) {
+    if (!existsSync(join(outDir, name))) continue;
+    const content = readFileSync(join(outDir, name), "utf8");
+    const res = await api("PUT", `/agent/data/${name}`, { content, agent });
+    if (res.ok) dataBase[name] = sha1(content);
+    else process.stderr.write(`push ${name}: ${res.status}\n`);
   }
+  writeFileSync(dataBaseFile, JSON.stringify(dataBase));
   for (const name of changedSince(
     join(outDir, "reports"),
     /^[a-z0-9-]+\.md$/,

@@ -250,6 +250,29 @@ describe("agent API", () => {
     ).toBe(404);
   });
 
+  test("the dataset serves the rows tune-stats and sources-review query", async () => {
+    expect((await call("GET", "/agent/dataset", undefined, "")).status).toBe(
+      401,
+    );
+    const res = await call("GET", "/agent/dataset?days=30");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(Array.isArray(body.deals)).toBe(true);
+    expect(Array.isArray(body.sources)).toBe(true);
+    expect(typeof body.collectionRuns).toBe("string");
+    for (const deal of body.deals) {
+      expect(Object.keys(deal).sort()).toEqual([
+        "category_id",
+        "dealabs_history",
+        "hot_chance",
+        "last_seen_at",
+        "score",
+        "source_id",
+        "status",
+      ]);
+    }
+  });
+
   test("file names can't leave data/agents", async () => {
     for (const name of [
       "..%2F..%2Fconfig%2Fpublish-rules.json",
