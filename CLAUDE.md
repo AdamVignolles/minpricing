@@ -84,7 +84,12 @@ controllers → React console → Dealabs draft / auto-publish.
 - **Dealabs login**: `DealabsSessionService` opens a visible Playwright
   window on the Dealabs login (button « Se connecter à Dealabs » on the deal
   page), detects the logged-in state and saves `.dealabs-session.json`
-  itself — local server only, like auto-publish. Auto-publish attempts are
+  itself — local server only, like auto-publish. On the Bay VM the browser
+  runs on a virtual display (`DISPLAY=:99`) and the console shows it as an
+  « écran distant » (`RemoteScreenService`, `/dealabs/screen`); if the
+  session is missing or expired, auto-publish opens the login in that same
+  window and continues once you've logged in. Local files (session, `config/`,
+  `data/agents`) live under `appDir()` (Bay's `APP_FILES_DIR`). Auto-publish attempts are
   recorded on the draft (`publishAttempts`, `lastPublishResult`,
   `lastPublishError`); a "Vérifier" that doesn't confirm puts the draft back
   to `draft`. Draft texts never contain prices — except, for Amazon deals,
