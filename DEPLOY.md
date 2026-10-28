@@ -191,3 +191,17 @@ printf 'APP_FILES_DIR=%s/data\nPLAYWRIGHT_BROWSERS_PATH=%s/browsers\nBROWSER_NO_
 ```
 
 The Dealabs login window cannot open on the VM: run `npm run dealabs:login` locally and upload `.dealabs-session.json`. A 2 GB swapfile is recommended (app is capped at 512 MB). After reinstalling Bay, run `chmod 0711 /opt/bay/data`.
+
+## Analytics and error reporting (Lore sigil)
+
+`AlephaSigil` (from `@alepha/lore/sigil`, registered in `WebModule`) reports page
+views, web vitals and errors to Lore. Production only.
+
+- Variable: `SIGIL_KEY` (`sg_minpricing_…`) — server-side only; the browser posts to
+  the app's own `/api/sigil/ingest`, which forwards to `https://lore.alepha.dev`
+  with the key. Keep it in the Bay `.env` / Lore env, never in the bundle.
+- Delivery is batched: `sigil_list` shows `lastSeenAt` a minute or so after a visit.
+- Check: `curl -X POST https://lore.alepha.dev/sigils/ingest -H "authorization: Bearer $KEY" -d '{}'` → 204
+  (401 = key invalid). Strip any quotes from the `.env` value when testing.
+- Rotate: `sigil_rotate` in Lore (history is kept), then update `SIGIL_KEY` on the VM
+  and restart the app.
