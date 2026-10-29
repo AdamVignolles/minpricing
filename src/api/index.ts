@@ -9,6 +9,7 @@ import { CatalogController } from "./controllers/CatalogController.ts";
 import { DealsController } from "./controllers/DealsController.ts";
 import { DraftsController } from "./controllers/DraftsController.ts";
 import { KeepaController } from "./controllers/KeepaController.ts";
+import { LinksController } from "./controllers/LinksController.ts";
 import { McpOAuthController } from "./controllers/McpOAuthController.ts";
 import { McpTools } from "./controllers/McpTools.ts";
 import { ProductsController } from "./controllers/ProductsController.ts";
@@ -16,6 +17,7 @@ import { PublishScheduleController } from "./controllers/PublishScheduleControll
 import { SourcesController } from "./controllers/SourcesController.ts";
 import { StatsController } from "./controllers/StatsController.ts";
 import { CollectDealsJob } from "./jobs/CollectDealsJob.ts";
+import { LinkCheckJob } from "./jobs/LinkCheckJob.ts";
 import { PublishScheduleJob } from "./jobs/PublishScheduleJob.ts";
 import { AgentFilesService } from "./services/AgentFilesService.ts";
 import { AgentsService } from "./services/AgentsService.ts";
@@ -62,6 +64,7 @@ export const ApiModule = $module({
     AdminController,
     StatsController,
     KeepaController,
+    LinksController,
     AgentsController,
     // agent write API (AGENT_TOKEN): bounded configs, reports, plan
     AgentApiController,
@@ -69,6 +72,7 @@ export const ApiModule = $module({
     // jobs
     CollectDealsJob,
     PublishScheduleJob,
+    LinkCheckJob,
     // services
     CollectionService,
     AgentsService,

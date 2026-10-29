@@ -28,11 +28,18 @@ import {
   MIN_VISIBLE_SCORE,
   ScoringService,
 } from "../services/ScoringService.ts";
+import { WatchedLinkService } from "../services/WatchedLinkService.ts";
 
 /**
  * A deal as the console lists it: the stored row, plus whether it is
  * already on Dealabs (the card is greyed out then).
  */
+interface AddedByLink {
+  linkId: string;
+  addedBy: string;
+  watched: boolean;
+}
+
 const dealResponseSchema = dealEntity.schema.extend({
   onDealabs: z
     .object({
@@ -40,6 +47,14 @@ const dealResponseSchema = dealEntity.schema.extend({
       price: z.number(),
       temperature: z.number(),
       mine: z.boolean(),
+    })
+    .optional(),
+  /** Added by pasting its link (see `WatchedLink`), still watched or not. */
+  addedByLink: z
+    .object({
+      linkId: z.text(),
+      addedBy: z.text(),
+      watched: z.boolean(),
     })
     .optional(),
 });
@@ -96,6 +111,7 @@ export class DealsController {
   protected deals = $repository(dealEntity);
   protected drafts = $repository(dealabsDraftEntity);
   protected myPosts = $inject(MyDealabsPostsService);
+  protected watchedLinks = $inject(WatchedLinkService);
   protected history = $repository(priceHistoryEntity);
   protected sources = $repository(sourceEntity);
   protected pricing = $inject(PricingService);
@@ -215,8 +231,42 @@ export class DealsController {
       currentPrice: number;
       dealabsHistory?: string | null;
     },
-  >(deals: T[]): Promise<Array<T & { onDealabs?: OnDealabs }>> {
+  >(
+    deals: T[],
+  ): Promise<Array<T & { onDealabs?: OnDealabs; addedByLink?: AddedByLink }>> {
     if (deals.length === 0) return deals;
+    const linked = await this.withLinks(deals);
+    return this.withDealabsOnly(linked);
+  }
+
+  /** The « ajouté par lien » flag, from the watched links. */
+  protected async withLinks<T extends { id: string }>(
+    deals: T[],
+  ): Promise<Array<T & { addedByLink?: AddedByLink }>> {
+    const links = await this.watchedLinks.byDeal(deals.map((deal) => deal.id));
+    return deals.map((deal) => {
+      const link = links.get(deal.id);
+      return link
+        ? {
+            ...deal,
+            addedByLink: {
+              linkId: link.id,
+              addedBy: link.addedBy,
+              watched: link.status !== "ended",
+            },
+          }
+        : deal;
+    });
+  }
+
+  protected async withDealabsOnly<
+    T extends {
+      id: string;
+      title: string;
+      currentPrice: number;
+      dealabsHistory?: string | null;
+    },
+  >(deals: T[]): Promise<Array<T & { onDealabs?: OnDealabs }>> {
     const posted = await this.drafts.findMany({
       where: {
         and: [
@@ -381,7 +431,8 @@ export class DealsController {
       params: z.object({ id: z.text() }),
       response: dealResponseSchema,
     },
-    handler: async ({ params }) => this.deals.getById(params.id),
+    handler: async ({ params }) =>
+      (await this.withLinks([await this.deals.getById(params.id)]))[0],
   });
 
   historyOf = $action({

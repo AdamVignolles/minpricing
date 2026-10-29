@@ -21,9 +21,17 @@ import type {
   ProductRef,
   RawDeal,
 } from "../src/api/collectors/DealSource.ts";
+import { AuthController } from "../src/api/controllers/AuthController.ts";
+import { DealsController } from "../src/api/controllers/DealsController.ts";
+import {
+  AGENT_LINKS_PER_DAY,
+  LinksController,
+} from "../src/api/controllers/LinksController.ts";
+import { agentWriteEntity } from "../src/api/entities/AgentWrite.ts";
 import { dealEntity } from "../src/api/entities/Deal.ts";
 import { watchedLinkEntity } from "../src/api/entities/WatchedLink.ts";
 import { ApiModule } from "../src/api/index.ts";
+import { LinkCheckJob } from "../src/api/jobs/LinkCheckJob.ts";
 import { CollectionService } from "../src/api/services/CollectionService.ts";
 import { DealabsDraftService } from "../src/api/services/DealabsDraftService.ts";
 import { DealabsHistoryService } from "../src/api/services/DealabsHistoryService.ts";
@@ -34,6 +42,7 @@ import { PriceSeriesService } from "../src/api/services/PriceSeriesService.ts";
 import { WatchedLinkService } from "../src/api/services/WatchedLinkService.ts";
 
 const NOW = "2026-10-29T15:00:00.000Z";
+const TOKEN = "l".repeat(64);
 
 /** A good Amazon offer: real drop vs its own 30-day low, well reviewed. */
 const goodOffer = (
@@ -81,6 +90,7 @@ class FakeAmazon implements DealSource {
 class Fixtures {
   deals = $repository(dealEntity);
   links = $repository(watchedLinkEntity);
+  writes = $repository(agentWriteEntity);
 }
 
 describe("watched links", () => {
@@ -90,6 +100,7 @@ describe("watched links", () => {
   let links: WatchedLinkService;
   let fx: Fixtures;
   let amazon: FakeAmazon;
+  let queued: ReturnType<typeof vi.spyOn>;
   const clock = () => alepha.inject(DateTimeProvider) as any;
 
   beforeAll(async () => {
@@ -102,6 +113,7 @@ describe("watched links", () => {
         APP_SECRET: "test-app-secret-0123456789abcdef",
         DATABASE_URL: "sqlite://:memory:",
         COLLECT_ON_START: "false",
+        AGENT_TOKEN: TOKEN,
       },
     })
       .with(AlephaServer)
@@ -129,6 +141,10 @@ describe("watched links", () => {
       alepha.inject(DealabsDraftService),
       "maybeGenerateDraft",
     ).mockResolvedValue(undefined as any);
+    // The queue is not under test: checks are run by hand below.
+    queued = vi
+      .spyOn(alepha.inject(LinkCheckJob).run, "push")
+      .mockResolvedValue("job-id");
   }, 30_000);
 
   afterAll(async () => {
@@ -143,6 +159,8 @@ describe("watched links", () => {
     await fx.deals.deleteMany({});
     await fx.links.deleteMany({});
     amazon = new FakeAmazon();
+    queued?.mockClear();
+    await fx.writes.deleteMany({});
     (collection as any).collectorsById.amazon = amazon;
   });
 
@@ -297,6 +315,159 @@ describe("watched links", () => {
     amazon.offers.set("B0BXYCS74H", goodOffer("B0BXYCS74H"));
     await collection.runOne("amazon");
     expect((await links.get(link.id)).status).toBe("ok");
+  });
+
+  test("API: admin adds a link, gets an instant refusal or a queued check", async () => {
+    const api = alepha.inject(LinksController);
+    const login = await alepha.inject(AuthController).login.fetch({
+      body: { username: "admin", password: "s3cret-admin-pass" },
+    });
+    const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
+
+    await expect(
+      api.addLink.fetch({
+        body: { url: "https://www.amazon.fr/dp/B0BXYCS74H" },
+      }),
+    ).rejects.toMatchObject({ status: 401 });
+    // The agent token reads, but adds only through /agent/links.
+    await expect(
+      api.addLink.fetch({
+        headers: { authorization: `Bearer ${TOKEN}` },
+        body: { url: "https://www.amazon.fr/dp/B0BXYCS74H" },
+      }),
+    ).rejects.toMatchObject({ status: 401 });
+
+    const refused = await api.addLink.fetch({
+      headers: { cookie },
+      body: { url: "https://www.fnac.com/a1/produit" },
+    });
+    expect(refused.data).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(queued).not.toHaveBeenCalled();
+
+    const added = await api.addLink.fetch({
+      headers: { cookie },
+      body: { url: "https://www.amazon.fr/dp/B0BXYCS74H?tag=x-21" },
+    });
+    expect(added.data).toMatchObject({
+      ok: true,
+      duplicate: false,
+      link: {
+        shop: "Amazon.fr",
+        canonicalUrl: "https://www.amazon.fr/dp/B0BXYCS74H",
+        status: "pending",
+        addedBy: "admin",
+      },
+    });
+    const linkId = added.data.link?.id as string;
+    expect(queued).toHaveBeenCalledWith({ linkId });
+
+    const again = await api.addLink.fetch({
+      headers: { cookie },
+      body: { url: "https://amazon.fr/gp/product/B0BXYCS74H" },
+    });
+    expect(again.data).toMatchObject({ ok: true, duplicate: true });
+    expect(again.data.link?.id).toBe(linkId);
+
+    amazon.offers.set("B0BXYCS74H", goodOffer("B0BXYCS74H"));
+    await collection.checkLink(linkId);
+    const detail = await api.linkDetail.fetch({
+      headers: { authorization: `Bearer ${TOKEN}` },
+      params: { id: linkId },
+    });
+    expect(detail.data).toMatchObject({
+      status: "ok",
+      deal: { currentPrice: 249, discountPercentage: 41 },
+    });
+    expect(detail.data.steps.at(-1)).toMatchObject({
+      id: "verdict",
+      status: "done",
+    });
+
+    const list = await api.listLinks.fetch({ headers: { cookie }, query: {} });
+    expect(list.data.links.map((link) => link.id)).toEqual([linkId]);
+    expect(list.data.shops.map((shop) => shop.label)).toEqual([
+      "Amazon.fr",
+      "Cdiscount",
+      "AliExpress",
+      "Steam",
+    ]);
+
+    const stopped = await api.stopLink.fetch({
+      headers: { cookie },
+      params: { id: linkId },
+    });
+    expect(stopped.data.status).toBe("ended");
+  });
+
+  test("API: agents add links, audited and rate-limited", async () => {
+    const api = alepha.inject(LinksController);
+    const agent = { authorization: `Bearer ${TOKEN}` };
+    const res = await api.agentAddLink.fetch({
+      headers: agent,
+      body: {
+        url: "https://store.steampowered.com/app/1145350/Hades_II/",
+        agent: "deals-sources",
+        reason: "hot on Dealabs last week",
+      },
+    });
+    expect(res.data).toMatchObject({
+      ok: true,
+      link: {
+        sourceId: "steam",
+        externalId: "1145350",
+        addedBy: "deals-sources",
+      },
+    });
+    const [audit] = await fx.writes.findMany({});
+    expect(audit).toMatchObject({
+      agent: "deals-sources",
+      kind: "link",
+      target: "links/steam/1145350",
+      reason: "hot on Dealabs last week",
+    });
+    // A refusal is not a write: not audited.
+    const refused = await api.agentAddLink.fetch({
+      headers: agent,
+      body: {
+        url: "https://www.dealabs.com/bons-plans/x-1",
+        agent: "deals-sources",
+      },
+    });
+    expect(refused.data).toMatchObject({ ok: false, reason: "dealabs" });
+    expect(await fx.writes.findMany({})).toHaveLength(1);
+
+    for (let i = 1; i < AGENT_LINKS_PER_DAY; i++) {
+      await fx.writes.create({
+        agent: "deals-sources",
+        kind: "link",
+        target: `links/x/${i}`,
+      });
+    }
+    await expect(
+      api.agentAddLink.fetch({
+        headers: agent,
+        body: {
+          url: "https://store.steampowered.com/app/620",
+          agent: "deals-sources",
+        },
+      }),
+    ).rejects.toMatchObject({ status: 429 });
+  });
+
+  test("lists flag deals added by link", async () => {
+    const link = await add("https://www.amazon.fr/dp/B0BXYCS74H");
+    amazon.offers.set("B0BXYCS74H", goodOffer("B0BXYCS74H"));
+    await collection.checkLink(link.id);
+    const deals = alepha.inject(DealsController);
+    const page = await deals.list.fetch({
+      headers: { authorization: `Bearer ${TOKEN}` },
+      query: { status: "active" },
+    });
+    expect(page.data.content[0].addedByLink).toEqual({
+      linkId: link.id,
+      addedBy: "admin",
+      watched: true,
+    });
   });
 
   test("the watch ends after its time, and with its expired deal", async () => {

@@ -27,6 +27,10 @@
  *                               the last pull; sends the changelog's newest entry)
  *   push-proposal <file.md> [agent]
  *                               remote mode: send a code proposal to the VM
+ *   add-link <url> [agent] [reason] [--wait]
+ *                               add a deal from its shop link (Amazon.fr,
+ *                               Cdiscount, AliExpress, Steam): same checks as
+ *                               collected deals; --wait prints the verdict
  *
  * Remote mode (`DEALRADAR_URL` + `DEALRADAR_TOKEN`, from the environment or
  * .env): the same commands against the online app (Bay VM) instead of a
@@ -178,6 +182,46 @@ async function api(method, path, body) {
     parsed = text;
   }
   return { ok: res.ok, status: res.status, body: parsed };
+}
+
+/**
+ * Adds a deal from its link (`POST /agent/links`). The app reads it on its
+ * own queue; with `wait`, polls the link until its first check is done
+ * (3 min at most) and prints the verdict.
+ */
+async function addLink(url, agent, reason, wait) {
+  const res = await api("POST", "/agent/links", { url, agent, reason });
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      message: res.body?.message ?? res.body,
+    };
+  }
+  if (!res.body.ok || !wait) {
+    const { link, ...rest } = res.body;
+    return link
+      ? { ...rest, linkId: link.id, shop: link.shop, status: link.status }
+      : rest;
+  }
+  let link = res.body.link;
+  for (let waited = 0; waited < 180; waited += 3) {
+    const verdictStep = link.steps.find((step) => step.id === "verdict");
+    if (["done", "failed"].includes(verdictStep?.status)) break;
+    await new Promise((done) => setTimeout(done, 3_000));
+    const next = await api("GET", `/links/${encodeURIComponent(link.id)}`);
+    if (next.ok) link = next.body;
+  }
+  return {
+    ok: true,
+    duplicate: res.body.duplicate,
+    linkId: link.id,
+    shop: link.shop,
+    status: link.status,
+    verdict: link.verdict,
+    dealId: link.deal?.id,
+    score: link.deal?.score,
+  };
 }
 
 async function ensureServer() {
@@ -1738,7 +1782,10 @@ try {
   if (remote && command === "pull" && args.includes("--force")) {
     writeFileSync(configBaseFile, "{}");
   }
-  if (remote && !["probe", "push-config", "push-proposal"].includes(command)) {
+  if (
+    remote &&
+    !["probe", "push-config", "push-proposal", "add-link"].includes(command)
+  ) {
     await pullFromVm();
   }
   switch (command) {
@@ -1850,12 +1897,24 @@ try {
       print({ status: res.status, slug });
       break;
     }
+    case "add-link": {
+      const [url, agent = "agent", reason] = args.filter(
+        (arg) => arg !== "--wait",
+      );
+      if (!url)
+        throw new Error("usage: add-link <url> [agent] [reason] [--wait]");
+      print(await addLink(url, agent, reason, args.includes("--wait")));
+      break;
+    }
     default:
       throw new Error(
-        "commands: ensure-server | report | shortlist | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days] | sources-review [days] | probe <url> | pull [--force] | push-config <name> | push-proposal <file>",
+        "commands: add-link <url> | ensure-server | report | shortlist | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days] | sources-review [days] | probe <url> | pull [--force] | push-config <name> | push-proposal <file>",
       );
   }
-  if (remote && !["probe", "push-config", "push-proposal"].includes(command)) {
+  if (
+    remote &&
+    !["probe", "push-config", "push-proposal", "add-link"].includes(command)
+  ) {
     const pushed = await pushToVm();
     if (pushed.length)
       process.stderr.write(`pushed to the VM: ${pushed.join(", ")}\n`);

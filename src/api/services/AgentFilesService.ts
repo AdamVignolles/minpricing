@@ -157,6 +157,16 @@ export class AgentFilesService {
     return existsSync(file) ? readFileSync(file, "utf8") : undefined;
   }
 
+  /** Accepted writes of one kind since `since` (rate limits). */
+  async countSince(kind: "link", since: Date): Promise<number> {
+    return (
+      await this.writes.findMany({
+        where: { createdAt: { gte: since.toISOString() }, kind: { eq: kind } },
+        limit: 500,
+      })
+    ).length;
+  }
+
   /** Configs, proposals and schedules written since `since` (agent health). */
   async decisionsSince(since: Date) {
     const rows = await this.writes.findMany({
@@ -185,7 +195,7 @@ export class AgentFilesService {
 
   async audit(row: {
     agent: string;
-    kind: "config" | "report" | "proposal" | "data" | "schedule";
+    kind: "config" | "report" | "proposal" | "data" | "schedule" | "link";
     target: string;
     reason?: string;
     summary?: string;
