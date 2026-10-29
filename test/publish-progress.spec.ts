@@ -219,6 +219,35 @@ describe("publish progress", () => {
     expect(last?.trigger).toBe("schedule");
   });
 
+  test("a second publish while one runs is refused, progress untouched", async () => {
+    const { deal } = await makeDeal("Dead Cells");
+    const { deal: other } = await makeDeal("Hades II");
+    quietPreflight();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(
+      alepha.inject(DealabsPublisherService),
+      "publish",
+    ).mockImplementation(async () => {
+      await progress.begin("form-link");
+      await gate;
+      return { dealabsUrl: "https://www.dealabs.com/bons-plans/dc-2" };
+    });
+    const publisher = alepha.inject(AutoPublishService);
+    const first = publisher.publishDeal(deal.id);
+    await vi.waitFor(async () =>
+      expect((await progress.get()).current?.dealId).toBe(deal.id),
+    );
+    await expect(publisher.publishDeal(other.id)).rejects.toMatchObject({
+      status: 409,
+    });
+    expect((await progress.get()).current?.dealId).toBe(deal.id);
+    release();
+    await expect(first).resolves.toMatchObject({ status: "posted" });
+  });
+
   test("a live duplicate stops before any attempt is counted", async () => {
     const { deal } = await makeDeal("Hollow Knight");
     vi.spyOn(
