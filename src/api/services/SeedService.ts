@@ -1,12 +1,15 @@
 import { $hook, $inject } from "alepha";
+import { $logger } from "alepha/logger";
 import { $repository, sql } from "alepha/orm";
 
 import { categoryEntity } from "../entities/Category.ts";
 import { dealEntity } from "../entities/Deal.ts";
 import { merchantEntity } from "../entities/Merchant.ts";
 import { sourceEntity } from "../entities/Source.ts";
+import { trackedProductEntity } from "../entities/TrackedProduct.ts";
 import { CategorizationService } from "./CategorizationService.ts";
 import { DEFAULT_MERCHANT_BY_SOURCE } from "./DealTypes.ts";
+import { WatchedLinkService } from "./WatchedLinkService.ts";
 
 /**
  * Seeds the sources this MVP ships with, plus a couple of common
@@ -19,11 +22,16 @@ export class SeedService {
   protected merchants = $repository(merchantEntity);
   protected deals = $repository(dealEntity);
   protected categorization = $inject(CategorizationService);
+  protected trackedProducts = $repository(trackedProductEntity);
+  protected watchedLinks = $inject(WatchedLinkService);
+  protected log = $logger();
 
   onReady = $hook({
     on: "ready",
     handler: async () => {
       await this.seedSources();
+      await this.retireManualSources();
+      await this.migrateTrackedProducts();
       await this.seedCategories();
       await this.seedMerchants();
       await this.backfillDealMetadata();
@@ -32,11 +40,6 @@ export class SeedService {
 
   protected async seedSources() {
     const defaults = [
-      {
-        id: "manual",
-        name: "Saisie manuelle",
-        type: "manual" as const,
-      },
       { id: "steam", name: "Steam", type: "api" as const },
       {
         id: "amazon",
@@ -141,6 +144,62 @@ export class SeedService {
       const existing = await this.sources.findById(source.id);
       if (!existing) {
         await this.sources.create(source);
+      }
+    }
+  }
+
+  /**
+   * Manual price entry is gone (products are added by link, see
+   * `WatchedLink`): its `manual` and `manual-link` sources go too —
+   * removed, or switched off when deals still point at them.
+   */
+  protected async retireManualSources() {
+    for (const id of ["manual", "manual-link"]) {
+      const source = await this.sources.findById(id);
+      if (!source) continue;
+      const deals = await this.deals.findMany({
+        where: { sourceId: { eq: id } },
+        limit: 1,
+      });
+      try {
+        if (deals.length > 0) throw new Error("still has deals");
+        await this.sources.deleteById(id);
+      } catch {
+        if (source.enabled) {
+          await this.sources.updateById(id, { enabled: false });
+        }
+      }
+    }
+  }
+
+  /**
+   * Tracked products whose page is in a supported shop become watched
+   * links (and stop being tracked); the others stay listed in the console
+   * for the owner to decide. Runs once per product: a migrated product is
+   * disabled.
+   */
+  protected async migrateTrackedProducts() {
+    const products = await this.trackedProducts.findMany({
+      where: { enabled: { eq: true } },
+    });
+    for (const product of products) {
+      try {
+        const added = await this.watchedLinks.add(
+          product.url,
+          "migration (produit suivi)",
+        );
+        if (added.ok) {
+          await this.trackedProducts.updateById(product.id, {
+            enabled: false,
+          });
+          this.log.info(
+            `Tracked product "${product.title}" is now a watched link`,
+          );
+        }
+      } catch (error) {
+        this.log.warn(`Could not migrate tracked product ${product.id}`, {
+          error,
+        });
       }
     }
   }

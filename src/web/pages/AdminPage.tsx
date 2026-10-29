@@ -1,5 +1,6 @@
 import {
   Accordion,
+  Alert,
   Anchor,
   Badge,
   Box,
@@ -7,32 +8,21 @@ import {
   Code,
   Grid,
   Group,
-  Modal,
-  NumberInput,
   Paper,
   Progress,
   SegmentedControl,
-  Select,
   SimpleGrid,
   Stack,
   Table,
   Tabs,
   Text,
-  TextInput,
   ThemeIcon,
   Title,
   Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useClient } from "alepha/react";
-import {
-  type FC,
-  type FormEvent,
-  type ReactNode,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { type FC, type ReactNode, useEffect, useState } from "react";
 
 import type { AdminController } from "../../api/controllers/AdminController.ts";
 import type { ProductsController } from "../../api/controllers/ProductsController.ts";
@@ -50,7 +40,6 @@ import { useNow } from "../components/ui/useNow.ts";
 import type {
   CollectionRun,
   CollectionRunLogEntry,
-  RefItem,
   TrackedProduct,
 } from "../types.ts";
 
@@ -89,7 +78,6 @@ export interface AdminPageProps {
   stats: AdminStats;
   products: TrackedProduct[];
   runs: CollectionRun[];
-  sources: RefItem[];
   tab?: string;
 }
 
@@ -278,7 +266,6 @@ const AdminPage: FC<AdminPageProps> = ({
   stats: initialStats,
   products: initialProducts,
   runs: initialRuns,
-  sources: sourceRefs,
   tab: initialTab,
 }) => {
   const admin = useClient<AdminController>();
@@ -364,8 +351,8 @@ const AdminPage: FC<AdminPageProps> = ({
             Administration
           </Title>
           <Text fz="sm" c="dimmed">
-            Les sources qui alimentent DealRadar, leurs collectes et les
-            produits que vous suivez à la main.
+            Les sources qui alimentent DealRadar, leurs collectes et les liens
+            de produits que vous avez ajoutés.
           </Text>
         </Stack>
         <Button
@@ -405,15 +392,6 @@ const AdminPage: FC<AdminPageProps> = ({
               </Badge>
             ) : null}
           </Tabs.Tab>
-          <Tabs.Tab
-            value="products"
-            leftSection={<Icon name="package" size={14} />}
-          >
-            Produits suivis
-            <Badge size="xs" variant="light" ml={6}>
-              {products.length}
-            </Badge>
-          </Tabs.Tab>
           <Tabs.Tab value="links" leftSection={<Icon name="link" size={14} />}>
             Liens ajoutés
           </Tabs.Tab>
@@ -437,19 +415,12 @@ const AdminPage: FC<AdminPageProps> = ({
           <SourcesTab sources={stats.sources} now={now} />
         </Tabs.Panel>
 
-        <Tabs.Panel value="products">
-          <ProductsTab
+        <Tabs.Panel value="links">
+          <LegacyProducts
             products={products}
             setProducts={setProducts}
-            sourceRefs={sourceRefs}
-            onPriceSaved={async () =>
-              setStats((await admin.stats({})) as AdminStats)
-            }
             client={productsClient}
           />
-        </Tabs.Panel>
-
-        <Tabs.Panel value="links">
           <AddedLinksList />
         </Tabs.Panel>
 
@@ -995,361 +966,75 @@ const Detail: FC<{ label: string; value: ReactNode }> = ({ label, value }) => (
   </Stack>
 );
 
-// ── Produits suivis ─────────────────────────────────────────────────────
+// ── Anciens produits suivis ─────────────────────────────────────────────
 
-const EMPTY_FORM = {
-  sourceId: "manual",
-  title: "",
-  url: "",
-  manualPrice: "",
-  steamAppId: "",
-  idealoUrl: "",
-};
-
-const ProductsTab: FC<{
+/**
+ * Tracked products left over from manual entry: their shop can't be read
+ * by link, so they were not migrated (see `SeedService`). Listed so the
+ * owner can remove them; nothing collects them any more.
+ */
+const LegacyProducts: FC<{
   products: TrackedProduct[];
   setProducts: (products: TrackedProduct[]) => void;
-  sourceRefs: RefItem[];
-  onPriceSaved: () => Promise<void>;
   client: ReturnType<typeof useClient<ProductsController>>;
-}> = ({ products, setProducts, sourceRefs, onPriceSaved, client }) => {
-  const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [search, setSearch] = useState("");
-
-  const sourceOptions = useMemo(
-    () =>
-      sourceRefs.map((source) => ({
-        value: source.id,
-        label: source.name ?? source.id,
-      })),
-    [sourceRefs],
-  );
-  const shown = products.filter((product) =>
-    `${product.title} ${product.sourceId}`
-      .toLowerCase()
-      .includes(search.trim().toLowerCase()),
-  );
-
-  const addProduct = async (event: FormEvent) => {
-    event.preventDefault();
+}> = ({ products, setProducts, client }) => {
+  const left = products.filter((product) => product.enabled);
+  if (left.length === 0) return null;
+  const remove = async (id: string) => {
     try {
-      const created = await client.create({
-        body: {
-          sourceId: form.sourceId,
-          title: form.title,
-          url: form.url,
-          manualPrice: form.manualPrice ? Number(form.manualPrice) : undefined,
-          steamAppId: form.steamAppId ? Number(form.steamAppId) : undefined,
-          idealoUrl: form.idealoUrl || undefined,
-        },
-      });
-      setProducts([...products, created as TrackedProduct]);
-      setForm(EMPTY_FORM);
-      setAdding(false);
-      notifications.show({
-        message: "Produit ajouté au suivi",
-        color: "teal",
-        icon: <Icon name="check" size={16} />,
-      });
+      await client.deleteProduct({ params: { id } });
+      setProducts(products.filter((product) => product.id !== id));
     } catch {
-      notifications.show({
-        title: "Ajout impossible",
-        message: "Vérifiez l'URL et la source choisie.",
-        color: "red",
-      });
+      notifications.show({ color: "red", message: "Suppression impossible" });
     }
   };
-
-  const updateManualPrice = async (id: string, value: string) => {
-    if (!value) return;
-    const updated = await client.updateManualPrice({
-      params: { id },
-      body: { manualPrice: Number(value) },
-    });
-    setProducts(
-      products.map((product) =>
-        product.id === id ? (updated as TrackedProduct) : product,
-      ),
-    );
-    await onPriceSaved();
-    notifications.show({
-      message: "Prix enregistré, collecte relancée pour cette source",
-      color: "teal",
-    });
-  };
-
-  const updateIdealoUrl = async (id: string, value: string) => {
-    const updated = await client.updateIdealoUrl({
-      params: { id },
-      body: { idealoUrl: value || undefined },
-    });
-    setProducts(
-      products.map((product) =>
-        product.id === id ? (updated as TrackedProduct) : product,
-      ),
-    );
-    notifications.show({
-      message: "Référence Idealo enregistrée",
-      color: "teal",
-    });
-  };
-
   return (
-    <Stack gap="md">
-      <Group justify="space-between" wrap="wrap" gap="sm">
-        <Text fz="sm" c="dimmed" maw={560}>
-          Des produits surveillés un par un, en plus des offres découvertes
-          automatiquement : leur prix est suivi dans la durée, même quand aucune
-          promotion ne les affiche.
+    <Alert
+      color="orange"
+      variant="light"
+      mb="lg"
+      icon={<Icon name="alert" size={16} />}
+      title={`${left.length} ancien${left.length > 1 ? "s" : ""} produit${left.length > 1 ? "s" : ""} suivi${left.length > 1 ? "s" : ""} à la main`}
+    >
+      <Stack gap="xs">
+        <Text fz="sm">
+          La saisie manuelle des prix n'existe plus. Ces liens ne viennent pas
+          d'une boutique lisible (Amazon.fr, Cdiscount, AliExpress, Steam) : ils
+          ne sont plus suivis. Retirez-les, ou collez un lien de boutique
+          acceptée dans « Ajouter un lien ».
         </Text>
-        <Group gap="sm">
-          {products.length > 6 ? (
-            <TextInput
-              size="xs"
-              placeholder="Rechercher…"
-              leftSection={<Icon name="search" size={14} />}
-              value={search}
-              onChange={(event) => setSearch(event.currentTarget.value)}
-            />
-          ) : null}
-          <Button
-            size="xs"
-            leftSection={<Icon name="package" size={14} />}
-            onClick={() => setAdding(true)}
+        {left.map((product) => (
+          <Group
+            key={product.id}
+            justify="space-between"
+            wrap="nowrap"
+            gap="sm"
           >
-            Ajouter un produit
-          </Button>
-        </Group>
-      </Group>
-
-      {products.length === 0 ? (
-        <EmptyState
-          icon="package"
-          title="Aucun produit suivi"
-          description="Ajoutez l'URL d'un produit pour suivre son prix, même s'il n'apparaît dans aucune offre."
-        />
-      ) : (
-        <Paper p={0} style={{ overflow: "hidden" }}>
-          <Table.ScrollContainer minWidth={640}>
-            <Table verticalSpacing="sm" highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Produit</Table.Th>
-                  <Table.Th>Source</Table.Th>
-                  <Table.Th w={170}>Prix relevé (manuel)</Table.Th>
-                  <Table.Th w={260}>Référence Idealo</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {shown.map((product) => (
-                  <Table.Tr key={product.id}>
-                    <Table.Td>
-                      <Anchor
-                        href={product.url}
-                        target="_blank"
-                        rel="noopener noreferrer nofollow"
-                        fz="sm"
-                        fw={600}
-                        c="var(--mantine-color-text)"
-                        lineClamp={1}
-                        maw={320}
-                      >
-                        {product.title}
-                      </Anchor>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge variant="default" size="sm">
-                        {product.sourceId}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {product.sourceId === "manual" ? (
-                        <ManualPriceField
-                          defaultValue={product.manualPrice}
-                          onSubmit={(value) =>
-                            void updateManualPrice(product.id, value)
-                          }
-                        />
-                      ) : (
-                        <Text fz="xs" c="dimmed">
-                          relevé automatiquement
-                        </Text>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      <IdealoUrlField
-                        defaultValue={product.idealoUrl}
-                        referencePrice={product.idealoReferencePrice}
-                        onSubmit={(value) =>
-                          void updateIdealoUrl(product.id, value)
-                        }
-                      />
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
-        </Paper>
-      )}
-
-      <Modal
-        opened={adding}
-        onClose={() => setAdding(false)}
-        title="Suivre un produit"
-        centered
-        size="lg"
-      >
-        <form onSubmit={addProduct}>
-          <Stack gap="sm">
-            <TextInput
-              label="Nom du produit"
-              placeholder="ex. Lenovo IdeaPad Slim 3 16 Go / 512 Go"
-              required
-              value={form.title}
-              onChange={(event) =>
-                setForm({ ...form, title: event.currentTarget.value })
-              }
-            />
-            <TextInput
-              label="Adresse de la page produit"
-              required
-              type="url"
-              placeholder="https://…"
-              value={form.url}
-              onChange={(event) =>
-                setForm({ ...form, url: event.currentTarget.value })
-              }
-            />
-            <Select
-              label="Source"
-              description="Qui relève le prix : vous (manuel), Steam par son API, ou la boutique."
-              data={sourceOptions}
-              searchable
-              allowDeselect={false}
-              value={form.sourceId}
-              onChange={(value) =>
-                setForm({ ...form, sourceId: value ?? "manual" })
-              }
-            />
-            {form.sourceId === "manual" ? (
-              <NumberInput
-                label="Prix relevé"
-                suffix=" €"
-                min={0}
-                decimalScale={2}
-                value={form.manualPrice}
-                onChange={(value) =>
-                  setForm({ ...form, manualPrice: String(value ?? "") })
-                }
-              />
-            ) : null}
-            {form.sourceId === "steam" ? (
-              <NumberInput
-                label="App ID Steam"
-                description="Le nombre dans l'adresse store.steampowered.com/app/…"
-                min={0}
-                value={form.steamAppId}
-                onChange={(value) =>
-                  setForm({ ...form, steamAppId: String(value ?? "") })
-                }
-              />
-            ) : null}
-            <TextInput
-              label="Page Idealo (optionnel)"
-              description="Donne un prix de référence du marché au score."
-              type="url"
-              placeholder="https://www.idealo.fr/prix/…"
-              value={form.idealoUrl}
-              onChange={(event) =>
-                setForm({ ...form, idealoUrl: event.currentTarget.value })
-              }
-            />
-            <Group justify="flex-end" mt="sm">
-              <Button variant="default" onClick={() => setAdding(false)}>
-                Annuler
-              </Button>
-              <Button type="submit">Ajouter au suivi</Button>
-            </Group>
-          </Stack>
-        </form>
-      </Modal>
-    </Stack>
-  );
-};
-
-/**
- * Price entry that only commits on blur or Enter.
- *
- * Saving on every keystroke would re-run the collector for the source on
- * each digit typed — the one action on this page with a real cost.
- */
-const ManualPriceField: FC<{
-  defaultValue?: number;
-  onSubmit: (value: string) => void;
-}> = ({ defaultValue, onSubmit }) => {
-  const [value, setValue] = useState(
-    defaultValue === undefined ? "" : String(defaultValue),
-  );
-
-  return (
-    <NumberInput
-      size="xs"
-      suffix=" €"
-      min={0}
-      decimalScale={2}
-      placeholder="—"
-      value={value}
-      onChange={(next) => setValue(String(next ?? ""))}
-      onBlur={() => value !== String(defaultValue ?? "") && onSubmit(value)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          onSubmit(value);
-        }
-      }}
-      aria-label="Prix relevé manuellement"
-    />
-  );
-};
-
-/**
- * Idealo page URL entry that only commits on blur or Enter, same rationale
- * as {@link ManualPriceField}. Shows the last cached reference price (if
- * any) as a hint — the fetch itself only happens on the next collection
- * run, not from this form.
- */
-const IdealoUrlField: FC<{
-  defaultValue?: string;
-  referencePrice?: number;
-  onSubmit: (value: string) => void;
-}> = ({ defaultValue, referencePrice, onSubmit }) => {
-  const [value, setValue] = useState(defaultValue ?? "");
-
-  return (
-    <Stack gap={2}>
-      <TextInput
-        size="xs"
-        type="url"
-        placeholder="https://www.idealo.fr/prix/…"
-        value={value}
-        onChange={(event) => setValue(event.currentTarget.value)}
-        onBlur={() => value !== (defaultValue ?? "") && onSubmit(value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            onSubmit(value);
-          }
-        }}
-        aria-label="Page Idealo de référence"
-      />
-      {referencePrice !== undefined ? (
-        <Text c="dimmed" fz="xs">
-          Référence marché : {f.price(referencePrice)}
-        </Text>
-      ) : null}
-    </Stack>
+            <Stack gap={0} style={{ minWidth: 0 }}>
+              <Text fz="sm" lineClamp={1}>
+                {product.title}
+              </Text>
+              <Anchor
+                href={product.url}
+                target="_blank"
+                fz="xs"
+                style={{ wordBreak: "break-all" }}
+              >
+                {product.url}
+              </Anchor>
+            </Stack>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="red"
+              onClick={() => void remove(product.id)}
+            >
+              Retirer
+            </Button>
+          </Group>
+        ))}
+      </Stack>
+    </Alert>
   );
 };
 

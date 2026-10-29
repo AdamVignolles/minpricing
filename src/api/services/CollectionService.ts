@@ -20,7 +20,6 @@ import type {
   DiscoverContext,
   RawDeal,
 } from "../collectors/DealSource.ts";
-import { ManualCollector } from "../collectors/ManualCollector.ts";
 import { RelaunchCollector } from "../collectors/RelaunchCollector.ts";
 import { SteamCollector } from "../collectors/SteamCollector.ts";
 import {
@@ -296,7 +295,6 @@ export class CollectionService {
   );
 
   protected readonly collectorsById: Record<string, DealSource> = {
-    manual: new ManualCollector(),
     steam: new SteamCollector(),
     amazon: new AmazonCollector(
       splitUrls(this.env.AMAZON_DEALS_URL),
@@ -520,7 +518,7 @@ export class CollectionService {
       new Date(this.dateTime.nowISOString()).getTime() - EXPIRE_AFTER_MS,
     ).toISOString();
     for (const summary of summaries) {
-      if (summary.error || summary.sourceId === "manual") continue;
+      if (summary.error) continue;
       try {
         const expired = await this.deals.updateMany(
           {

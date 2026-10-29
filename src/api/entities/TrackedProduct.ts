@@ -2,11 +2,12 @@ import { z } from "alepha";
 import { $entity, db } from "alepha/orm";
 
 /**
- * A product you track. This is the unit of work for collectors:
- * - "manual" sources: you update `manualPrice` yourself when you notice a
- *   price on Amazon/Cdiscount (no reliable public API / scraping-safe access).
- * - "api" sources (e.g. Steam): `steamAppId` is used to fetch the price
- *   automatically from the official store API.
+ * A product tracked from before links (epic 16). Products are now added by
+ * pasting their link (`WatchedLink`); at startup, tracked products in a
+ * supported shop become watched links and are disabled here
+ * (`SeedService.migrateTrackedProducts`). Enabled rows still read by their
+ * source's `collect()`: Steam ones by `steamAppId`. `manualPrice` is no
+ * longer read (manual price entry was retired).
  */
 export const trackedProductEntity = $entity({
   name: "tracked_products",

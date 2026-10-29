@@ -29,6 +29,8 @@ import {
 } from "../src/api/controllers/LinksController.ts";
 import { agentWriteEntity } from "../src/api/entities/AgentWrite.ts";
 import { dealEntity } from "../src/api/entities/Deal.ts";
+import { sourceEntity } from "../src/api/entities/Source.ts";
+import { trackedProductEntity } from "../src/api/entities/TrackedProduct.ts";
 import { watchedLinkEntity } from "../src/api/entities/WatchedLink.ts";
 import { ApiModule } from "../src/api/index.ts";
 import { LinkCheckJob } from "../src/api/jobs/LinkCheckJob.ts";
@@ -39,6 +41,7 @@ import { ItadService } from "../src/api/services/ItadService.ts";
 import { linkVerdict } from "../src/api/services/linkVerdict.ts";
 import { MarketReferenceService } from "../src/api/services/MarketReferenceService.ts";
 import { PriceSeriesService } from "../src/api/services/PriceSeriesService.ts";
+import { SeedService } from "../src/api/services/SeedService.ts";
 import { WatchedLinkService } from "../src/api/services/WatchedLinkService.ts";
 
 const NOW = "2026-10-29T15:00:00.000Z";
@@ -88,6 +91,8 @@ class FakeAmazon implements DealSource {
 }
 
 class Fixtures {
+  products = $repository(trackedProductEntity);
+  sources = $repository(sourceEntity);
   deals = $repository(dealEntity);
   links = $repository(watchedLinkEntity);
   writes = $repository(agentWriteEntity);
@@ -468,6 +473,48 @@ describe("watched links", () => {
       addedBy: "admin",
       watched: true,
     });
+  });
+
+  test("manual entry retired: tracked products in a supported shop become links", async () => {
+    await fx.sources.create({
+      id: "manual",
+      name: "Saisie manuelle",
+      type: "manual",
+    });
+    await fx.sources.create({
+      id: "manual-link",
+      name: "Lien",
+      type: "manual",
+    });
+    const amazonProduct = await fx.products.create({
+      sourceId: "manual",
+      title: "Logitech Combo Touch",
+      url: "https://www.amazon.fr/dp/B0D42B3N3W?ref=cm_sw_r_cso_cp_apan_dp_0YR19J0",
+    } as any);
+    const fnacProduct = await fx.products.create({
+      sourceId: "manual",
+      title: "Livre Fnac",
+      url: "https://www.fnac.com/a1/livre",
+    } as any);
+
+    const seed = alepha.inject(SeedService) as any;
+    await seed.retireManualSources();
+    await seed.migrateTrackedProducts();
+    await seed.migrateTrackedProducts();
+
+    expect(await fx.sources.findById("manual")).toBeUndefined();
+    expect(await fx.sources.findById("manual-link")).toBeUndefined();
+    const [link, ...others] = await fx.links.findMany({});
+    expect(others).toEqual([]);
+    expect(link).toMatchObject({
+      sourceId: "amazon",
+      externalId: "B0D42B3N3W",
+      addedBy: "migration (produit suivi)",
+    });
+    expect((await fx.products.getById(amazonProduct.id)).enabled).toBe(false);
+    // Unsupported shop: left as is, for the owner to remove.
+    expect((await fx.products.getById(fnacProduct.id)).enabled).toBe(true);
+    expect((collection as any).collectorsById.manual).toBeUndefined();
   });
 
   test("the watch ends after its time, and with its expired deal", async () => {

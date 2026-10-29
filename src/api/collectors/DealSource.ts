@@ -158,8 +158,8 @@ export interface DiscoverContext {
  * offers. It must never throw for a single failing product: skip it and
  * let the caller log the failure, so one bad product never blocks the rest.
  *
- * `collect` covers products you tell it about (manual entry, or a specific
- * Steam appId). `discover` is for sources that can find deals on their own
+ * `collect` covers products you tell it about (a pasted link, read by its
+ * shop id, or a tracked Steam appId). `discover` is for sources that can find deals on their own
  * (Steam specials API, Amazon/Cdiscount "bons plans" pages) — no tracked
  * product needed, it returns whatever it found this run.
  */

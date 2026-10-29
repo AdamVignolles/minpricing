@@ -269,13 +269,12 @@ export class AppRouter {
     schema: { query: z.object({ tab: z.text().optional() }) },
     lazy: () => import("./pages/AdminPage.tsx"),
     loader: async ({ query }) => {
-      const [stats, products, runs, sources] = await Promise.all([
+      const [stats, products, runs] = await Promise.all([
         this.admin.stats({}),
         this.products.listProducts({ query: {} }),
         this.admin.runs({ query: { size: 40 } }),
-        this.sources.listSources({}),
       ]);
-      return { stats, products, runs, sources, tab: query.tab };
+      return { stats, products, runs, tab: query.tab };
     },
   });
 }

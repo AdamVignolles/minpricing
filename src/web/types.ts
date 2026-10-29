@@ -363,9 +363,8 @@ export interface TrackedProduct {
   sourceId: string;
   title: string;
   url: string;
-  manualPrice?: number;
   steamAppId?: number;
-  idealoUrl?: string;
-  idealoReferencePrice?: number;
   currency: string;
+  /** False once migrated to a watched link. */
+  enabled: boolean;
 }

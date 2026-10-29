@@ -1,26 +1,22 @@
 import { z } from "alepha";
-import { $inject } from "alepha";
 import { $repository } from "alepha/orm";
 import { $action } from "alepha/server";
 
 import { trackedProductEntity } from "../entities/TrackedProduct.ts";
 import { $adminSession } from "../services/AdminAuth.ts";
-import { CollectionService } from "../services/CollectionService.ts";
 
 const trackedProductResponseSchema = trackedProductEntity.schema;
 
 /**
- * Manage the catalog of products you watch. Adding a product does not
- * collect it immediately for "manual" sources (there is no price yet, see
- * `updateManualPrice`); for "api" sources (Steam) it is picked up on the
- * next cron run, or immediately via `POST /api/admin/collect`.
+ * Tracked products: the catalogue from before links (epic 16). Products
+ * are now added by pasting their link (`LinksController`); at startup,
+ * tracked products in a supported shop become watched links. What is left
+ * here is listed in the console's « Liens ajoutés » tab, to be removed.
  *
- * Admin-only: every action here is only ever called from the `/admin`
- * dashboard, so all three sit behind the same {@link $adminSession} gate.
+ * Admin-only, behind {@link $adminSession}.
  */
 export class ProductsController {
   protected products = $repository(trackedProductEntity);
-  protected collection = $inject(CollectionService);
 
   listProducts = $action({
     method: "GET",
@@ -36,51 +32,21 @@ export class ProductsController {
       }),
   });
 
-  create = $action({
-    method: "POST",
-    path: "/products",
-    use: [$adminSession()],
-    schema: {
-      body: z.object({
-        sourceId: z.text(),
-        title: z.text({ minLength: 1, maxLength: 300 }),
-        url: z.text(),
-        merchantId: z.text().optional(),
-        categoryId: z.text().optional(),
-        steamAppId: z.number().optional(),
-        manualPrice: z.number().min(0).optional(),
-        idealoUrl: z.text().optional(),
-        currency: z.text().optional(),
-      }),
-      response: trackedProductResponseSchema,
-    },
-    handler: async ({ body }) =>
-      this.products.create({
-        ...body,
-        currency: body.currency ?? "EUR",
-      }),
-  });
-
   /**
-   * Records the price you just observed on Amazon/Cdiscount, then
-   * immediately re-runs the "manual" collector so the deal/history/score
-   * reflect it without waiting for the next cron tick.
+   * Removes a tracked product the owner gave up on: an old manual entry
+   * whose shop can't be read by link (see `SeedService.migrateTrackedProducts`).
    */
-  updateManualPrice = $action({
-    method: "PATCH",
-    path: "/products/:id/price",
+  deleteProduct = $action({
+    method: "DELETE",
+    path: "/products/:id",
     use: [$adminSession()],
     schema: {
       params: z.object({ id: z.text() }),
-      body: z.object({ manualPrice: z.number().min(0) }),
-      response: trackedProductResponseSchema,
+      response: z.object({ ok: z.boolean() }),
     },
-    handler: async ({ params, body }) => {
-      const product = await this.products.updateById(params.id, {
-        manualPrice: body.manualPrice,
-      });
-      await this.collection.runOne(product.sourceId);
-      return product;
+    handler: async ({ params }) => {
+      await this.products.deleteById(params.id);
+      return { ok: true };
     },
   });
 
