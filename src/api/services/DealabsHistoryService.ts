@@ -81,6 +81,8 @@ export class DealabsHistoryService {
   async refreshStale(
     sourceId: string,
     onProgress?: (done: number, total: number) => void,
+    /** Only these deals (a link checked on its own), whatever their age. */
+    focus?: string[],
   ): Promise<string[]> {
     const candidates = await this.deals.findMany({
       where: {
@@ -89,11 +91,13 @@ export class DealabsHistoryService {
     });
     const now = Date.now();
     const stale = candidates
+      .filter((deal) => !focus || focus.includes(deal.id))
       .filter(
         (deal) =>
-          (deal.score ?? 0) >= MIN_SCORE_TO_CHECK &&
-          (!deal.dealabsCheckedAt ||
-            now - new Date(deal.dealabsCheckedAt).getTime() > CACHE_TTL_MS),
+          !!focus ||
+          ((deal.score ?? 0) >= MIN_SCORE_TO_CHECK &&
+            (!deal.dealabsCheckedAt ||
+              now - new Date(deal.dealabsCheckedAt).getTime() > CACHE_TTL_MS)),
       )
       // Closest to being published first: that's where history matters.
       .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))

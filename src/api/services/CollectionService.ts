@@ -70,6 +70,13 @@ import { predictDealHeat } from "./heatPrediction.ts";
 import { HotWatchlistService } from "./HotWatchlistService.ts";
 import { IdealoReferenceService } from "./IdealoReferenceService.ts";
 import { ItadService } from "./ItadService.ts";
+import { SUPPORTED_SHOPS } from "./linkResolver.ts";
+import {
+  initialLinkSteps,
+  type LinkStep,
+  type LinkStepId,
+} from "./linkSteps.ts";
+import { type LinkVerdict, linkVerdict } from "./linkVerdict.ts";
 import { MarketReferenceService } from "./MarketReferenceService.ts";
 import { PriceSeriesService } from "./PriceSeriesService.ts";
 import { PricingService } from "./PricingService.ts";
@@ -80,6 +87,7 @@ import {
   ScoringService,
   type SourceReliability,
 } from "./ScoringService.ts";
+import { type WatchedLink, WatchedLinkService } from "./WatchedLinkService.ts";
 
 /** Sources that open many browser pages: started first in a run. */
 const HEAVY_SOURCES = [
@@ -115,6 +123,11 @@ export function fitTitle(title: string, max = TITLE_MAX): string {
 
 /** Progress-sidebar id of the publishing step that ends a run. */
 const AUTO_PUBLISH_STEP = "dealabs-publish";
+
+/** What `upsertDeal` did with one offer. */
+export type UpsertOutcome =
+  | { result: "created" | "updated"; dealId: string }
+  | { result: "rejected"; reason: string };
 
 export interface CollectionSummary {
   sourceId: string;
@@ -170,6 +183,7 @@ export class CollectionService {
   protected amazonWatch = $inject(AmazonWatchService);
   protected progress = $inject(CollectionProgressService);
   protected autoPublish = $inject(AutoPublishService);
+  protected watchedLinks = $inject(WatchedLinkService);
 
   /**
    * How long a deal's seller/review details are reused before the
@@ -518,6 +532,7 @@ export class CollectionService {
           },
           { status: "expired" },
         );
+        await this.watchedLinks.endForExpiredDeals(expired.map(String));
         if (expired.length > 0) {
           this.progress.note(
             `${expired.length} deal(s) plus listés depuis 48 h : expirés`,
@@ -626,18 +641,37 @@ export class CollectionService {
         and: [{ sourceId: { eq: source.id } }, { enabled: { eq: true } }],
       },
     });
+    // Pasted links of this shop: read by id, like tracked products.
+    const links = await this.watchedLinks.active(source.id);
 
     try {
       const context = await this.discoverContext(source.id);
       const step = (label: string, done?: number, total?: number) =>
         this.progress.step(source.id, label, done, total);
-      const rawDeals: RawDeal[] = [];
+      const found: RawDeal[] = [];
       if (collector.collect) {
-        rawDeals.push(...(await collector.collect(products, context)));
+        found.push(
+          ...(await collector.collect(
+            [
+              ...products,
+              ...links.map((link) => this.watchedLinks.toRef(link)),
+            ],
+            context,
+          )),
+        );
       }
       if (collector.discover) {
-        rawDeals.push(...(await collector.discover(context)));
+        found.push(...(await collector.discover(context)));
       }
+      // A linked product also found on a listing is one offer: the
+      // link's read (its own product page) comes first and wins.
+      const seen = new Set<string>();
+      const rawDeals = found.filter((deal) => {
+        if (seen.has(deal.externalId)) return false;
+        seen.add(deal.externalId);
+        return true;
+      });
+      const outcomes = new Map<string, UpsertOutcome>();
 
       let created = 0;
       const createdIds: string[] = [];
@@ -658,6 +692,7 @@ export class CollectionService {
             source.type,
             rawDeal,
           );
+          outcomes.set(rawDeal.externalId, outcome);
           if (outcome.result === "rejected") {
             rejected++;
             // Group by kind of reason ("vendeur mal noté", not the rating).
@@ -706,6 +741,15 @@ export class CollectionService {
       for (const [index, dealId] of [...checked].entries()) {
         step("Mise à jour des notes", index + 1, checked.size);
         await this.rescore(dealId, source.type);
+      }
+      for (const link of links) {
+        await this.recordLinkVerdict(
+          link,
+          outcomes.get(link.externalId),
+          source.type,
+        ).catch((error: unknown) =>
+          this.log.warn(`Could not record link ${link.id}`, { error }),
+        );
       }
 
       // New deals the console actually shows (score ≥ 40 after the
@@ -815,7 +859,7 @@ export class CollectionService {
   protected async rescore(
     dealId: string,
     sourceType: SourceReliability,
-  ): Promise<void> {
+  ): Promise<ReturnType<ScoringService["evaluate"]>> {
     const deal = await this.deals.getById(dealId);
     const stats = await this.pricing.getStats(
       deal.id,
@@ -829,6 +873,214 @@ export class CollectionService {
       hotChance: heat.chance,
       hotReasons: JSON.stringify(heat.reasons),
     });
+    return evaluation;
+  }
+
+  /** One link check at a time per shop (its browser budget). */
+  protected linkChecks = new Map<string, Promise<unknown>>();
+
+  /**
+   * Reads one pasted link now, through exactly what a run of its shop
+   * does for it — `collect()`, `upsertDeal` (quality gate), market
+   * comparison, Dealabs history, rescoring — reporting each step on the
+   * link, and stores the verdict. Queued per shop; never throws.
+   */
+  async checkLink(linkId: string): Promise<WatchedLink> {
+    const link = await this.watchedLinks.get(linkId);
+    const previous = this.linkChecks.get(link.sourceId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => this.runLinkCheck(link))
+      .catch(async (error: unknown) => {
+        this.log.warn(`Link check ${link.id} failed`, { error });
+        return this.watchedLinks.record(link.id, {
+          status: "failed",
+          verdict:
+            `Vérification interrompue : ${error instanceof Error ? error.message : String(error)}`.slice(
+              0,
+              500,
+            ),
+        });
+      });
+    this.linkChecks.set(link.sourceId, run);
+    return run;
+  }
+
+  protected async runLinkCheck(link: WatchedLink): Promise<WatchedLink> {
+    const steps = initialLinkSteps();
+    const set = async (
+      id: LinkStepId,
+      status: LinkStep["status"],
+      detail?: string,
+    ) => {
+      const step = steps.find((entry) => entry.id === id);
+      if (step) {
+        step.status = status;
+        if (detail !== undefined) step.detail = detail;
+      }
+      await this.watchedLinks.setSteps(link.id, steps);
+    };
+    const skipRest = async () => {
+      for (const step of steps) {
+        if (step.status === "pending") step.status = "skipped";
+      }
+      await this.watchedLinks.setSteps(link.id, steps);
+    };
+    const finish = async (verdict: LinkVerdict) => {
+      await skipRest();
+      await set(
+        "verdict",
+        verdict.status === "failed" ? "failed" : "done",
+        verdict.verdict,
+      );
+      return this.watchedLinks.get(link.id);
+    };
+
+    const source = await this.sources.findOne({
+      where: { id: { eq: link.sourceId } },
+    });
+    const collector = this.collectorsById[link.sourceId];
+    if (!source || !collector?.collect) {
+      await set(
+        "page",
+        "failed",
+        "Boutique indisponible dans cette installation.",
+      );
+      const verdict: LinkVerdict = {
+        status: "failed",
+        verdict: `La source ${link.sourceId} n'est pas disponible ici.`,
+      };
+      await this.watchedLinks.record(link.id, verdict);
+      return finish(verdict);
+    }
+
+    await set("page", "running");
+    const context = await this.discoverContext(source.id);
+    const raw = (
+      await collector
+        .collect([this.watchedLinks.toRef(link)], context)
+        .catch(() => [] as RawDeal[])
+    ).find((deal) => deal.externalId === link.externalId);
+    if (!raw) {
+      await set(
+        "page",
+        "failed",
+        "Page bloquée, produit retiré ou mise en page changée.",
+      );
+      return finish(await this.recordLinkVerdict(link, undefined, source.type));
+    }
+    await set(
+      "page",
+      "done",
+      `${raw.title.slice(0, 120)} : ${raw.price.toLocaleString("fr-FR")} €`,
+    );
+
+    const outcome = await this.upsertDeal(source.id, source.type, raw);
+    if (outcome.result !== "rejected") {
+      const focus = [outcome.dealId];
+      await set("market", "running");
+      await this.marketReference
+        .refreshStale(
+          source.id,
+          () => this.cloudflareBrowserBinding(),
+          undefined,
+          focus,
+        )
+        .catch(() => [] as string[]);
+      const compared = await this.deals.getById(outcome.dealId);
+      await set(
+        "market",
+        compared.marketPrice ? "done" : "skipped",
+        compared.marketPrice
+          ? `${compared.marketPriceSource ?? "Autre boutique"} : ${compared.marketPrice.toLocaleString("fr-FR")} €`
+          : "Pas de comparaison pour ce produit.",
+      );
+      await set("dealabs", "running");
+      await this.dealabsHistory
+        .refreshStale(source.id, undefined, focus)
+        .catch(() => [] as string[]);
+      await this.itad
+        .refreshStale(source.id, undefined, focus)
+        .catch(() => [] as string[]);
+      const withHistory = await this.deals.getById(outcome.dealId);
+      let pastDeals = 0;
+      try {
+        pastDeals = withHistory.dealabsHistory
+          ? (JSON.parse(withHistory.dealabsHistory) as unknown[]).length
+          : 0;
+      } catch {
+        // Unreadable history: counted as none.
+      }
+      await set(
+        "dealabs",
+        withHistory.dealabsCheckedAt ? "done" : "skipped",
+        withHistory.dealabsCheckedAt
+          ? `${pastDeals} bon(s) plan(s) passé(s) trouvé(s) pour ce produit.`
+          : "Dealabs n'a pas répondu : vérifié au prochain passage.",
+      );
+    }
+    await set("score", "running");
+    const verdict = await this.recordLinkVerdict(link, outcome, source.type);
+    const deal =
+      outcome.result === "rejected"
+        ? undefined
+        : await this.deals.getById(outcome.dealId);
+    await set(
+      "score",
+      outcome.result === "rejected" ? "failed" : "done",
+      outcome.result === "rejected"
+        ? `Contrôle qualité : ${outcome.reason}`
+        : `${deal?.score ?? 0}/100`,
+    );
+    return finish(verdict);
+  }
+
+  /**
+   * Stores, on a watched link, what this read of it concluded — the same
+   * checks as every collected offer, said in French (see `linkVerdict`).
+   */
+  protected async recordLinkVerdict(
+    link: WatchedLink,
+    outcome: UpsertOutcome | undefined,
+    sourceType: SourceReliability,
+  ): Promise<LinkVerdict> {
+    const shop =
+      SUPPORTED_SHOPS.find((entry) => entry.sourceId === link.sourceId)
+        ?.label ?? link.sourceId;
+    if (!outcome) {
+      const verdict = linkVerdict({ read: false, shop });
+      // A failed read keeps the previous verdict's deal; only the status
+      // and text change.
+      await this.watchedLinks.record(link.id, verdict);
+      return verdict;
+    }
+    if (outcome.result === "rejected") {
+      const existing = await this.deals.findOne({
+        where: {
+          and: [
+            { sourceId: { eq: link.sourceId } },
+            { externalId: { eq: link.externalId } },
+          ],
+        },
+      });
+      const verdict = linkVerdict({
+        read: true,
+        rejected: outcome.reason,
+        shop,
+      });
+      await this.watchedLinks.record(link.id, verdict, existing?.id);
+      return verdict;
+    }
+    const evaluation = await this.rescore(outcome.dealId, sourceType);
+    const deal = await this.deals.getById(outcome.dealId);
+    const verdict = linkVerdict({
+      read: true,
+      deal,
+      warnings: evaluation.warnings,
+      shop,
+    });
+    await this.watchedLinks.record(link.id, verdict, deal.id);
+    return verdict;
   }
 
   /** Collapses whitespace and fits an error message in `Source.lastError`. */
@@ -898,10 +1150,7 @@ export class CollectionService {
     sourceId: string,
     sourceType: SourceReliability,
     rawDeal: RawDeal,
-  ): Promise<
-    | { result: "created" | "updated"; dealId: string }
-    | { result: "rejected"; reason: string }
-  > {
+  ): Promise<UpsertOutcome> {
     const now = this.dateTime.nowISOString();
     rawDeal = { ...rawDeal, title: fitTitle(rawDeal.title) };
 

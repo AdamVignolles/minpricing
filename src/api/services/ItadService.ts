@@ -54,6 +54,8 @@ export class ItadService {
   async refreshStale(
     sourceId: string,
     onProgress?: (done: number, total: number) => void,
+    /** Only these deals (a link checked on its own), whatever their age. */
+    focus?: string[],
   ): Promise<string[]> {
     if (!this.enabled || sourceId !== "steam") {
       return [];
@@ -65,8 +67,10 @@ export class ItadService {
     });
     const now = Date.now();
     const stale = candidates
+      .filter((deal) => !focus || focus.includes(deal.id))
       .filter(
         (deal) =>
+          !!focus ||
           !deal.itadCheckedAt ||
           now - new Date(deal.itadCheckedAt).getTime() > CACHE_TTL_MS,
       )

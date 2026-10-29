@@ -129,6 +129,8 @@ export class MarketReferenceService {
     sourceId: string,
     getCloudflareBinding?: () => CloudflareBrowserBinding | undefined,
     onProgress?: (done: number, total: number) => void,
+    /** Only these deals (a link checked on its own), whatever their age. */
+    focus?: string[],
   ): Promise<string[]> {
     // Amazon deals would be looked up against Amazon itself.
     if (sourceId === "amazon") {
@@ -141,6 +143,7 @@ export class MarketReferenceService {
         modelQuery,
         getCloudflareBinding,
         onProgress,
+        focus,
       );
     }
     // Joybuy has no EAN either, and its struck price is a "prix
@@ -151,6 +154,7 @@ export class MarketReferenceService {
         joybuyModelQuery,
         getCloudflareBinding,
         onProgress,
+        focus,
       );
     }
     // Mobile plans: compared with the other operators' plans, no browser.
@@ -165,13 +169,15 @@ export class MarketReferenceService {
     });
     const now = Date.now();
     const stale = candidates
+      .filter((deal) => !focus || focus.includes(deal.id))
       .filter(
         (deal) =>
           !!deal.ean &&
           // An EAN lookup returns *new* product prices: comparing a
           // refurbished phone to them would make every refurb look great.
           (!deal.condition || deal.condition === "new") &&
-          (!deal.marketCheckedAt ||
+          (!!focus ||
+            !deal.marketCheckedAt ||
             now - new Date(deal.marketCheckedAt).getTime() > CACHE_TTL_MS),
       )
       .slice(0, LOOKUPS_PER_RUN);
@@ -265,6 +271,7 @@ export class MarketReferenceService {
     queryFor: (title: string) => string | undefined,
     getCloudflareBinding?: () => CloudflareBrowserBinding | undefined,
     onProgress?: (done: number, total: number) => void,
+    focus?: string[],
   ): Promise<string[]> {
     const now = Date.now();
     const stale = (
@@ -274,10 +281,12 @@ export class MarketReferenceService {
         },
       })
     )
+      .filter((deal) => !focus || focus.includes(deal.id))
       .filter(
         (deal) =>
           !!queryFor(deal.title) &&
-          (!deal.marketCheckedAt ||
+          (!!focus ||
+            !deal.marketCheckedAt ||
             now - new Date(deal.marketCheckedAt).getTime() > CACHE_TTL_MS),
       )
       .slice(0, CROSS_SEARCHES_PER_RUN);
