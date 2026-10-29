@@ -52,7 +52,7 @@ const loreCall = async (method, path, body) => {
       authorization: `Bearer ${loreKey}`,
       "content-type": "application/json",
     },
-    body: body ? JSON.stringify(body) : undefined,
+    ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${text}`);
