@@ -1,4 +1,4 @@
-import type { DealSource, RawDeal, TrackedProduct } from "./DealSource.ts";
+import type { DealSource, ProductRef, RawDeal } from "./DealSource.ts";
 
 /**
  * Collector for sources without a safe automated access (Amazon, Cdiscount):
@@ -10,7 +10,7 @@ export class ManualCollector implements DealSource {
   id = "manual";
   name = "Manual entry";
 
-  async collect(products: TrackedProduct[]): Promise<RawDeal[]> {
+  async collect(products: ProductRef[]): Promise<RawDeal[]> {
     const deals: RawDeal[] = [];
 
     for (const product of products) {
@@ -22,10 +22,10 @@ export class ManualCollector implements DealSource {
       deals.push({
         externalId: product.id,
         productId: product.id,
-        title: product.title,
+        title: product.title ?? product.url,
         url: product.url,
         price: product.manualPrice,
-        currency: product.currency,
+        currency: product.currency ?? "EUR",
         availability: "unknown",
         merchantId: product.merchantId,
         categoryId: product.categoryId,

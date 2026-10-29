@@ -7,6 +7,7 @@ import {
   interleave,
   mapWithConcurrency,
   parsePriceFr,
+  readProductPages,
   scrollAndCollect,
   withBrowser,
   withPage,
@@ -15,6 +16,7 @@ import type {
   DealDetails,
   DealSource,
   DiscoverContext,
+  ProductRef,
   RawDeal,
 } from "./DealSource.ts";
 
@@ -49,6 +51,61 @@ export class AliExpressCollector implements DealSource {
     protected getCloudflareBinding?: () => CloudflareBrowserBinding | undefined,
   ) {
     this.urls = Array.isArray(urls) ? urls : [urls];
+  }
+
+  /**
+   * Watched links (see `WatchedLink`): each item page, read with the same
+   * {@link fetchDetails} as collected deals, plus its title and image.
+   */
+  async collect(
+    products: ProductRef[],
+    context?: DiscoverContext,
+  ): Promise<RawDeal[]> {
+    const items = products.filter((product) =>
+      /^\d{6,}$/.test(product.externalId ?? ""),
+    );
+    return readProductPages(
+      items,
+      async (page, product): Promise<RawDeal | undefined> => {
+        const id = product.externalId as string;
+        const url = `https://fr.aliexpress.com/item/${id}.html`;
+        const { price, originalPrice, ...signals } = await this.fetchDetails(
+          page,
+          url,
+        );
+        if (price === undefined) return undefined;
+        const identity = await page.evaluate(() => ({
+          title:
+            (
+              document.querySelector(
+                '[data-pl="product-title"], h1',
+              ) as HTMLElement | null
+            )?.innerText?.trim() || undefined,
+          imageUrl:
+            document
+              .querySelector('meta[property="og:image"]')
+              ?.getAttribute("content") ?? undefined,
+        }));
+        return {
+          externalId: id,
+          productId: product.id,
+          title: identity.title || product.title || `AliExpress ${id}`,
+          url,
+          imageUrl: identity.imageUrl,
+          price,
+          listPrice: originalPrice,
+          currency: "EUR",
+          availability: "in_stock",
+          merchantId: "aliexpress",
+          details: signals,
+        };
+      },
+      {
+        concurrency: PAGE_CONCURRENCY,
+        cloudflareBinding: this.getCloudflareBinding?.(),
+        context,
+      },
+    );
   }
 
   async discover(context?: DiscoverContext): Promise<RawDeal[]> {

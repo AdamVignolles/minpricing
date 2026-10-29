@@ -2,8 +2,8 @@ import type {
   DealDetails,
   DealSource,
   DiscoverContext,
+  ProductRef,
   RawDeal,
-  TrackedProduct,
 } from "./DealSource.ts";
 
 /**
@@ -26,6 +26,7 @@ interface SteamAppDetailsResponse {
     data?: {
       name: string;
       short_description?: string;
+      header_image?: string;
       price_overview?: {
         currency: string;
         initial: number;
@@ -399,25 +400,29 @@ export class SteamCollector implements DealSource {
   name = "Steam";
 
   async collect(
-    products: TrackedProduct[],
+    products: ProductRef[],
     context?: DiscoverContext,
   ): Promise<RawDeal[]> {
     return withSteamDetails(await this.collectPrices(products), context);
   }
 
-  protected async collectPrices(
-    products: TrackedProduct[],
-  ): Promise<RawDeal[]> {
+  protected async collectPrices(products: ProductRef[]): Promise<RawDeal[]> {
     const deals: RawDeal[] = [];
 
     for (const product of products) {
-      if (!product.steamAppId) {
+      // A tracked product's appid, or a watched link's (its externalId).
+      const appId =
+        product.steamAppId ??
+        (/^\d+$/.test(product.externalId ?? "")
+          ? Number(product.externalId)
+          : undefined);
+      if (!appId) {
         continue;
       }
 
       try {
         const response = await fetch(
-          `https://store.steampowered.com/api/appdetails?appids=${product.steamAppId}&cc=fr&filters=basic,price_overview`,
+          `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=fr&filters=basic,price_overview`,
           { headers: STEAM_REQUEST_HEADERS },
         );
 
@@ -426,7 +431,7 @@ export class SteamCollector implements DealSource {
         }
 
         const json = (await response.json()) as SteamAppDetailsResponse;
-        const entry = json[String(product.steamAppId)];
+        const entry = json[String(appId)];
         const priceOverview = entry?.data?.price_overview;
 
         if (!entry?.success || !priceOverview) {
@@ -435,10 +440,11 @@ export class SteamCollector implements DealSource {
         }
 
         deals.push({
-          externalId: String(product.steamAppId),
+          externalId: String(appId),
           productId: product.id,
-          title: product.title,
+          title: entry.data?.name || product.title || `Steam ${appId}`,
           url: product.url,
+          imageUrl: entry.data?.header_image,
           price: priceOverview.final / 100,
           listPrice:
             priceOverview.initial > priceOverview.final

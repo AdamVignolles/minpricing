@@ -1,3 +1,5 @@
+import type { DiscoverContext, RawDeal } from "./DealSource.ts";
+
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -360,4 +362,43 @@ export async function scrollAndCollect<T>(
   }
 
   return Array.from(byKey.values());
+}
+
+/**
+ * Reads explicit products (watched links) one product page each, a few at
+ * a time, in one browser — the by-id counterpart of a collector's
+ * `discover()`. No browser is launched when there is nothing to read, and
+ * a product whose page fails is skipped, never thrown.
+ */
+export async function readProductPages<T>(
+  products: T[],
+  read: (page: DealsPage, product: T) => Promise<RawDeal | undefined>,
+  options: {
+    concurrency: number;
+    cloudflareBinding?: CloudflareBrowserBinding;
+    context?: DiscoverContext;
+  },
+): Promise<RawDeal[]> {
+  if (products.length === 0) return [];
+  let done = 0;
+  return withBrowser(async (browser) => {
+    const found = await mapWithConcurrency(
+      products,
+      options.concurrency,
+      async (product) => {
+        try {
+          return await withPage(browser, (page) => read(page, product));
+        } catch {
+          return undefined;
+        } finally {
+          options.context?.progress?.(
+            "Liens ajoutés (fiches produits)",
+            ++done,
+            products.length,
+          );
+        }
+      },
+    );
+    return found.filter((deal): deal is RawDeal => !!deal);
+  }, options.cloudflareBinding);
 }

@@ -3,6 +3,7 @@ import {
   interleave,
   mapWithConcurrency,
   parsePriceFr,
+  readProductPages,
   scrollAndCollect,
   withBrowser,
   withPage,
@@ -16,11 +17,13 @@ import {
   parseCondition,
   parseOffersSummary,
   parseSellerLine,
+  parseSplitEuro,
 } from "./cdiscountOffers.ts";
 import type {
   DealDetails,
   DealSource,
   DiscoverContext,
+  ProductRef,
   RawDeal,
 } from "./DealSource.ts";
 
@@ -64,6 +67,59 @@ export class CdiscountCollector implements DealSource {
   setTargets(homeUrls: string[], limit: number): void {
     this.homeUrls = homeUrls;
     this.limit = limit;
+  }
+
+  /**
+   * Watched links (see `WatchedLink`): each product page, read with the
+   * same {@link fetchDetails} as collected deals plus the page's own
+   * price, title and image (no listing card to take them from).
+   */
+  async collect(
+    products: ProductRef[],
+    context?: DiscoverContext,
+  ): Promise<RawDeal[]> {
+    const pages = products.filter((product) =>
+      /^https:\/\/www\.cdiscount\.com\/.+\.html$/.test(
+        product.externalId ?? "",
+      ),
+    );
+    return readProductPages(
+      pages,
+      async (page, product): Promise<RawDeal | undefined> => {
+        const url = product.externalId as string;
+        const fetched = await this.fetchDetails(page, url);
+        const price = fetched?.price;
+        if (!fetched || price === undefined) return undefined;
+        const struck =
+          fetched.comparisonPrice !== undefined &&
+          fetched.comparisonPrice > price
+            ? fetched.comparisonPrice
+            : undefined;
+        return {
+          externalId: url,
+          productId: product.id,
+          title: fetched.title || product.title || url,
+          url,
+          imageUrl: fetched.imageUrl,
+          price,
+          listPrice: struck,
+          description: fetched.description,
+          currency: "EUR",
+          availability: "in_stock",
+          merchantId: "cdiscount",
+          categoryHint: cdiscountCategoryHint(url),
+          details: {
+            ...fetched.details,
+            listPriceKind: struck !== undefined ? "rrp" : undefined,
+          },
+        };
+      },
+      {
+        concurrency: PAGE_CONCURRENCY,
+        cloudflareBinding: this.getCloudflareBinding?.(),
+        context,
+      },
+    );
   }
 
   async discover(context?: DiscoverContext): Promise<RawDeal[]> {
@@ -296,7 +352,8 @@ export class CdiscountCollector implements DealSource {
   protected async fetchDetails(
     page: DealsPage,
     url: string,
-    price: number,
+    /** The listing card's price; read from the page itself when absent. */
+    listingPrice?: number,
   ): Promise<CdiscountProductPage | undefined> {
     const response = await page.goto(url, {
       waitUntil: "domcontentloaded",
@@ -320,6 +377,8 @@ export class CdiscountCollector implements DealSource {
       let rating: number | undefined;
       let reviewCount: number | undefined;
       let condition: string | undefined;
+      let offerPrice: number | undefined;
+      let image: string | undefined;
       for (const script of Array.from(
         document.querySelectorAll('script[type="application/ld+json"]'),
       )) {
@@ -333,6 +392,13 @@ export class CdiscountCollector implements DealSource {
             json.aggregateRating?.reviewCount ??
             reviewCount;
           condition = json.offers?.itemCondition ?? condition;
+          const offer = Array.isArray(json.offers)
+            ? json.offers[0]
+            : json.offers;
+          const ldPrice = Number(offer?.price ?? offer?.lowPrice);
+          if (Number.isFinite(ldPrice) && ldPrice > 0) offerPrice = ldPrice;
+          image =
+            (Array.isArray(json.image) ? json.image[0] : json.image) ?? image;
         } catch {
           // Not valid JSON-LD: try the next script tag.
         }
@@ -392,6 +458,15 @@ export class CdiscountCollector implements DealSource {
           reviewCount !== undefined ? Number(reviewCount) : undefined,
         condition,
         title: document.querySelector('[data-e2e="title"]')?.textContent ?? "",
+        offerPrice,
+        priceText:
+          document.querySelector('[data-e2e="price"]')?.textContent ?? "",
+        imageUrl:
+          image ??
+          document
+            .querySelector('meta[property="og:image"]')
+            ?.getAttribute("content") ??
+          undefined,
         sellerText: sellerEl?.textContent ?? "",
         offersText:
           document.querySelector('[data-e2e="offers-list"]')?.textContent ?? "",
@@ -427,6 +502,18 @@ export class CdiscountCollector implements DealSource {
       offersCount: summary.offersCount,
     };
     const comparisonPrice = parseComparisonPrice(onPage.priceAreaText);
+    // The price shown on the page (split "279 €99"); JSON-LD's offer as
+    // the fallback.
+    const pagePrice =
+      parseSplitEuro(onPage.priceText) ??
+      onPage.offerPrice ??
+      (onPage.priceText ? parsePriceFr(onPage.priceText) : undefined);
+    const price = listingPrice ?? pagePrice;
+    const facts = {
+      title: onPage.title.replace(/\s+/g, " ").trim(),
+      imageUrl: onPage.imageUrl,
+      price,
+    };
     const specValue = (label: RegExp) =>
       onPage.specs.find(([name]) => label.test(name))?.[1];
     const description = buildCdiscountDescription({
@@ -438,7 +525,7 @@ export class CdiscountCollector implements DealSource {
 
     // Only one offer: nothing to compare against, and no layer to open.
     if (!summary.offersCount || summary.offersCount < 2) {
-      return { details, comparisonPrice, description };
+      return { details, comparisonPrice, description, ...facts };
     }
 
     const lines = await page.evaluate(
@@ -508,6 +595,7 @@ export class CdiscountCollector implements DealSource {
     } else if (
       layer.others.length === 0 &&
       summary.fromPrice !== undefined &&
+      price !== undefined &&
       summary.fromPrice < price
     ) {
       // The layer didn't render, but the summary alone proves a cheaper
@@ -516,7 +604,7 @@ export class CdiscountCollector implements DealSource {
       details.bestOtherOfferPrice = summary.fromPrice;
     }
 
-    return { details, comparisonPrice, description };
+    return { details, comparisonPrice, description, ...facts };
   }
 }
 
@@ -540,4 +628,8 @@ interface CdiscountProductPage {
   comparisonPrice?: number;
   /** Built from the product sheet, see `buildCdiscountDescription`. */
   description?: string;
+  title: string;
+  imageUrl?: string;
+  /** The listing price when given, else the page's own. */
+  price?: number;
 }

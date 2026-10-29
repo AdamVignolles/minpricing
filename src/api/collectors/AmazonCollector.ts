@@ -4,6 +4,7 @@ import {
   interleave,
   mapWithConcurrency,
   parsePriceFr,
+  readProductPages,
   scrollAndCollect,
   withBrowser,
   withPage,
@@ -12,6 +13,7 @@ import type {
   DealDetails,
   DealSource,
   DiscoverContext,
+  ProductRef,
   RawDeal,
 } from "./DealSource.ts";
 
@@ -105,6 +107,50 @@ export class AmazonCollector implements DealSource {
   setTargets(dealsUrls: string[], limit: number): void {
     this.dealsUrls = dealsUrls;
     this.limit = limit;
+  }
+
+  /**
+   * Watched links (see `WatchedLink`): each ASIN's product page, read
+   * with the same {@link fetchPrice} as collected deals.
+   */
+  async collect(
+    products: ProductRef[],
+    context?: DiscoverContext,
+  ): Promise<RawDeal[]> {
+    const asins = products.filter((product) =>
+      /^[A-Z0-9]{10}$/.test(product.externalId ?? ""),
+    );
+    return readProductPages(
+      asins,
+      async (page, product): Promise<RawDeal | undefined> => {
+        const asin = product.externalId as string;
+        const url = `https://www.amazon.fr/dp/${asin}`;
+        const priced = await this.fetchPrice(page, url);
+        if (!priced) return undefined;
+        return {
+          externalId: asin,
+          productId: product.id,
+          title: priced.title || product.title || asin,
+          url,
+          imageUrl: upscaleAmazonImage(priced.imageUrl),
+          price: priced.price,
+          listPrice: priced.listPrice,
+          description: priced.description,
+          currency: "EUR",
+          availability: "in_stock",
+          merchantId: "amazon",
+          categoryHint: priced.breadcrumb
+            ? `amazon-crumb:${priced.breadcrumb}`
+            : undefined,
+          details: priced.details,
+        };
+      },
+      {
+        concurrency: PAGE_CONCURRENCY,
+        cloudflareBinding: this.getCloudflareBinding?.(),
+        context,
+      },
+    );
   }
 
   async discover(context?: DiscoverContext): Promise<RawDeal[]> {
@@ -301,6 +347,9 @@ export class AmazonCollector implements DealSource {
         details?: DealDetails;
         /** Root of the product's breadcrumb, e.g. "Cuisine et Maison". */
         breadcrumb?: string;
+        /** `#productTitle`, for a product not found on a listing card. */
+        title?: string;
+        imageUrl?: string;
       }
     | undefined
   > {
@@ -360,13 +409,21 @@ export class AmazonCollector implements DealSource {
         listPrice !== undefined && listPrice > price ? listPrice : undefined,
       description: bullets,
       details: parseAmazonSignals(pageText, price),
-      breadcrumb: await page.evaluate(
-        () =>
-          document
-            .querySelector("#wayfinding-breadcrumbs_feature_div li a")
-            ?.textContent?.replace(/\s+/g, " ")
-            .trim() || undefined,
-      ),
+      title: pageText.title,
+      ...(await page.evaluate(() => {
+        const image = document.querySelector(
+          "#landingImage, #imgBlkFront",
+        ) as HTMLImageElement | null;
+        return {
+          breadcrumb:
+            document
+              .querySelector("#wayfinding-breadcrumbs_feature_div li a")
+              ?.textContent?.replace(/\s+/g, " ")
+              .trim() || undefined,
+          imageUrl:
+            image?.getAttribute("data-old-hires") || image?.src || undefined,
+        };
+      })),
     };
   }
 

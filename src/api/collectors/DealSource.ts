@@ -5,6 +5,24 @@ import type { trackedProductEntity } from "../entities/TrackedProduct.ts";
 export type TrackedProduct = Infer<typeof trackedProductEntity.schema>;
 
 /**
+ * One product a collector is asked to read by id rather than find: a
+ * tracked product (Steam appid) or a watched link (`WatchedLink`, the
+ * link's shop id as {@link externalId}). {@link TrackedProduct} fits it.
+ */
+export interface ProductRef {
+  id: string;
+  url: string;
+  title?: string;
+  /** The shop's id for the product (ASIN, item id, appid, page URL). */
+  externalId?: string;
+  merchantId?: string;
+  categoryId?: string;
+  steamAppId?: number;
+  manualPrice?: number;
+  currency?: string;
+}
+
+/**
  * A raw offer, as returned by a collector, before normalization.
  */
 export interface RawDeal {
@@ -149,7 +167,7 @@ export interface DealSource {
   id: string;
   name: string;
   collect?(
-    products: TrackedProduct[],
+    products: ProductRef[],
     context?: DiscoverContext,
   ): Promise<RawDeal[]>;
   discover?(context?: DiscoverContext): Promise<RawDeal[]>;
