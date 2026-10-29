@@ -105,6 +105,8 @@ export interface Deal {
     temperature: number;
     mine: boolean;
   };
+  /** Added by pasting its link (see `WatchedLink`). */
+  addedByLink?: { linkId: string; addedBy: string; watched: boolean };
 }
 
 /** Live state of a collection run (see `/admin/collect/progress`). */

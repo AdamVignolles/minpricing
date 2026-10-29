@@ -23,6 +23,7 @@ import { useRouter } from "alepha/react/router";
 import { type FC, useEffect, useMemo, useState } from "react";
 
 import DealGrid from "../components/deals/DealGrid.tsx";
+import AddLinkField from "../components/links/AddLinkField.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
 import { EmptyState } from "../components/ui/States.tsx";
@@ -301,6 +302,8 @@ const DealsListPage: FC<DealsPageProps> = ({
           </Text>
         </Stack>
       </Group>
+
+      <AddLinkField />
 
       <Group gap="sm" wrap="nowrap">
         <TextInput

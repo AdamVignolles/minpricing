@@ -10,6 +10,7 @@ import type { AuthController } from "../api/controllers/AuthController.ts";
 import type { CatalogController } from "../api/controllers/CatalogController.ts";
 import type { DealsController } from "../api/controllers/DealsController.ts";
 import type { DraftsController } from "../api/controllers/DraftsController.ts";
+import type { LinksController } from "../api/controllers/LinksController.ts";
 import type { ProductsController } from "../api/controllers/ProductsController.ts";
 import type { PublishScheduleController } from "../api/controllers/PublishScheduleController.ts";
 import type { SourcesController } from "../api/controllers/SourcesController.ts";
@@ -55,6 +56,7 @@ export class AppRouter {
   auth = $client<AuthController>();
   agents = $client<AgentsController>();
   publishSchedule = $client<PublishScheduleController>();
+  links = $client<LinksController>();
 
   head = $head({
     title: "DealRadar",

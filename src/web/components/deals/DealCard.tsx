@@ -185,9 +185,14 @@ const DealCard: FC<DealCardProps> = ({
 
         <Group gap="xs" justify="space-between" wrap="nowrap">
           <Group gap={5} wrap="nowrap" style={{ minWidth: 0 }}>
-            <Icon name="store" size={13} aria-hidden />
+            <Icon
+              name={deal.addedByLink ? "link" : "store"}
+              size={13}
+              aria-label={deal.addedByLink ? "Ajouté par lien" : undefined}
+            />
             <Text fz="xs" c="dimmed" truncate>
               {merchant}
+              {deal.addedByLink ? " · ajouté par lien" : ""}
               {deal.sellerName && !deal.soldByMerchant
                 ? ` · vendu par ${deal.sellerName}`
                 : ""}

@@ -40,6 +40,7 @@ import {
   COLLECTION_FINISHED_EVENT,
   COLLECTION_STARTED_EVENT,
 } from "../components/layout/CollectionProgressAside.tsx";
+import AddedLinksList from "../components/links/AddedLinksList.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon, { type IconName } from "../components/ui/Icon.tsx";
 import Section from "../components/ui/Section.tsx";
@@ -413,6 +414,9 @@ const AdminPage: FC<AdminPageProps> = ({
               {products.length}
             </Badge>
           </Tabs.Tab>
+          <Tabs.Tab value="links" leftSection={<Icon name="link" size={14} />}>
+            Liens ajoutés
+          </Tabs.Tab>
           <Tabs.Tab value="logs" leftSection={<Icon name="clock" size={14} />}>
             Journaux
           </Tabs.Tab>
@@ -443,6 +447,10 @@ const AdminPage: FC<AdminPageProps> = ({
             }
             client={productsClient}
           />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="links">
+          <AddedLinksList />
         </Tabs.Panel>
 
         <Tabs.Panel value="logs">

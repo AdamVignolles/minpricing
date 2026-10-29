@@ -23,6 +23,7 @@ import SystemStatus, {
   type DealabsSession,
 } from "../components/dashboard/SystemStatus.tsx";
 import DealCard from "../components/deals/DealCard.tsx";
+import AddLinkField from "../components/links/AddLinkField.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
 import Section from "../components/ui/Section.tsx";
@@ -138,6 +139,8 @@ const DashboardPage: FC<DashboardPageProps> = ({
           </Button>
         </Group>
       </Group>
+
+      <AddLinkField />
 
       {pause ? <PublishPauseSwitch pause={pause} onChange={setPause} /> : null}
 
