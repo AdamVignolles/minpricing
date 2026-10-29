@@ -13,10 +13,11 @@ import {
 import { notifications } from "@mantine/notifications";
 import { useClient } from "alepha/react";
 import { Link } from "alepha/react/router";
-import { type FC, useState } from "react";
+import { type FC, useEffect, useRef, useState } from "react";
 
 import type { PublishScheduleController } from "../../../api/controllers/PublishScheduleController.ts";
 import type { ScheduleEntry } from "../../../api/services/PublishScheduleService.ts";
+import PublishSteps, { usePublishProgress } from "../deals/PublishSteps.tsx";
 import Icon from "../ui/Icon.tsx";
 import Section from "../ui/Section.tsx";
 
@@ -62,6 +63,18 @@ const TonightPlan: FC<{ initial: TonightPlanData }> = ({ initial }) => {
         query: { date: plan.date },
       })) as TonightPlanData,
     );
+  // A running time shows its publication phase by phase; when it ends,
+  // the plan is reloaded to show its result.
+  const progress = usePublishProgress(
+    plan.entries.some((e) => e.status === "running"),
+  );
+  const runningId = progress.current?.runId;
+  const wasRunning = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (wasRunning.current && !runningId) void reload();
+    wasRunning.current = runningId;
+  }, [runningId]);
+
   const act = async (run: () => Promise<unknown>, done: string) => {
     try {
       await run();
@@ -156,6 +169,26 @@ const TonightPlan: FC<{ initial: TonightPlanData }> = ({ initial }) => {
                               : "—"}
                           </Text>
                         )}
+                        {entry.status === "running" && progress.current ? (
+                          <>
+                            {entry.dealId !== progress.current.dealId ? (
+                              <Anchor
+                                component={Link}
+                                href={`/deals/${progress.current.dealId}`}
+                                fz="sm"
+                                lineClamp={1}
+                              >
+                                {progress.current.title}
+                              </Anchor>
+                            ) : null}
+                            <PublishSteps run={progress.current} compact />
+                          </>
+                        ) : null}
+                        {entry.status === "failed" &&
+                        progress.last?.dealId === entry.dealId &&
+                        progress.last?.status === "failed" ? (
+                          <PublishSteps run={progress.last} compact />
+                        ) : null}
                         {entry.dealabsUrl ? (
                           <Anchor
                             href={entry.dealabsUrl}

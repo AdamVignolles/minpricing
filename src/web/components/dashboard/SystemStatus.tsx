@@ -4,6 +4,8 @@ import type { FC } from "react";
 
 import type { RoutineHealth } from "../../../api/services/agentHealth.ts";
 import type { ScheduleEntry } from "../../../api/services/PublishScheduleService.ts";
+import { currentPublishStep } from "../../../api/services/publishSteps.ts";
+import { usePublishProgress } from "../deals/PublishSteps.tsx";
 import * as f from "../ui/format.ts";
 import Icon, { type IconName } from "../ui/Icon.tsx";
 import { useNow } from "../ui/useNow.ts";
@@ -107,6 +109,9 @@ const SystemStatus: FC<SystemStatusProps> = ({
   tonight,
 }) => {
   const now = useNow();
+  // Polled only while a publication runs (button, schedule or collection).
+  const publishing = usePublishProgress(false).current;
+  const publishingStep = publishing && currentPublishStep(publishing);
 
   const sessionCard = !session ? (
     <Card
@@ -247,18 +252,33 @@ const SystemStatus: FC<SystemStatusProps> = ({
       <Card
         title="Publications ce soir"
         icon="flame"
-        tone={failed.length ? "warn" : real.length ? "ok" : "unknown"}
+        tone={
+          publishing
+            ? "info"
+            : failed.length
+              ? "warn"
+              : real.length
+                ? "ok"
+                : "unknown"
+        }
         state={
-          real.length
-            ? `${done.length}/${real.length} publiée${done.length > 1 ? "s" : ""}`
-            : "Rien de prévu"
+          publishing
+            ? "En cours"
+            : real.length
+              ? `${done.length}/${real.length} publiée${done.length > 1 ? "s" : ""}`
+              : "Rien de prévu"
         }
         lines={[
+          publishing
+            ? `${publishing.title} : ${publishingStep?.label ?? "démarrage"}${publishingStep?.needsHuman ? " (action requise dans l'écran distant)" : ""}`
+            : null,
           next ? `Prochaine à ${time(next.plannedAt)}` : null,
           failed.length ? `${failed.length} en échec` : null,
           real.length ? null : "La sélection du soir n'a pas encore planifié.",
         ]}
-        href="/agents?tab=activite"
+        href={
+          publishing ? `/deals/${publishing.dealId}` : "/agents?tab=activite"
+        }
       />
     );
   }
