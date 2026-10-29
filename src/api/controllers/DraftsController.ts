@@ -14,6 +14,7 @@ import { DealabsDraftService } from "../services/DealabsDraftService.ts";
 import { DealabsDuplicateError } from "../services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../services/DealabsSessionService.ts";
 import { DealPageCheckService } from "../services/DealPageCheckService.ts";
+import { PublishPauseService } from "../services/PublishPauseService.ts";
 import {
   PublishCancelledError,
   PublishProgressService,
@@ -71,6 +72,14 @@ const publishRunSchema = z.object({
   ),
 });
 
+const pauseSchema = z.object({
+  paused: z.boolean(),
+  since: z.text().optional(),
+  by: z.text().optional(),
+  until: z.text().optional(),
+  reason: z.text().optional(),
+});
+
 const screenSchema = z.object({
   active: z.boolean(),
   label: z.text().optional(),
@@ -89,6 +98,7 @@ export class DraftsController {
   protected screen = $inject(RemoteScreenService);
   protected deals = $repository(dealEntity);
   protected progress = $inject(PublishProgressService);
+  protected pause = $inject(PublishPauseService);
 
   /**
    * Dry run of the pre-publish check: opens the merchant page and says
@@ -138,9 +148,49 @@ export class DraftsController {
       response: z.object({
         current: publishRunSchema.optional(),
         last: publishRunSchema.optional(),
+        pause: pauseSchema,
       }),
     },
-    handler: () => this.progress.get(),
+    handler: async () => ({
+      ...(await this.progress.get()),
+      pause: this.pause.status(),
+    }),
+  });
+
+  /** Is automatic publishing paused (schedule and end of collection)? */
+  publishPause = $action({
+    method: "GET",
+    path: "/dealabs/publish/pause",
+    use: [$adminSession()],
+    schema: { response: pauseSchema },
+    handler: () => this.pause.status(),
+  });
+
+  /**
+   * Pauses or resumes automatic publishing. Admin session only: an agent
+   * can read the pause, never lift it. `until` resumes on its own.
+   */
+  setPublishPause = $action({
+    method: "PUT",
+    path: "/dealabs/publish/pause",
+    use: [$adminSession()],
+    schema: {
+      body: z.object({
+        paused: z.boolean(),
+        until: z.datetime().optional(),
+        reason: z.text({ maxLength: 200 }).optional(),
+      }),
+      response: pauseSchema,
+    },
+    handler: ({ body }) => {
+      if (body.paused && body.until && new Date(body.until) <= new Date()) {
+        throw new HttpError({
+          status: 422,
+          message: "La fin de la pause doit être dans le futur.",
+        });
+      }
+      return this.pause.set(body, "vous");
+    },
   });
 
   /**

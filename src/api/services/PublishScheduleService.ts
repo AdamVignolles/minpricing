@@ -20,6 +20,7 @@ import { DealabsDraftService } from "./DealabsDraftService.ts";
 import { DealabsDuplicateError } from "./DealabsPublisherService.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
 import { DealPageCheckService } from "./DealPageCheckService.ts";
+import { PublishPauseService } from "./PublishPauseService.ts";
 import {
   atParis,
   HHMM,
@@ -92,6 +93,7 @@ export interface PlanInput {
 export class PublishScheduleService {
   protected log = $logger();
   protected dateTime = $inject(DateTimeProvider);
+  protected pause = $inject(PublishPauseService);
   protected entries = $repository(publishScheduleEntity);
   protected deals = $repository(dealEntity);
   protected files = $inject(AgentFilesService);
@@ -163,7 +165,12 @@ export class PublishScheduleService {
       where: { date: { eq: day } },
       orderBy: { column: "plannedAt", direction: "asc" },
     });
-    return { date: day, entries, queue: this.readQueue(day) };
+    return {
+      date: day,
+      entries,
+      queue: this.readQueue(day),
+      pause: this.pause.status(),
+    };
   }
 
   /** Replaces today's planned entries with a new plan. */
@@ -433,6 +440,10 @@ export class PublishScheduleService {
         status: "skipped",
         note: "trop tard (le serveur était occupé ou arrêté à l'heure prévue)",
       });
+    }
+    // Paused by hand: the slot is skipped, not kept for later.
+    if (!entry.dryRun && this.pause.paused) {
+      return this.finish(entry, { status: "skipped", note: this.pause.note() });
     }
     const r = this.rules();
     const slot = parisTime(new Date(entry.plannedAt));

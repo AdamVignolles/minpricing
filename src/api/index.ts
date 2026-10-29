@@ -36,6 +36,7 @@ import { McpOAuthService } from "./services/McpOAuthService.ts";
 import { MyDealabsPostsService } from "./services/MyDealabsPostsService.ts";
 import { PriceSeriesService } from "./services/PriceSeriesService.ts";
 import { PricingService } from "./services/PricingService.ts";
+import { PublishPauseService } from "./services/PublishPauseService.ts";
 import { PublishProgressService } from "./services/PublishProgressService.ts";
 import { PublishScheduleService } from "./services/PublishScheduleService.ts";
 import { ScoringService } from "./services/ScoringService.ts";
@@ -74,6 +75,7 @@ export const ApiModule = $module({
     PublishScheduleService,
     CollectionProgressService,
     PublishProgressService,
+    PublishPauseService,
     AutoPublishService,
     PricingService,
     PriceSeriesService,

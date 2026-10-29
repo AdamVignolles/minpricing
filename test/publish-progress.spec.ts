@@ -26,6 +26,7 @@ import { DealabsHistoryService } from "../src/api/services/DealabsHistoryService
 import { DealabsPublisherService } from "../src/api/services/DealabsPublisherService.ts";
 import { DealPageCheckService } from "../src/api/services/DealPageCheckService.ts";
 import { PriceSeriesService } from "../src/api/services/PriceSeriesService.ts";
+import { PublishPauseService } from "../src/api/services/PublishPauseService.ts";
 import {
   PublishCancelledError,
   PublishProgressService,
@@ -374,5 +375,52 @@ describe("publish progress", () => {
       ok: false,
       message: "Aucune publication en cours.",
     });
+  });
+
+  test("pause: the button still publishes; only the admin changes it", async () => {
+    const pause = alepha.inject(PublishPauseService);
+    pause.set({ paused: true }, "vous");
+    const { deal } = await makeDeal("Gris");
+    quietPreflight();
+    vi.spyOn(
+      alepha.inject(DealabsPublisherService),
+      "publish",
+    ).mockResolvedValue({
+      dealabsUrl: "https://www.dealabs.com/bons-plans/gris-1",
+    });
+    const posted = await alepha
+      .inject(AutoPublishService)
+      .publishDeal(deal.id, "button");
+    expect(posted.status).toBe("posted");
+
+    const drafts = alepha.inject(DraftsController);
+    const agent = { authorization: `Bearer ${"p".repeat(64)}` };
+    expect(
+      (await drafts.publishPause.fetch({ headers: agent })).data.paused,
+    ).toBe(true);
+    expect(
+      (await drafts.publishProgress.fetch({ headers: agent })).data.pause
+        .paused,
+    ).toBe(true);
+    await expect(
+      drafts.setPublishPause.fetch({ headers: agent, body: { paused: false } }),
+    ).rejects.toMatchObject({ status: 401 });
+
+    const login = await alepha.inject(AuthController).login.fetch({
+      body: { username: "admin", password: "s3cret-admin-pass" },
+    });
+    const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
+    await expect(
+      drafts.setPublishPause.fetch({
+        headers: { cookie },
+        body: { paused: true, until: "2020-01-01T00:00:00.000Z" },
+      }),
+    ).rejects.toMatchObject({ status: 422 });
+    const resumed = await drafts.setPublishPause.fetch({
+      headers: { cookie },
+      body: { paused: false },
+    });
+    expect(resumed.data.paused).toBe(false);
+    expect(pause.paused).toBe(false);
   });
 });

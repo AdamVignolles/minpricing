@@ -10,6 +10,14 @@ const listResponse = z.object({
   date: z.text(),
   entries: z.array(publishScheduleEntity.schema),
   queue: z.array(z.record(z.text(), z.any())),
+  /** Automatic publishing paused by hand: due slots are skipped. */
+  pause: z.object({
+    paused: z.boolean(),
+    since: z.text().optional(),
+    by: z.text().optional(),
+    until: z.text().optional(),
+    reason: z.text().optional(),
+  }),
 });
 
 /**

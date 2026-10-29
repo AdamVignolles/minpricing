@@ -15,6 +15,7 @@ import { DealabsSessionService } from "./DealabsSessionService.ts";
 import { DealPageCheckService } from "./DealPageCheckService.ts";
 import { keepaChartForDeal } from "./keepa.ts";
 import { PriceSeriesService } from "./PriceSeriesService.ts";
+import { PublishPauseService } from "./PublishPauseService.ts";
 import {
   PublishCancelledError,
   PublishProgressService,
@@ -94,6 +95,7 @@ export class AutoPublishService {
   protected priceSeries = $inject(PriceSeriesService);
   protected pageCheck = $inject(DealPageCheckService);
   protected progress = $inject(PublishProgressService);
+  protected pause = $inject(PublishPauseService);
   protected env = $env(
     z.object({
       AUTO_PUBLISH: z.boolean().default(false),
@@ -305,6 +307,9 @@ export class AutoPublishService {
     const outcome: AutoPublishOutcome = { published: [], failed: [] };
     if (!this.enabled) {
       return { ...outcome, skipped: "désactivée (AUTO_PUBLISH=false)" };
+    }
+    if (this.pause.paused) {
+      return { ...outcome, skipped: this.pause.note() };
     }
     const session = this.session.status();
     if (!session.available) {

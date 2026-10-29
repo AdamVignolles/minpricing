@@ -27,6 +27,7 @@ import { DealabsDraftService } from "../src/api/services/DealabsDraftService.ts"
 import { DealabsDuplicateError } from "../src/api/services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../src/api/services/DealabsSessionService.ts";
 import { DealPageCheckService } from "../src/api/services/DealPageCheckService.ts";
+import { PublishPauseService } from "../src/api/services/PublishPauseService.ts";
 import {
   atParis,
   parisDay,
@@ -319,6 +320,34 @@ describe("publishing plan", () => {
     // One deal tried, no other one started, nothing in the ledger.
     expect(publish).toHaveBeenCalledTimes(1);
     expect(ledger()).toEqual([]);
+    publish.mockRestore();
+  });
+
+  test("paused: a due slot is skipped and the end-of-run batch too", async () => {
+    const pause = alepha.inject(PublishPauseService);
+    const publish = vi.spyOn(publisher, "publishDeal");
+    await call("PUT", "/agent/schedule", {
+      ranked: ranked(),
+      times: ["17:40"],
+      agent: "deals-select",
+    });
+    pause.set({ paused: true, reason: "test" }, "vous");
+    expect((await schedule.list()).pause.paused).toBe(true);
+    setNow("2026-10-28T16:41:00.000Z");
+    const [entry] = await schedule.runDue();
+    expect(entry.status).toBe("skipped");
+    expect(entry.note).toContain("en pause");
+    expect(entry.note).toContain("par vous");
+    expect(publish).not.toHaveBeenCalled();
+
+    vi.spyOn(publisher, "enabled", "get").mockReturnValue(true);
+    const batch = await publisher.publishBestDeals(WEDNESDAY_17H);
+    expect(batch.skipped).toContain("en pause");
+
+    // An end time in the past means the pause is over.
+    pause.set({ paused: true, until: "2026-10-28T16:00:00.000Z" }, "vous");
+    expect(pause.paused).toBe(false);
+    pause.set({ paused: false }, "vous");
     publish.mockRestore();
   });
 
