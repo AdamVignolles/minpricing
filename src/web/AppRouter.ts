@@ -113,15 +113,65 @@ export class AppRouter {
     name: "home",
     lazy: () => import("./pages/DashboardPage.tsx"),
     loader: async () => {
-      const [overview, highlights, merchants, publications] = await Promise.all(
-        [
-          this.stats.overview({}),
-          this.deals.highlights({ query: { size: 8 } }),
-          this.catalog.listMerchants({}),
-          this.stats.publications({}),
-        ],
+      // The status blocks are best-effort: one unreadable source (no
+      // browser for the session, health file missing) must not take the
+      // whole dashboard down, so each says "unknown" instead.
+      const [
+        overview,
+        highlights,
+        merchants,
+        publications,
+        toPublish,
+        session,
+        adminStats,
+        runs,
+        health,
+        tonight,
+      ] = await Promise.all([
+        this.stats.overview({}),
+        this.deals.highlights({ query: { size: 8 } }),
+        this.catalog.listMerchants({}),
+        this.stats.publications({}),
+        this.deals
+          .list({ query: { size: 12, status: "active", sortBy: "hot" } })
+          .catch(() => undefined),
+        this.drafts.dealabsSessionStatus({}).catch(() => undefined),
+        this.admin.stats({}).catch(() => undefined),
+        this.admin.runs({ query: { size: 10 } }).catch(() => undefined),
+        this.agents.agentsHealth({}).catch(() => undefined),
+        this.publishSchedule.publishPlan({ query: {} }).catch(() => undefined),
+      ]);
+      const lastRun = runs?.find(
+        (run) => run.status === "ok" || run.status === "error",
       );
-      return { overview, highlights, merchants, publications };
+      return {
+        overview,
+        highlights,
+        merchants,
+        publications,
+        toPublish: (toPublish?.content ?? [])
+          .filter((deal) => !deal.onDealabs)
+          .slice(0, 4),
+        session,
+        collection: adminStats
+          ? {
+              running: adminStats.running,
+              nextRunAt: adminStats.nextRunAt,
+              lastRun,
+              failingSources: adminStats.sources
+                .filter(
+                  (source) =>
+                    source.enabled &&
+                    source.lastErrorAt &&
+                    (!source.lastSuccessAt ||
+                      source.lastErrorAt > source.lastSuccessAt),
+                )
+                .map((source) => source.name),
+            }
+          : undefined,
+        routines: health?.routines,
+        tonight: tonight?.entries,
+      };
     },
   });
 

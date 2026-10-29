@@ -14,13 +14,19 @@ import {
 import { Link } from "alepha/react/router";
 import type { FC } from "react";
 
+import type { RoutineHealth } from "../../api/services/agentHealth.ts";
+import type { ScheduleEntry } from "../../api/services/PublishScheduleService.ts";
+import SystemStatus, {
+  type CollectionState,
+  type DealabsSession,
+} from "../components/dashboard/SystemStatus.tsx";
 import DealCard from "../components/deals/DealCard.tsx";
-import DealImage from "../components/deals/DealImage.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
 import Section from "../components/ui/Section.tsx";
 import { EmptyState } from "../components/ui/States.tsx";
 import StatTile from "../components/ui/StatTile.tsx";
+import { useNow } from "../components/ui/useNow.ts";
 import type {
   Deal,
   PublicationStats,
@@ -38,89 +44,28 @@ export interface DashboardPageProps {
   };
   merchants: RefItem[];
   publications: PublicationStats;
+  /** Best Dealabs potential, not on Dealabs yet. */
+  toPublish: Deal[];
+  session?: DealabsSession;
+  collection?: CollectionState;
+  routines?: RoutineHealth[];
+  tonight?: ScheduleEntry[];
 }
-
-/**
- * The deal the hero is built around.
- *
- * Shown large because the first screen has to prove the product is worth
- * scrolling: one real offer, priced and quantified, does that better than any
- * amount of copy.
- */
-const Featured: FC<{ deal: Deal; merchants: RefItem[] }> = ({
-  deal,
-  merchants,
-}) => {
-  const saving = f.savings(deal.currentPrice, deal.listPrice);
-  const merchant =
-    merchants.find((row) => row.id === deal.merchantId)?.name ??
-    f.titleize(deal.merchantId ?? deal.sourceId);
-
-  return (
-    <Paper
-      component={Link}
-      href={`/deals/${deal.id}`}
-      p="md"
-      className="lift"
-      style={{ display: "block", color: "inherit" }}
-    >
-      <Group align="stretch" wrap="nowrap" gap="md">
-        <Box w={130} style={{ flexShrink: 0 }}>
-          <DealImage
-            src={deal.imageUrl}
-            alt={deal.title}
-            ratio={1}
-            loading="eager"
-            fallbackLabel={merchant}
-          />
-        </Box>
-        <Stack gap={6} justify="center" style={{ minWidth: 0 }}>
-          <Group gap={6}>
-            <Badge size="sm" variant="light" color="gray">
-              Coup de cœur
-            </Badge>
-            {(deal.discountPercentage ?? 0) >= 1 ? (
-              <Badge size="sm" color="signal" variant="filled" className="tnum">
-                {f.discount(deal.discountPercentage as number)}
-              </Badge>
-            ) : null}
-          </Group>
-          <Text fw={600} fz="sm" lh={1.35} className="clamp-2">
-            {deal.title}
-          </Text>
-          <Group gap={8} align="baseline">
-            <Text fz="xl" fw={700} className="tnum">
-              {f.price(deal.currentPrice, deal.currency)}
-            </Text>
-            {deal.listPrice && deal.listPrice > deal.currentPrice ? (
-              <Text fz="sm" c="dimmed" td="line-through" className="tnum">
-                {f.price(deal.listPrice, deal.currency)}
-              </Text>
-            ) : null}
-          </Group>
-          {saving !== null ? (
-            <Text fz="sm" fw={600} c="signal.6" className="tnum">
-              Économisez {f.price(saving, deal.currency)} chez {merchant}
-            </Text>
-          ) : (
-            <Text fz="xs" c="dimmed">
-              Chez {merchant}
-            </Text>
-          )}
-        </Stack>
-      </Group>
-    </Paper>
-  );
-};
 
 const DashboardPage: FC<DashboardPageProps> = ({
   overview,
   highlights,
   merchants,
   publications,
+  toPublish,
+  session,
+  collection,
+  routines,
+  tonight,
 }) => {
   const { totals, dealsPerDay, categories } = overview;
   const hasDeals = totals.activeDeals > 0;
+  const now = useNow();
 
   // The chart needs one point per day with a real zero for quiet days;
   // the API already returns the series that way, so this is a pure relabel.
@@ -153,63 +98,66 @@ const DashboardPage: FC<DashboardPageProps> = ({
 
   return (
     <Stack gap="xl">
-      {/* Hero */}
-      <Paper
-        p={{ base: "md", sm: "xl" }}
-        radius="lg"
-        style={{
-          background:
-            "linear-gradient(135deg, var(--app-surface), var(--app-surface-muted))",
-        }}
-      >
-        <Grid gap="xl" align="center">
-          <Grid.Col span={{ base: 12, md: highlights.featured ? 7 : 12 }}>
-            <Stack gap="sm">
-              <Badge
-                variant="light"
-                color="gray"
-                leftSection={<Icon name="refresh" size={11} />}
-              >
-                Mis à jour en continu
-              </Badge>
-              <Title
-                order={1}
-                fz={{ base: "1.75rem", sm: "2.25rem" }}
-                lh={1.15}
-              >
-                Les meilleurs bons plans du moment
-              </Title>
-              <Text c="dimmed" maw={520}>
-                {totals.activeDeals} offres suivies en temps réel, avec leur
-                historique de prix et la réduction réelle face au prix de
-                référence du marchand.
-              </Text>
-              <Group gap="sm" mt="xs">
-                <Button
-                  component={Link}
-                  href="/deals?sortBy=discount"
-                  leftSection={<Icon name="tag" size={16} />}
-                >
-                  Parcourir les offres
-                </Button>
-                <Button
-                  component={Link}
-                  href="/stats"
-                  variant="default"
-                  leftSection={<Icon name="chart" size={16} />}
-                >
-                  Voir les statistiques
-                </Button>
-              </Group>
-            </Stack>
-          </Grid.Col>
-          {highlights.featured ? (
-            <Grid.Col span={{ base: 12, md: 5 }}>
-              <Featured deal={highlights.featured} merchants={merchants} />
-            </Grid.Col>
-          ) : null}
-        </Grid>
-      </Paper>
+      <Group justify="space-between" align="flex-end" gap="sm">
+        <Stack gap={2}>
+          <Title order={1}>Tableau de bord</Title>
+          <Text c="dimmed" fz="sm">
+            {now
+              ? `${new Date(now).toLocaleDateString("fr-FR", {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "long",
+                  timeZone: "Europe/Paris",
+                })} · `
+              : null}
+            {totals.activeDeals} offres suivies, {totals.newLast24h} nouvelles
+            en 24 h
+          </Text>
+        </Stack>
+        <Group gap="sm">
+          <Button
+            component={Link}
+            href="/deals?sortBy=hot"
+            leftSection={<Icon name="flame" size={16} />}
+          >
+            Potentiel Dealabs
+          </Button>
+          <Button
+            component={Link}
+            href="/agents"
+            variant="default"
+            leftSection={<Icon name="clock" size={16} />}
+          >
+            Agents
+          </Button>
+        </Group>
+      </Group>
+
+      <SystemStatus
+        session={session}
+        collection={collection}
+        routines={routines}
+        tonight={tonight}
+      />
+
+      {toPublish.length > 0 ? (
+        <Section
+          title="À publier en priorité"
+          description="Meilleure chance d'atteindre 100° sur Dealabs, et pas encore postés."
+          moreHref="/deals?sortBy=hot"
+        >
+          <SimpleGrid cols={{ base: 1, xs: 2, md: 4 }} spacing="md">
+            {toPublish.map((deal, index) => (
+              <DealCard
+                key={deal.id}
+                deal={deal}
+                merchants={merchants}
+                priority={index < 4}
+              />
+            ))}
+          </SimpleGrid>
+        </Section>
+      ) : null}
 
       {/* Headline figures. Four, not twelve: the rest lives on /stats. */}
       <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
