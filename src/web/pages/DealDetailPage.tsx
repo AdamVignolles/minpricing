@@ -27,11 +27,15 @@ import { type FC, useEffect, useMemo, useState } from "react";
 
 import type { DealsController } from "../../api/controllers/DealsController.ts";
 import type { DraftsController } from "../../api/controllers/DraftsController.ts";
+import type { PublishRun } from "../../api/services/publishSteps.ts";
 import DealabsConnection from "../components/deals/DealabsConnection.tsx";
 import DealAnalysis from "../components/deals/DealAnalysis.tsx";
 import DealImage from "../components/deals/DealImage.tsx";
 import KeepaChart from "../components/deals/KeepaChart.tsx";
 import PriceHistoryPanel from "../components/deals/PriceHistoryPanel.tsx";
+import PublishSteps, {
+  usePublishProgress,
+} from "../components/deals/PublishSteps.tsx";
 import RemoteScreen from "../components/deals/RemoteScreen.tsx";
 import StoreHistoryChart from "../components/deals/StoreHistoryChart.tsx";
 import * as f from "../components/ui/format.ts";
@@ -175,6 +179,24 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
   );
   const [verifying, setVerifying] = useState(false);
   const [autoPublishing, setAutoPublishing] = useState(false);
+  // Live phases of a publication of this deal (started here, or by the
+  // evening schedule while the page is open), else the last one saved on
+  // the draft.
+  const progress = usePublishProgress(autoPublishing);
+  const liveRun = [progress.current, progress.last].find(
+    (run) => run?.dealId === deal.id,
+  );
+  const savedRun = useMemo(() => {
+    try {
+      return current?.lastPublishSteps
+        ? (JSON.parse(current.lastPublishSteps) as PublishRun)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }, [current?.lastPublishSteps]);
+  const shownRun = liveRun ?? savedRun;
+  const publishRunning = autoPublishing || liveRun?.status === "running";
 
   /**
    * Idealo's own price-history chart, fetched live the moment this page
@@ -376,9 +398,16 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
    */
   const autoPublish = async () => {
     if (!current) return;
+    // The client batches calls made within 10 ms into one request: the
+    // polls that start with « publishing » mode (progress, remote screen)
+    // would ride along with this minutes-long call and wait for its end.
+    // Send it first, alone, then switch the page over.
+    const request = drafts.autoPublish({ params: { id: deal.id } });
+    request.catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 30));
     setAutoPublishing(true);
     try {
-      const updated = await drafts.autoPublish({ params: { id: deal.id } });
+      const updated = await request;
       setCurrent(updated as Draft);
       setDealabsUrlInput(updated.dealabsUrl ?? "");
       notifications.show({
@@ -970,7 +999,7 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                     <Button
                       variant="filled"
                       color="signal"
-                      loading={autoPublishing}
+                      loading={publishRunning}
                       disabled={current.status === "posted"}
                       rightSection={<Icon name="bolt" size={16} />}
                       onClick={() => void autoPublish()}
@@ -980,25 +1009,16 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                   </Tooltip>
                 </Group>
 
-                {publishAttemptNotice && !autoPublishing ? (
+                {publishAttemptNotice && !publishRunning ? (
                   <Text size="xs" c="red">
                     {publishAttemptNotice.title} — {publishAttemptNotice.text}
                   </Text>
                 ) : null}
 
-                {autoPublishing && (
-                  <>
-                    <Text size="xs" c="dimmed">
-                      Vérification de la page du marchand, puis ouverture de
-                      Dealabs sur le serveur. Si la session a expiré, la
-                      connexion Dealabs s'ouvre ici : connectez-vous dans
-                      l'écran ci-dessous (10 min max) et la publication reprend
-                      toute seule. Même chose pour une case « je ne suis pas un
-                      robot ».
-                    </Text>
-                    <RemoteScreen hint="Suivez la publication en direct. Si une case « je ne suis pas un robot » apparaît, cliquez dessus dans l'image." />
-                  </>
-                )}
+                {publishRunning ? (
+                  <RemoteScreen hint="Suivez la publication en direct. Si une case « je ne suis pas un robot » apparaît, cliquez dessus dans l'image." />
+                ) : null}
+                {shownRun ? <PublishSteps run={shownRun} /> : null}
 
                 <Divider
                   label="Confirmer la publication"

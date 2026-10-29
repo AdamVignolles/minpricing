@@ -271,6 +271,8 @@ export interface Draft {
   lastPublishAttemptAt?: string;
   lastPublishResult?: "success" | "failed" | "duplicate";
   lastPublishError?: string;
+  /** The last publication's steps (`PublishRun` as JSON). */
+  lastPublishSteps?: string;
 }
 
 export interface Breakdown {
