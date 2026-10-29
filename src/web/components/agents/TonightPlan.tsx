@@ -16,15 +16,18 @@ import { Link } from "alepha/react/router";
 import { type FC, useEffect, useRef, useState } from "react";
 
 import type { PublishScheduleController } from "../../../api/controllers/PublishScheduleController.ts";
+import type { PublishPause } from "../../../api/services/PublishPauseService.ts";
 import type { ScheduleEntry } from "../../../api/services/PublishScheduleService.ts";
 import PublishSteps, { usePublishProgress } from "../deals/PublishSteps.tsx";
 import Icon from "../ui/Icon.tsx";
 import Section from "../ui/Section.tsx";
+import { PublishPauseSwitch, StopPublishButton } from "./PublishControls.tsx";
 
 export interface TonightPlanData {
   date: string;
   entries: ScheduleEntry[];
   queue: Array<Record<string, unknown>>;
+  pause?: PublishPause;
 }
 
 const STATUS: Record<
@@ -91,13 +94,22 @@ const TonightPlan: FC<{ initial: TonightPlanData }> = ({ initial }) => {
   };
 
   const visible = plan.entries.filter(
-    (e) => e.status !== "cancelled" || e.note?.startsWith("annulé par"),
+    (e) =>
+      e.status !== "cancelled" ||
+      e.note?.startsWith("annulé par") ||
+      e.note?.includes("arrêtée par"),
   );
 
   return (
     <Section
       title="Ce soir"
       description="Le plan de publication tenu par le serveur : l'heure tirée, puis ce qui a été publié ou pourquoi rien ne l'a été."
+      action={
+        <PublishPauseSwitch
+          pause={plan.pause ?? { paused: false }}
+          onChange={(pause) => setPlan({ ...plan, pause })}
+        />
+      }
     >
       <Paper p={visible.length ? 0 : "md"} style={{ overflow: "hidden" }}>
         {visible.length === 0 ? (
@@ -182,6 +194,10 @@ const TonightPlan: FC<{ initial: TonightPlanData }> = ({ initial }) => {
                               </Anchor>
                             ) : null}
                             <PublishSteps run={progress.current} compact />
+                            <StopPublishButton
+                              run={progress.current}
+                              size="xs"
+                            />
                           </>
                         ) : null}
                         {entry.status === "failed" &&

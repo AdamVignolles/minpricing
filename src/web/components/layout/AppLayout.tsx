@@ -26,6 +26,7 @@ import {
   CollectionProgressPanel,
   useCollectionProgress,
 } from "./CollectionProgressAside.tsx";
+import PublishBanner from "./PublishBanner.tsx";
 
 /**
  * The places the application can be. Keeping them in one array is what
@@ -229,6 +230,7 @@ const AppLayout: FC = () => {
         </AppShell.Navbar>
 
         <AppShell.Main>
+          <PublishBanner />
           <NestedView />
         </AppShell.Main>
 

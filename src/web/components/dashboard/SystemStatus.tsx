@@ -34,6 +34,8 @@ export interface SystemStatusProps {
   collection?: CollectionState;
   routines?: RoutineHealth[];
   tonight?: ScheduleEntry[];
+  /** Automatic publishing paused by hand. */
+  paused?: boolean;
 }
 
 type Tone = "ok" | "warn" | "bad" | "info" | "unknown";
@@ -107,6 +109,7 @@ const SystemStatus: FC<SystemStatusProps> = ({
   collection,
   routines,
   tonight,
+  paused,
 }) => {
   const now = useNow();
   // Polled only while a publication runs (button, schedule or collection).
@@ -255,24 +258,32 @@ const SystemStatus: FC<SystemStatusProps> = ({
         tone={
           publishing
             ? "info"
-            : failed.length
+            : paused
               ? "warn"
-              : real.length
-                ? "ok"
-                : "unknown"
+              : failed.length
+                ? "warn"
+                : real.length
+                  ? "ok"
+                  : "unknown"
         }
         state={
           publishing
             ? "En cours"
-            : real.length
-              ? `${done.length}/${real.length} publiée${done.length > 1 ? "s" : ""}`
-              : "Rien de prévu"
+            : paused
+              ? "En pause"
+              : real.length
+                ? `${done.length}/${real.length} publiée${done.length > 1 ? "s" : ""}`
+                : "Rien de prévu"
         }
         lines={[
           publishing
             ? `${publishing.title} : ${publishingStep?.label ?? "démarrage"}${publishingStep?.needsHuman ? " (action requise dans l'écran distant)" : ""}`
             : null,
-          next ? `Prochaine à ${time(next.plannedAt)}` : null,
+          next
+            ? paused
+              ? "Créneaux sautés tant que la pause dure"
+              : `Prochaine à ${time(next.plannedAt)}`
+            : null,
           failed.length ? `${failed.length} en échec` : null,
           real.length ? null : "La sélection du soir n'a pas encore planifié.",
         ]}

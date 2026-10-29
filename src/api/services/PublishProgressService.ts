@@ -145,13 +145,30 @@ export class PublishProgressService {
 
   /**
    * A stop point: throws {@link PublishCancelledError} when a stop was
-   * asked, unless the point of no return is already passed.
+   * asked, unless the point of no return is already passed. At a step
+   * boundary (`next` given) the step that just ran is done and `next` is
+   * the one marked stopped; during a wait, the running step is.
    */
-  protected stopPoint(): void {
+  protected stopPoint(next?: PublishStepId): void {
     const run = this.state;
     if (!run?.stopRequest || !canStopPublish(run)) return;
-    const step = run.steps.find((s) => s.status === "running");
-    throw new PublishCancelledError(run.stopRequest.by, step?.label);
+    const by = run.stopRequest.by;
+    let stoppedAt = run.steps.find((s) => s.status === "running");
+    if (next) {
+      this.update((r, now) => {
+        for (const step of r.steps) {
+          if (step.status === "running") this.close(step, "done", now);
+        }
+        const step = this.find(r, next);
+        if (step) {
+          step.startedAt = now;
+          this.close(step, "stopped", now);
+          step.detail = `Arrêtée par ${by} avant de commencer`;
+        }
+      });
+      stoppedAt = this.find(run, next);
+    }
+    throw new PublishCancelledError(by, stoppedAt?.label);
   }
 
   /**
@@ -160,7 +177,7 @@ export class PublishProgressService {
    * before « Envoi » starts, never after).
    */
   async begin(id: PublishStepId, detail?: string): Promise<void> {
-    this.stopPoint();
+    this.stopPoint(id);
     this.update((run, now) => {
       for (const step of run.steps) {
         if (step.status === "running") this.close(step, "done", now);
@@ -246,9 +263,11 @@ export class PublishProgressService {
    */
   async cancel(error: PublishCancelledError): Promise<void> {
     this.update((run, now) => {
-      const step =
-        run.steps.find((s) => s.status === "running") ??
-        run.steps.find((s) => s.status === "pending");
+      // Already marked at a step boundary; otherwise the step it waited in.
+      const step = run.steps.some((s) => s.status === "stopped")
+        ? undefined
+        : (run.steps.find((s) => s.status === "running") ??
+          run.steps.find((s) => s.status === "pending"));
       if (step) {
         step.startedAt ??= now;
         this.close(step, "stopped", now);

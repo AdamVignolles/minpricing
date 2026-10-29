@@ -28,6 +28,7 @@ import { type FC, useEffect, useMemo, useState } from "react";
 import type { DealsController } from "../../api/controllers/DealsController.ts";
 import type { DraftsController } from "../../api/controllers/DraftsController.ts";
 import type { PublishRun } from "../../api/services/publishSteps.ts";
+import { StopPublishButton } from "../components/agents/PublishControls.tsx";
 import DealabsConnection from "../components/deals/DealabsConnection.tsx";
 import DealAnalysis from "../components/deals/DealAnalysis.tsx";
 import DealImage from "../components/deals/DealImage.tsx";
@@ -416,13 +417,17 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
         icon: <Icon name="check" size={16} />,
       });
     } catch (error) {
+      const stopped =
+        error instanceof Error && error.message.includes("rien n'a été posté");
       notifications.show({
-        title: "Échec de la publication automatique",
+        title: stopped
+          ? "Publication arrêtée"
+          : "Échec de la publication automatique",
         message:
           error instanceof Error
             ? error.message
             : "La publication automatique a échoué.",
-        color: "red",
+        color: stopped ? "orange" : "red",
         icon: <Icon name="alert" size={16} />,
         autoClose: 10000,
       });
@@ -1017,6 +1022,9 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
 
                 {publishRunning ? (
                   <RemoteScreen hint="Suivez la publication en direct. Si une case « je ne suis pas un robot » apparaît, cliquez dessus dans l'image." />
+                ) : null}
+                {shownRun?.status === "running" ? (
+                  <StopPublishButton run={shownRun} />
                 ) : null}
                 {shownRun ? <PublishSteps run={shownRun} /> : null}
 

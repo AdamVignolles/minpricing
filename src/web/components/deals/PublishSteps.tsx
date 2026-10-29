@@ -24,11 +24,12 @@ export interface PublishProgressState {
 }
 
 const POLL_MS = 1_500;
+const IDLE_POLL_MS = 30_000;
 
 /**
- * The Dealabs publication in progress and the last one, polled while
- * `active` (a publish was started here, or one is already running). Stops
- * polling on its own once nothing runs. Errors are ignored: the next poll
+ * The Dealabs publication in progress and the last one: polled every
+ * 1.5 s while `active` (a publish was started here) or while one runs,
+ * every 30 s otherwise. Errors are ignored: the next poll
  * tries again, and the page never breaks over a progress read.
  */
 export const usePublishProgress = (active: boolean): PublishProgressState => {
@@ -42,7 +43,12 @@ export const usePublishProgress = (active: boolean): PublishProgressState => {
       const next = await drafts.publishProgress({}).catch(() => undefined);
       if (stopped) return;
       if (next) setState(next as PublishProgressState);
-      if (active || next?.current) timer = setTimeout(poll, POLL_MS);
+      // Fast while something runs; otherwise a slow check, so a
+      // publication started elsewhere (schedule, collection) shows up.
+      timer = setTimeout(
+        poll,
+        active || next?.current ? POLL_MS : IDLE_POLL_MS,
+      );
     };
     void poll();
     return () => {

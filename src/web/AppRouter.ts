@@ -171,6 +171,7 @@ export class AppRouter {
           : undefined,
         routines: health?.routines,
         tonight: tonight?.entries,
+        pause: tonight?.pause,
       };
     },
   });

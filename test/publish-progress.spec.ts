@@ -335,8 +335,9 @@ describe("publish progress", () => {
     expect(saved?.lastPublishResult).toBeUndefined();
     const trail = JSON.parse(saved?.lastPublishSteps ?? "{}") as PublishRun;
     expect(trail.status).toBe("cancelled");
-    expect(statusOf(trail, "form-link")).toBe("stopped");
-    expect(statusOf(trail, "form-essentials")).toBe("pending");
+    expect(statusOf(trail, "form-link")).toBe("done");
+    expect(statusOf(trail, "form-essentials")).toBe("stopped");
+    expect(statusOf(trail, "form-description")).toBe("pending");
     expect((await progress.get()).last?.status).toBe("cancelled");
   });
 

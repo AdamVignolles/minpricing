@@ -12,10 +12,12 @@ import {
   Title,
 } from "@mantine/core";
 import { Link } from "alepha/react/router";
-import type { FC } from "react";
+import { type FC, useState } from "react";
 
 import type { RoutineHealth } from "../../api/services/agentHealth.ts";
+import type { PublishPause } from "../../api/services/PublishPauseService.ts";
 import type { ScheduleEntry } from "../../api/services/PublishScheduleService.ts";
+import { PublishPauseSwitch } from "../components/agents/PublishControls.tsx";
 import SystemStatus, {
   type CollectionState,
   type DealabsSession,
@@ -50,6 +52,8 @@ export interface DashboardPageProps {
   collection?: CollectionState;
   routines?: RoutineHealth[];
   tonight?: ScheduleEntry[];
+  /** Automatic publishing paused by hand; unknown when unreadable. */
+  pause?: PublishPause;
 }
 
 const DashboardPage: FC<DashboardPageProps> = ({
@@ -62,7 +66,9 @@ const DashboardPage: FC<DashboardPageProps> = ({
   collection,
   routines,
   tonight,
+  pause: initialPause,
 }) => {
+  const [pause, setPause] = useState(initialPause);
   const { totals, dealsPerDay, categories } = overview;
   const hasDeals = totals.activeDeals > 0;
   const now = useNow();
@@ -133,7 +139,10 @@ const DashboardPage: FC<DashboardPageProps> = ({
         </Group>
       </Group>
 
+      {pause ? <PublishPauseSwitch pause={pause} onChange={setPause} /> : null}
+
       <SystemStatus
+        paused={pause?.paused}
         session={session}
         collection={collection}
         routines={routines}
