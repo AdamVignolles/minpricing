@@ -126,6 +126,20 @@ controllers → React console → Dealabs draft / auto-publish.
   its step. The console sends the long auto-publish POST alone before it
   starts polling: the client batches calls made within 10 ms, and a poll
   batched with it would wait for the whole publication.
+  **Stopping**: `POST /dealabs/publish/stop` (admin session only) asks the
+  run to stop; `PublishProgressService.begin()` (every phase boundary) and
+  `touch()` (Cloudflare/login waits) are the stop points and throw
+  `PublishCancelledError` — browser closed, run `cancelled`, the prevented
+  step marked `stopped`, no attempt counted, a scheduled slot `cancelled`
+  without trying the next deal or writing the ledger. Refused once
+  « Envoi » (`POINT_OF_NO_RETURN`) has started. **Pause**
+  (`PublishPauseService`, `.publish-pause.json` under `appDir()`, optional
+  `until`): due slots are skipped with « publications en pause … » and
+  `publishBestDeals` too; the deal-page button still publishes.
+  `GET/PUT /dealabs/publish/pause` (PUT admin only), also in the progress
+  and schedule responses. The console's `PublishBanner` (every page) shows a
+  running publication with « Arrêter », a slot due within 10 min with
+  « Reporter »/« Annuler », or the pause.
 - **Other sources**: `AliExpressCollector` ("Deal du Jour" listing plus
   phone/PC/tablet searches with `shipFromCountry=FR`; product page only for
   new/stale deals; parsing in `collectors/aliexpressSignals.ts`). Branded
