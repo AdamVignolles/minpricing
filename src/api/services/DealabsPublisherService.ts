@@ -12,6 +12,8 @@ import { dealabsTitle } from "./DealabsDraftService.ts";
 import { isSameProduct } from "./dealabsSearch.ts";
 import type { Deal } from "./DealTypes.ts";
 import { keepaChartForDeal } from "./keepa.ts";
+import { PublishProgressService } from "./PublishProgressService.ts";
+import type { PublishStepId } from "./publishSteps.ts";
 import {
   launchVisibleBrowser,
   RemoteScreenService,
@@ -176,6 +178,7 @@ export class DealabsPublisherService {
   protected alepha = $inject(Alepha);
   protected dateTime = $inject(DateTimeProvider);
   protected screen = $inject(RemoteScreenService);
+  protected progress = $inject(PublishProgressService);
 
   /**
    * @param chartImageUrl price-history picture for the top of the
@@ -202,6 +205,7 @@ export class DealabsPublisherService {
     // Cheap check first, no browser needed: if a Dealabs thread for this
     // exact product link already exists, don't even bother opening one —
     // reposting the same deal isn't allowed.
+    await this.progress.begin("existing-post");
     const existingUrl = await this.findExistingPost(deal);
     if (existingUrl) {
       throw new DealabsDuplicateError(
@@ -216,6 +220,9 @@ export class DealabsPublisherService {
     // of fighting it we run a real, visible browser. If Cloudflare still
     // challenges it, you see the window and click the checkbox yourself,
     // same as during `npm run dealabs:login`.
+    await this.progress.done("existing-post", "Aucun post avec ce lien");
+
+    await this.progress.begin("browser");
     const browser = await launchVisibleBrowser();
 
     try {
@@ -227,21 +234,38 @@ export class DealabsPublisherService {
       await blockThirdParty(context);
       const page = await context.newPage();
       this.screen.attach(page, "Publication sur Dealabs");
+      await this.progress.done(
+        "browser",
+        hasSession ? "Session Dealabs chargée" : "Sans session enregistrée",
+      );
 
       try {
+        await this.progress.begin("dealabs-open");
         await page.goto("https://www.dealabs.com/bons-plans", {
           waitUntil: "domcontentloaded",
           timeout: 30_000,
         });
+        await this.progress.done("dealabs-open");
 
-        await this.waitOutCloudflareChallenge(page);
-
-        if (await this.isLoggedOut(page)) {
-          await this.waitForLogin(page);
-          await context.storageState({ path: SESSION_PATH });
+        if (!(await this.waitOutCloudflareChallenge(page))) {
+          await this.progress.skip(
+            "cloudflare",
+            "Aucune vérification demandée",
+          );
         }
 
+        if (await this.isLoggedOut(page)) {
+          await this.progress.begin("login");
+          await this.waitForLogin(page);
+          await context.storageState({ path: SESSION_PATH });
+          await this.progress.done("login", "Connecté, session enregistrée");
+        } else {
+          await this.progress.skip("login", "Déjà connecté");
+        }
+
+        await this.progress.begin("form-open");
         await this.openSubmissionForm(page);
+        await this.progress.done("form-open");
         const dealabsUrl = await this.fillFormAndSubmit(
           page,
           deal,
@@ -252,7 +276,9 @@ export class DealabsPublisherService {
         // Refresh the saved session: Dealabs may rotate cookies on use, and
         // keeping the file current avoids forcing a re-login sooner than
         // necessary.
+        await this.progress.begin("session-save");
         await context.storageState({ path: SESSION_PATH });
+        await this.progress.done("session-save");
 
         return { dealabsUrl };
       } catch (error) {
@@ -321,15 +347,17 @@ export class DealabsPublisherService {
    */
   protected async waitOutCloudflareChallenge(
     page: import("playwright").Page,
-  ): Promise<void> {
+    resume?: PublishStepId,
+  ): Promise<boolean> {
     const isChallenge = async () =>
       (await page
         .getByText(/vérification que vous n'êtes pas un robot/i)
         .count()) > 0;
 
     if (!(await isChallenge())) {
-      return;
+      return false;
     }
+    await this.progress.begin("cloudflare");
 
     // Without any display nobody can click the checkbox (the console's
     // « écran distant » needs the server's virtual display, DISPLAY=:99):
@@ -337,13 +365,18 @@ export class DealabsPublisherService {
     if (!isAttended()) {
       await page.waitForTimeout(10_000);
       if (!(await isChallenge())) {
-        return;
+        await this.cloudflareCleared(resume);
+        return true;
       }
       throw new Error(
         "Dealabs demande une vérification anti-robot (Cloudflare) que le serveur ne peut pas valider : publiez depuis un poste local (npm run dev + « Se connecter à Dealabs ») ou copiez le brouillon à la main.",
       );
     }
 
+    await this.progress.waitForHuman(
+      "cloudflare",
+      "Cochez « Je ne suis pas un robot » dans l'écran distant",
+    );
     const deadline = Date.now() + 240_000;
     while ((await isChallenge()) && Date.now() < deadline) {
       await page.waitForTimeout(1_000);
@@ -354,6 +387,14 @@ export class DealabsPublisherService {
         "Cloudflare challenge was not cleared in time — resolve it in the browser window and try again.",
       );
     }
+    await this.cloudflareCleared(resume);
+    return true;
+  }
+
+  /** The challenge is gone: back to the step it interrupted, if any. */
+  protected async cloudflareCleared(resume?: PublishStepId): Promise<void> {
+    await this.progress.done("cloudflare", "Vérification passée");
+    if (resume) await this.progress.begin(resume);
   }
 
   /**
@@ -394,6 +435,10 @@ export class DealabsPublisherService {
       );
     }
     this.screen.attach(page, "Connectez-vous à Dealabs pour publier");
+    await this.progress.waitForHuman(
+      "login",
+      "Session expirée : connectez-vous dans l'écran distant",
+    );
     await page
       .getByText("Continuer sans accepter", { exact: false })
       .first()
@@ -409,6 +454,7 @@ export class DealabsPublisherService {
     let loggedInChecks = 0;
     while (Date.now() < deadline) {
       await page.waitForTimeout(2_000);
+      await this.progress.touch();
       const loggedOut = await this.isLoggedOut(page).catch(() => true);
       const ready = await page
         .evaluate(() => document.readyState === "complete")
@@ -446,7 +492,7 @@ export class DealabsPublisherService {
         timeout: 30_000,
       },
     );
-    await this.waitOutCloudflareChallenge(page);
+    await this.waitOutCloudflareChallenge(page, "form-open");
     await page.waitForSelector('input[name="link"], #link', {
       timeout: 15_000,
     });
@@ -468,6 +514,7 @@ export class DealabsPublisherService {
     chart?: string,
   ): Promise<string> {
     // Step: Lien
+    await this.progress.begin("form-link", deal.url);
     const linkInput = page.locator('input[name="link"], #link').first();
     await linkInput.fill(deal.url);
 
@@ -489,6 +536,10 @@ export class DealabsPublisherService {
       30_000,
     );
     await this.handleDuplicateWarning(page, deal);
+    await this.progress.done(
+      "form-link",
+      "Lien accepté, pas de doublon signalé",
+    );
 
     // Step: Essentiel — Dealabs usually auto-fills title/price from the
     // link already; we overwrite with our own values to make sure they
@@ -497,6 +548,7 @@ export class DealabsPublisherService {
     // but a field is wrong/empty" failure mode — better to abort loudly
     // here than post something incomplete.
     // A title edited by hand may exceed Dealabs' limit: fit it here too.
+    await this.progress.begin("form-essentials");
     await this.fillFirstMatch(
       page,
       TITLE_SELECTORS,
@@ -539,11 +591,16 @@ export class DealabsPublisherService {
 
     // Step: Galerie d'images — optional, nothing to fill.
     await this.clickNavNext(page);
+    await this.progress.done(
+      "form-essentials",
+      `${deal.currentPrice.toFixed(2).replace(".", ",")} €${deal.listPrice ? `, prix constaté ${deal.listPrice.toFixed(2).replace(".", ",")} €` : ""}`,
+    );
 
     // Step: Description — a Tiptap/ProseMirror rich-text editor, not a
     // plain `<textarea>` (confirmed from a captured page): a `div`
     // with `contenteditable="true"` and `role="textbox"`. Playwright's
     // `.fill()` supports contenteditable elements directly.
+    await this.progress.begin("form-description");
     await this.fillFirstMatch(
       page,
       [
@@ -566,12 +623,17 @@ export class DealabsPublisherService {
       await this.insertImageAtTop(page, chart);
     }
     await this.clickNavNext(page);
+    await this.progress.done(
+      "form-description",
+      chart ? "Description et graphique de prix" : "Description",
+    );
 
     // Step: Derniers détails — native `type="date"` inputs named
     // `startDate`/`endDate` (confirmed from a captured page), plus an
     // auto-picked category we leave alone. No real availability window
     // is tracked for most deals, so default to "now" → "a week from now"
     // rather than leaving it blank.
+    await this.progress.begin("form-details");
     const start = deal.startDate
       ? this.dateTime.of(deal.startDate)
       : this.dateTime.now();
@@ -602,12 +664,18 @@ export class DealabsPublisherService {
     // "Suivant" throughout the wizard, just relabeled "Poster un deal"
     // once every step is complete (confirmed from a captured page:
     // `[data-t="navNext"]`, `type="submit"`).
+    await this.progress.done(
+      "form-details",
+      `Du ${start.format("DD/MM")} au ${end.format("DD/MM")}`,
+    );
+    await this.progress.begin("submit");
     await this.clickNavNext(page);
 
     await page
       .waitForURL(/dealabs\.com\/bons-plans\/[^/]+$/, { timeout: 30_000 })
       .catch(() => undefined);
 
+    await this.progress.done("submit", page.url());
     return page.url();
   }
 

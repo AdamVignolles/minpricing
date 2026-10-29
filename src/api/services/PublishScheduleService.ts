@@ -515,7 +515,7 @@ export class PublishScheduleService {
       let error: string | undefined;
       try {
         await this.drafts.ensureDraftForDeal(deal.id);
-        const draft = await this.publisher.publishDeal(deal.id);
+        const draft = await this.publisher.publishDeal(deal.id, "schedule");
         result = "success";
         url = draft.dealabsUrl;
       } catch (thrown) {

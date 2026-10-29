@@ -39,6 +39,12 @@ export const dealabsDraftEntity = $entity({
       .meta({ mode: "text" })
       .optional(),
     lastPublishError: z.text({ size: "rich" }).optional(),
+    /**
+     * The last publication's steps (`PublishRun` as JSON, see
+     * `publishSteps.ts`), so a failure at night can be read the next
+     * morning: which phase, when, and why.
+     */
+    lastPublishSteps: z.text({ size: "rich" }).optional(),
     generatedAt: z.datetime(),
     createdAt: db.createdAt(),
     updatedAt: db.updatedAt(),

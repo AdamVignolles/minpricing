@@ -13,7 +13,10 @@ import {
 } from "./DealabsPublisherService.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
 import { DealPageCheckService } from "./DealPageCheckService.ts";
+import { keepaChartForDeal } from "./keepa.ts";
 import { PriceSeriesService } from "./PriceSeriesService.ts";
+import { PublishProgressService } from "./PublishProgressService.ts";
+import type { PublishTrigger } from "./publishSteps.ts";
 import { sameListingKey } from "./sameListing.ts";
 
 type Draft = Infer<typeof dealabsDraftEntity.schema>;
@@ -87,6 +90,7 @@ export class AutoPublishService {
   protected dealabsHistory = $inject(DealabsHistoryService);
   protected priceSeries = $inject(PriceSeriesService);
   protected pageCheck = $inject(DealPageCheckService);
+  protected progress = $inject(PublishProgressService);
   protected env = $env(
     z.object({
       AUTO_PUBLISH: z.boolean().default(false),
@@ -121,11 +125,16 @@ export class AutoPublishService {
 
   /**
    * Publishes one deal's draft and records the attempt on it (count, time,
-   * result, error) whatever happens.
+   * result, error) whatever happens. Each phase is reported to
+   * {@link PublishProgressService} as it happens, and the run's steps are
+   * kept on the draft (`lastPublishSteps`) once it ends.
    * @throws PublishRefusedError when nothing could be attempted,
    *   DealabsDuplicateError when Dealabs already has it, Error otherwise.
    */
-  async publishDeal(dealId: string): Promise<Draft> {
+  async publishDeal(
+    dealId: string,
+    trigger: PublishTrigger = "button",
+  ): Promise<Draft> {
     if (this.busy) {
       throw new PublishRefusedError(
         "Une publication Dealabs est déjà en cours, réessayez dans un instant.",
@@ -150,12 +159,24 @@ export class AutoPublishService {
     }
 
     this.busy = true;
+    // Set once the attempt counts (something may be sent to Dealabs):
+    // pre-flight refusals are not recorded as attempts.
+    let attempt:
+      | { publishAttempts: number; lastPublishAttemptAt: string }
+      | undefined;
     try {
       const deal = await this.deals.getById(dealId);
+      await this.progress.start({ dealId, title: deal.title, trigger });
+      await this.progress.done(
+        "checks",
+        "Brouillon à publier, aucune autre publication en cours",
+      );
+
       // Same product already live on Dealabs (another link, colour or
       // shop) at our price or cheaper: posting it again is a duplicate.
       // Checked before any browser opens; nothing is recorded on the
       // draft — it's still publishable once that deal expires.
+      await this.progress.begin("dealabs-duplicate");
       const duplicate = await this.dealabsHistory
         .findLiveDuplicate(deal)
         .catch(() => undefined);
@@ -165,55 +186,105 @@ export class AutoPublishService {
           duplicate.url,
         );
       }
+      await this.progress.done(
+        "dealabs-duplicate",
+        "Aucun deal identique en ligne",
+      );
+
       // A moderator clicks the link before validating: the merchant page
       // must be up, the product there and still at our price.
       if (this.pageCheck.enabled) {
+        await this.progress.begin("merchant-check", deal.url);
         const verdict = await this.pageCheck.check(deal);
         if (!verdict.ok) {
           throw new DealNotAvailableError(`Pas publié : ${verdict.reason}`);
         }
+        await this.progress.done(
+          "merchant-check",
+          "Page en ligne, produit disponible au bon prix",
+        );
+      } else {
+        await this.progress.skip(
+          "merchant-check",
+          "Vérification désactivée (PUBLISH_PAGE_CHECK=false)",
+        );
       }
+
       // A draft generated while the deal had no description has an empty
       // one: rebuild it from the deal now (never empty, see render()).
       if (!draft.description?.trim()) {
+        await this.progress.begin("draft", "Description vide : régénération");
         await this.draftService.maybeGenerateDraft(deal);
         draft =
           (await this.drafts.findOne({ where: { dealId: { eq: dealId } } })) ??
           draft;
+        await this.progress.done("draft", "Description régénérée");
+      } else {
+        await this.progress.done("draft", "Prêt");
       }
-      const attempt = {
+
+      attempt = {
         publishAttempts: (draft.publishAttempts ?? 0) + 1,
         lastPublishAttemptAt: this.dateTime.nowISOString(),
       };
 
-      try {
-        // Keepa for Amazon (the publisher's default); otherwise the
-        // product's eShop history, drawn by QuickChart.
-        const chart = await this.priceSeries
-          .chartImageUrl(deal)
-          .catch(() => undefined);
-        const { dealabsUrl } = await this.publisher.publish(deal, draft, chart);
-        return await this.drafts.updateById(draft.id, {
-          ...attempt,
-          lastPublishResult: "success",
-          lastPublishError: "",
-          status: "posted",
-          dealabsUrl,
-          verifiedAt: this.dateTime.nowISOString(),
-        });
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        await this.drafts.updateById(draft.id, {
-          ...attempt,
-          lastPublishResult:
-            error instanceof DealabsDuplicateError ? "duplicate" : "failed",
-          lastPublishError: reason.slice(0, 2000),
-        });
-        throw error;
+      // Keepa for Amazon (the publisher's default); otherwise the
+      // product's eShop history, drawn by QuickChart.
+      await this.progress.begin("chart");
+      const chart = await this.priceSeries
+        .chartImageUrl(deal)
+        .catch(() => undefined);
+      if (chart) {
+        await this.progress.done("chart", "Historique du magasin");
+      } else if (keepaChartForDeal(deal)) {
+        await this.progress.done("chart", "Courbe Keepa (Amazon)");
+      } else {
+        await this.progress.skip("chart", "Aucun historique de prix à joindre");
       }
+
+      const { dealabsUrl } = await this.publisher.publish(deal, draft, chart);
+      await this.progress.finish(dealabsUrl);
+      return await this.drafts.updateById(draft.id, {
+        ...attempt,
+        lastPublishResult: "success",
+        lastPublishError: "",
+        lastPublishSteps: this.trail(),
+        status: "posted",
+        dealabsUrl,
+        verifiedAt: this.dateTime.nowISOString(),
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      await this.progress.fail(reason);
+      await this.drafts
+        .updateById(draft.id, {
+          ...(attempt
+            ? {
+                ...attempt,
+                lastPublishResult:
+                  error instanceof DealabsDuplicateError
+                    ? ("duplicate" as const)
+                    : ("failed" as const),
+                lastPublishError: reason.slice(0, 2000),
+              }
+            : {}),
+          lastPublishSteps: this.trail(),
+        })
+        .catch((saveError) =>
+          this.log.warn("Publish trail not saved on the draft", {
+            saveError,
+          }),
+        );
+      throw error;
     } finally {
       this.busy = false;
     }
+  }
+
+  /** The finished run's steps, as stored on the draft. */
+  protected trail(): string | undefined {
+    const run = this.progress.snapshot();
+    return run ? JSON.stringify(run) : undefined;
   }
 
   /**
@@ -312,7 +383,7 @@ export class AutoPublishService {
     for (const [index, deal] of candidates.entries()) {
       onProgress?.(index + 1, candidates.length);
       try {
-        const draft = await this.publishDeal(deal.id);
+        const draft = await this.publishDeal(deal.id, "collection");
         outcome.published.push({
           title: deal.title,
           score: deal.score,

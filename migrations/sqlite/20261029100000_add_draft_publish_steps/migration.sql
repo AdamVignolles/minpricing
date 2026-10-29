@@ -1,0 +1,1 @@
+ALTER TABLE `dealabs_drafts` ADD `last_publish_steps` text;
