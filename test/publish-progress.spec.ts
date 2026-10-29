@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Alepha } from "alepha";
+import { McpServerProvider } from "alepha/mcp";
 import { $repository } from "alepha/orm";
 import { AlephaServer } from "alepha/server";
 import {
@@ -15,6 +16,8 @@ import {
   vi,
 } from "vitest";
 
+import { AuthController } from "../src/api/controllers/AuthController.ts";
+import { DraftsController } from "../src/api/controllers/DraftsController.ts";
 import { dealEntity } from "../src/api/entities/Deal.ts";
 import { dealabsDraftEntity } from "../src/api/entities/DealabsDraft.ts";
 import { ApiModule } from "../src/api/index.ts";
@@ -52,6 +55,7 @@ describe("publish progress", () => {
         ADMIN_USERNAME: "admin",
         ADMIN_PASSWORD: "s3cret-admin-pass",
         APP_SECRET: "test-app-secret-0123456789abcdef",
+        AGENT_TOKEN: "p".repeat(64),
         DATABASE_URL: "sqlite://:memory:",
         COLLECT_ON_START: "false",
       },
@@ -270,5 +274,32 @@ describe("publish progress", () => {
     expect(saved?.publishAttempts ?? 0).toBe(0);
     const trail = JSON.parse(saved?.lastPublishSteps ?? "{}") as PublishRun;
     expect(currentPublishStep(trail)?.id).toBe("dealabs-duplicate");
+  });
+
+  test("endpoint: 401 anonymous, 200 for the admin and the agent token", async () => {
+    const drafts = alepha.inject(DraftsController);
+    await expect(drafts.publishProgress.fetch({})).rejects.toMatchObject({
+      status: 401,
+    });
+
+    const agent = await drafts.publishProgress.fetch({
+      headers: { authorization: `Bearer ${"p".repeat(64)}` },
+    });
+    expect(agent.data.last?.steps.length).toBe(17);
+
+    const login = await alepha.inject(AuthController).login.fetch({
+      body: { username: "admin", password: "s3cret-admin-pass" },
+    });
+    const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const admin = await drafts.publishProgress.fetch({ headers: { cookie } });
+    expect(admin.data.last?.runId).toBe(agent.data.last?.runId);
+  });
+
+  test("MCP exposes the progress as a read-only tool", () => {
+    const tool = alepha
+      .inject(McpServerProvider)
+      .getTools()
+      .find((t) => t.name === "get_publish_progress");
+    expect(tool?.options.annotations?.readOnlyHint).toBe(true);
   });
 });

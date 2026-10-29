@@ -14,6 +14,8 @@ import { DealabsDraftService } from "../services/DealabsDraftService.ts";
 import { DealabsDuplicateError } from "../services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../services/DealabsSessionService.ts";
 import { DealPageCheckService } from "../services/DealPageCheckService.ts";
+import { PublishProgressService } from "../services/PublishProgressService.ts";
+import { PUBLISH_STEPS } from "../services/publishSteps.ts";
 import {
   REMOTE_KEYS,
   RemoteScreenService,
@@ -34,6 +36,30 @@ const sessionStatusSchema = z.object({
     .optional(),
 });
 
+const publishRunSchema = z.object({
+  runId: z.text(),
+  dealId: z.text(),
+  title: z.text({ size: "rich" }),
+  trigger: z.enum(["button", "schedule", "collection"]),
+  status: z.enum(["running", "done", "failed"]),
+  startedAt: z.text(),
+  finishedAt: z.text().optional(),
+  updatedAt: z.text(),
+  dealabsUrl: z.text({ maxLength: 500 }).optional(),
+  error: z.text({ size: "rich" }).optional(),
+  steps: z.array(
+    z.object({
+      id: z.enum(PUBLISH_STEPS.map((step) => step.id) as [string, ...string[]]),
+      label: z.text(),
+      status: z.enum(["pending", "running", "done", "skipped", "failed"]),
+      startedAt: z.text().optional(),
+      finishedAt: z.text().optional(),
+      detail: z.text({ size: "rich" }).optional(),
+      needsHuman: z.boolean().optional(),
+    }),
+  ),
+});
+
 const screenSchema = z.object({
   active: z.boolean(),
   label: z.text().optional(),
@@ -51,6 +77,7 @@ export class DraftsController {
   protected pageCheck = $inject(DealPageCheckService);
   protected screen = $inject(RemoteScreenService);
   protected deals = $repository(dealEntity);
+  protected progress = $inject(PublishProgressService);
 
   /**
    * Dry run of the pre-publish check: opens the merchant page and says
@@ -85,6 +112,24 @@ export class DraftsController {
         availability: verdict.snapshot?.availability,
       };
     },
+  });
+
+  /**
+   * The Dealabs publication in progress (button, schedule or end of a
+   * collection), step by step, and the last finished one. Cheap: the
+   * console polls it every couple of seconds while a publish runs.
+   */
+  publishProgress = $action({
+    method: "GET",
+    path: "/dealabs/publish/progress",
+    use: [$adminSession()],
+    schema: {
+      response: z.object({
+        current: publishRunSchema.optional(),
+        last: publishRunSchema.optional(),
+      }),
+    },
+    handler: () => this.progress.get(),
   });
 
   /** Is a Dealabs session saved for auto-publish, and is a login running? */

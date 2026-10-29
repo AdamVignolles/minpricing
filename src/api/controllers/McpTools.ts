@@ -325,6 +325,14 @@ export class McpTools {
     handler: async () => ({ posts: await this.myPosts.postsNow() }),
   });
 
+  get_publish_progress = $tool({
+    title: "Publication en cours",
+    description:
+      "The Dealabs publication running right now (if any) and the last finished one, phase by phase: pre-flight checks, merchant page, browser, Cloudflare, login, form steps, submit. Each step has a status (pending/running/done/skipped/failed), times, a French detail, and needsHuman when someone must act in the remote screen; a failed run names the failed step and why.",
+    annotations: readOnly,
+    handler: () => this.drafts.publishProgress.run(),
+  });
+
   get_dealabs_session = $tool({
     title: "Session Dealabs",
     description:
