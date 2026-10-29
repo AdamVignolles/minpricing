@@ -112,6 +112,20 @@ controllers → React console → Dealabs draft / auto-publish.
   `AUTO_PUBLISH_MAX_PER_DAY` (6) attempts over 24 h; skipped when
   serverless or no Dealabs session. **Off by default**
   (`AUTO_PUBLISH=true` turns it on); the per-deal button works either way.
+  **Phases**: `publishDeal(dealId, trigger)` reports each step of the
+  publication (list in `services/publishSteps.ts`: pre-flight checks,
+  duplicate, merchant page, draft, chart, existing post, browser, Dealabs,
+  Cloudflare, login, form steps, submit, session) to
+  `PublishProgressService` (`$cache`, one current + one last run; never
+  throws, so a progress write can't fail a publish). Cloudflare and login
+  mark `needsHuman` (act in the « écran distant »). Served by
+  `GET /dealabs/publish/progress` and the MCP tool `get_publish_progress`;
+  drawn by `PublishSteps.tsx` on the deal page (polled while a run is
+  active), in « Ce soir » and on the dashboard card. The finished run is
+  saved on the draft (`lastPublishSteps`, JSON) so a night failure names
+  its step. The console sends the long auto-publish POST alone before it
+  starts polling: the client batches calls made within 10 ms, and a poll
+  batched with it would wait for the whole publication.
 - **Other sources**: `AliExpressCollector` ("Deal du Jour" listing plus
   phone/PC/tablet searches with `shipFromCountry=FR`; product page only for
   new/stale deals; parsing in `collectors/aliexpressSignals.ts`). Branded
