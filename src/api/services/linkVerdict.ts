@@ -81,7 +81,7 @@ export function linkVerdict(check: LinkCheck, now = new Date()): LinkVerdict {
   if (live) {
     return {
       status: "refused",
-      verdict: `Déjà en ligne sur Dealabs à ${euros(live.price)} (${live.temperature}°)${live.mine ? ", posté par vous" : ""} : ${live.url}. Note ${score}/100, affiché grisé.`,
+      verdict: `Déjà en ligne sur Dealabs à ${euros(live.price)} (${live.temperature}°)${live.mine ? ", posté par vous" : ""}, ici ${euros(deal.currentPrice)} : ${live.url}. Note ${score}/100, affiché grisé.`,
     };
   }
   const discount = deal.discountPercentage

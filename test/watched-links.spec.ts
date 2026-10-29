@@ -601,7 +601,7 @@ describe("link verdicts (same checks as collected deals)", () => {
     );
     expect(verdict.status).toBe("refused");
     expect(verdict.verdict).toBe(
-      "Déjà en ligne sur Dealabs à 249 € (413°) : https://www.dealabs.com/bons-plans/casque-sony-123. Note 72/100, affiché grisé.",
+      "Déjà en ligne sur Dealabs à 249 € (413°), ici 249 € : https://www.dealabs.com/bons-plans/casque-sony-123. Note 72/100, affiché grisé.",
     );
   });
 

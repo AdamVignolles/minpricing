@@ -13,7 +13,7 @@ deployment detail.
 
 minpricing ("DealRadar"): a private, single-user app that collects prices
 (Amazon, Cdiscount, AliExpress, Steam and other game stores, Lidl, IKEA,
-telecom operators, manual entry), keeps price history, scores real
+telecom operators, a pasted product link), keeps price history, scores real
 discounts, generates a Dealabs post draft, and can auto-publish it to Dealabs
 via Playwright using a session saved locally by `npm run dealabs:login`. No
 public pages, no SEO — every route sits behind the admin session.
@@ -396,6 +396,36 @@ deals and, separately, the visible ones (`createdVisible`).
   single use, access 1 h, refresh 30 d; no table). Connect in claude.ai →
   Settings → Connectors → custom connector `https://<host>/mcp`, then log in
   with the admin credentials on the DealRadar page. `test/mcp.spec.ts`.
+- **Add by link** (epic 16): a product page link pasted in the console
+  (« Ajouter un lien », dashboard and deals page) or sent by an agent
+  (`POST /agent/links`, audited, 20/24 h; `dealradar.mjs add-link <url>
+[agent] [reason] [--wait]`). `services/linkResolver.ts` (pure, tested)
+  follows short links (amzn.to, s.click.aliexpress… 5 hops, never a
+  Dealabs link), drops tracking params and matches `SUPPORTED_SHOPS`
+  (Amazon.fr, Cdiscount, AliExpress, Steam) → the same
+  `(sourceId, externalId)` key collection uses (ASIN, Cdiscount page URL,
+  item id, appid), so a linked product also collected is **one deal**;
+  anything else is refused at once, in French. The link is stored in
+  `watched_links` (`WatchedLinkService`) and read by its shop's own
+  collector through `collect(products)` (`ProductRef`; Amazon
+  `fetchPrice`, Cdiscount `fetchDetails` incl. the page's own price,
+  AliExpress `fetchDetails`, Steam appdetails — `readProductPages` in
+  `browser.ts`): right away by `LinkCheckJob` → `CollectionService.
+checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
+  the link and polled by the console), then on every run of that shop.
+  No bypass: `upsertDeal` (quality gate), market comparison and Dealabs
+  history focused on that deal (`focus` on `refreshStale`), `rescore`.
+  `linkVerdict.ts` says the outcome in French (visible with score / gate
+  reason / « pas d'argument prix » / under 40 / already live on Dealabs /
+  page unreadable). Refused links stay watched; the watch ends after 14
+  days or when the deal expires. Deals carry `addedByLink`; Admin ›
+  « Liens ajoutés » lists them (Revérifier, Arrêter). Manual price entry
+  (`ManualCollector`, `PATCH /products/:id/price`, the `manual` and
+  `manual-link` sources) is gone: at startup `SeedService` turns tracked
+  products in a supported shop into watched links and lists the others
+  for removal. To support a new shop: a `SUPPORTED_SHOPS` entry and a
+  `collect()` on its collector, with a fixture test
+  (`test/link-collect.spec.ts`).
 - **Web**: `src/web/AppRouter.ts` declares `$page` routes and one
   `$client<Controller>()` per backend controller; pages are lazy-loaded.
   New controllers must be registered in `src/api/index.ts` and get a matching
@@ -408,7 +438,9 @@ deals and, separately, the visible ones (`createdVisible`).
 - `PriceHistory` gets a row only when the price changes (plus an occasional
   heartbeat), never unconditionally on each run.
 - Source reliability order API > manual > scrape is reflected in scoring
-  weights and `Source.type` (`"api" | "manual" | "scrape"`).
+  weights and `Source.type` (`"api" | "manual" | "scrape"`). No source is
+  `manual` any more (manual price entry was retired for links); a linked
+  product is scored with its shop's own type.
 
 ## Migrations and deployment gotchas
 
