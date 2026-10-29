@@ -4,6 +4,7 @@ import { DateTimeProvider } from "alepha/datetime";
 import { $logger } from "alepha/logger";
 
 import {
+  canStopPublish,
   PUBLISH_STEPS,
   type PublishRun,
   type PublishStep,
@@ -17,6 +18,28 @@ import {
  * stays open 10 minutes.
  */
 const STALE_AFTER_MS = 15 * 60 * 1000;
+
+/**
+ * Thrown at a step boundary once someone asked to stop the publication:
+ * nothing has been posted, the browser is closed by the caller's
+ * `finally`, and the run ends `cancelled` rather than failed.
+ */
+export class PublishCancelledError extends Error {
+  constructor(
+    public readonly by: string,
+    public readonly step?: string,
+  ) {
+    super(
+      `Publication arrêtée par ${by}${step ? ` à l'étape « ${step} »` : ""}, rien n'a été posté`,
+    );
+    this.name = "PublishCancelledError";
+  }
+}
+
+export interface StopAnswer {
+  ok: boolean;
+  message: string;
+}
 
 export interface PublishProgress {
   /** The publication in progress, if any. */
@@ -34,6 +57,12 @@ export interface PublishProgress {
  * method here throws, a progress write can never fail a publication.
  * Same storage choice as {@link CollectionProgressService}: the shared
  * cache, so a page polling from another worker sees the same state.
+ *
+ * It also carries the stop request ({@link requestStop}): `begin()` and
+ * `touch()` are the stop points (every phase boundary, and the long waits
+ * for Cloudflare and the login), and throw {@link PublishCancelledError}
+ * once a stop was asked, up to the point of no return (« Envoi »). That is
+ * the one exception to « never throws », and it is the point.
  */
 export class PublishProgressService {
   protected log = $logger();
@@ -87,8 +116,51 @@ export class PublishProgressService {
     await this.flush();
   }
 
-  /** `id` starts; a step still running is considered done. */
+  /**
+   * Asks the publication in progress to stop at its next step boundary.
+   * Refused once « Envoi » has started: the post may already exist.
+   */
+  async requestStop(by: string): Promise<StopAnswer> {
+    const run = this.state;
+    if (!run || run.status !== "running") {
+      return { ok: false, message: "Aucune publication en cours." };
+    }
+    if (!canStopPublish(run)) {
+      return {
+        ok: false,
+        message:
+          "Trop tard : l'envoi à Dealabs est parti, le post existe peut-être déjà.",
+      };
+    }
+    if (!run.stopRequest) {
+      run.stopRequest = { by, at: this.dateTime.nowISOString() };
+      await this.flush();
+    }
+    return {
+      ok: true,
+      message:
+        "Arrêt demandé : la publication s'arrête à la prochaine étape, rien ne sera posté.",
+    };
+  }
+
+  /**
+   * A stop point: throws {@link PublishCancelledError} when a stop was
+   * asked, unless the point of no return is already passed.
+   */
+  protected stopPoint(): void {
+    const run = this.state;
+    if (!run?.stopRequest || !canStopPublish(run)) return;
+    const step = run.steps.find((s) => s.status === "running");
+    throw new PublishCancelledError(run.stopRequest.by, step?.label);
+  }
+
+  /**
+   * `id` starts; a step still running is considered done. A stop point:
+   * throws {@link PublishCancelledError} if a stop was asked (checked
+   * before « Envoi » starts, never after).
+   */
   async begin(id: PublishStepId, detail?: string): Promise<void> {
+    this.stopPoint();
     this.update((run, now) => {
       for (const step of run.steps) {
         if (step.status === "running") this.close(step, "done", now);
@@ -139,8 +211,9 @@ export class PublishProgressService {
     await this.flush();
   }
 
-  /** Marks the run alive during a long wait. */
+  /** Marks the run alive during a long wait; a stop point too. */
   async touch(): Promise<void> {
+    this.stopPoint();
     this.update(() => undefined);
     await this.flush();
   }
@@ -167,6 +240,27 @@ export class PublishProgressService {
     await this.flush(true);
   }
 
+  /**
+   * Stopped on request: the step it was on is marked stopped, the run
+   * ends `cancelled`. Steps never reached stay pending.
+   */
+  async cancel(error: PublishCancelledError): Promise<void> {
+    this.update((run, now) => {
+      const step =
+        run.steps.find((s) => s.status === "running") ??
+        run.steps.find((s) => s.status === "pending");
+      if (step) {
+        step.startedAt ??= now;
+        this.close(step, "stopped", now);
+        step.detail = `Arrêtée par ${error.by}`;
+      }
+      run.status = "cancelled";
+      run.error = error.message;
+      run.finishedAt = now;
+    });
+    await this.flush(true);
+  }
+
   /** Posted: whatever didn't run is marked skipped. */
   async finish(dealabsUrl: string): Promise<void> {
     this.update((run, now) => {
@@ -187,7 +281,7 @@ export class PublishProgressService {
 
   protected close(
     step: PublishStep,
-    status: "done" | "skipped" | "failed",
+    status: "done" | "skipped" | "failed" | "stopped",
     now: string,
   ): void {
     step.status = status;

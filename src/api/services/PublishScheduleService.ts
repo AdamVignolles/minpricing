@@ -28,6 +28,7 @@ import {
   parisWeekday,
   randomTimes,
 } from "./publishPlan.ts";
+import { PublishCancelledError } from "./PublishProgressService.ts";
 
 export type ScheduleEntry = Infer<typeof publishScheduleEntity.schema>;
 
@@ -519,6 +520,16 @@ export class PublishScheduleService {
         result = "success";
         url = draft.dealabsUrl;
       } catch (thrown) {
+        // Stopped by hand: nothing posted, no ledger line, and the slot
+        // doesn't move on to the next deal.
+        if (thrown instanceof PublishCancelledError) {
+          return this.finish(entry, {
+            status: "cancelled",
+            dealId: deal.id,
+            title: deal.title,
+            note: [...outcomes, thrown.message].join("\n"),
+          });
+        }
         error = (
           thrown instanceof Error ? thrown.message : String(thrown)
         ).slice(0, 300);

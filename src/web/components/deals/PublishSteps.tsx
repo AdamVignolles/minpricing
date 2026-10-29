@@ -80,6 +80,7 @@ const STATUS: Record<
   done: { icon: "check", color: "teal", word: "fait" },
   skipped: { icon: "chevronRight", color: "dimmed", word: "sans objet" },
   failed: { icon: "alert", color: "red", word: "échec" },
+  stopped: { icon: "close", color: "orange", word: "arrêtée" },
 };
 
 const seconds = (from?: string, to?: string | number): string | null => {
@@ -135,7 +136,11 @@ const PublishSteps: FC<{ run: PublishRun; compact?: boolean }> = ({
           c={focus.status === "failed" ? "red" : undefined}
           lineClamp={1}
         >
-          {focus.status === "failed" ? "Échec : " : ""}
+          {focus.status === "failed"
+            ? "Échec : "
+            : focus.status === "stopped"
+              ? "Arrêtée : "
+              : ""}
           {focus.label}
           {focus.needsHuman ? " · action requise" : ""}
         </Text>
@@ -148,7 +153,9 @@ const PublishSteps: FC<{ run: PublishRun; compact?: boolean }> = ({
       ? "Publication en cours"
       : run.status === "done"
         ? "Publiée sur Dealabs"
-        : `Échec à l'étape « ${focus?.label ?? "?"} »`;
+        : run.status === "cancelled"
+          ? `Arrêtée à l'étape « ${focus?.label ?? "?"} », rien n'a été posté`
+          : `Échec à l'étape « ${focus?.label ?? "?"} »`;
 
   return (
     <Paper withBorder p="sm" radius="md">

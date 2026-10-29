@@ -15,7 +15,10 @@ import { DealabsSessionService } from "./DealabsSessionService.ts";
 import { DealPageCheckService } from "./DealPageCheckService.ts";
 import { keepaChartForDeal } from "./keepa.ts";
 import { PriceSeriesService } from "./PriceSeriesService.ts";
-import { PublishProgressService } from "./PublishProgressService.ts";
+import {
+  PublishCancelledError,
+  PublishProgressService,
+} from "./PublishProgressService.ts";
 import type { PublishTrigger } from "./publishSteps.ts";
 import { sameListingKey } from "./sameListing.ts";
 
@@ -255,10 +258,14 @@ export class AutoPublishService {
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      await this.progress.fail(reason);
+      // Stopped on request: nothing was posted, so it isn't an attempt
+      // either — the deal can be published later as if untouched.
+      const stopped = error instanceof PublishCancelledError;
+      if (stopped) await this.progress.cancel(error);
+      else await this.progress.fail(reason);
       await this.drafts
         .updateById(draft.id, {
-          ...(attempt
+          ...(attempt && !stopped
             ? {
                 ...attempt,
                 lastPublishResult:
@@ -393,6 +400,8 @@ export class AutoPublishService {
         const reason = error instanceof Error ? error.message : String(error);
         this.log.warn(`Auto-publish failed for "${deal.title}": ${reason}`);
         outcome.failed.push({ title: deal.title, score: deal.score, reason });
+        // Someone stopped it: the rest of the batch doesn't start either.
+        if (error instanceof PublishCancelledError) break;
       }
     }
     return outcome;

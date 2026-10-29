@@ -12,7 +12,10 @@ import { dealabsTitle } from "./DealabsDraftService.ts";
 import { isSameProduct } from "./dealabsSearch.ts";
 import type { Deal } from "./DealTypes.ts";
 import { keepaChartForDeal } from "./keepa.ts";
-import { PublishProgressService } from "./PublishProgressService.ts";
+import {
+  PublishCancelledError,
+  PublishProgressService,
+} from "./PublishProgressService.ts";
 import type { PublishStepId } from "./publishSteps.ts";
 import {
   launchVisibleBrowser,
@@ -282,7 +285,10 @@ export class DealabsPublisherService {
 
         return { dealabsUrl };
       } catch (error) {
-        if (error instanceof DealabsDuplicateError) {
+        if (
+          error instanceof DealabsDuplicateError ||
+          error instanceof PublishCancelledError
+        ) {
           throw error;
         }
         const debugPath = await this.captureDebug(page, deal.id);
@@ -380,6 +386,7 @@ export class DealabsPublisherService {
     const deadline = Date.now() + 240_000;
     while ((await isChallenge()) && Date.now() < deadline) {
       await page.waitForTimeout(1_000);
+      await this.progress.touch();
     }
 
     if (await isChallenge()) {

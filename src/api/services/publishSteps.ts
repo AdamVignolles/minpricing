@@ -33,7 +33,9 @@ export type PublishStepStatus =
   | "running"
   | "done"
   | "skipped"
-  | "failed";
+  | "failed"
+  /** Stopped on request before anything was posted. */
+  | "stopped";
 
 export interface PublishStep {
   id: PublishStepId;
@@ -55,7 +57,7 @@ export interface PublishRun {
   dealId: string;
   title: string;
   trigger: PublishTrigger;
-  status: "running" | "done" | "failed";
+  status: "running" | "done" | "failed" | "cancelled";
   startedAt: string;
   finishedAt?: string;
   /** Heartbeat: a "running" run silent for too long has died. */
@@ -63,7 +65,25 @@ export interface PublishRun {
   steps: PublishStep[];
   dealabsUrl?: string;
   error?: string;
+  /** Someone asked to stop it; it stops at the next step boundary. */
+  stopRequest?: { by: string; at: string };
 }
+
+/**
+ * The phase from which a stop can no longer be honoured: « Poster un deal »
+ * has been clicked, the post may already exist.
+ */
+export const POINT_OF_NO_RETURN: PublishStepId = "submit";
+
+/** Can this run still be stopped before anything is posted? */
+export const canStopPublish = (run: PublishRun): boolean =>
+  run.status === "running" &&
+  !run.steps.some(
+    (step) =>
+      step.id === POINT_OF_NO_RETURN &&
+      step.status !== "pending" &&
+      step.status !== "skipped",
+  );
 
 export const publishStepLabel = (id: string): string =>
   PUBLISH_STEPS.find((step) => step.id === id)?.label ?? id;
@@ -73,4 +93,6 @@ export const currentPublishStep = (
   run: Pick<PublishRun, "steps">,
 ): PublishStep | undefined =>
   run.steps.find((step) => step.status === "running") ??
-  run.steps.find((step) => step.status === "failed");
+  run.steps.find(
+    (step) => step.status === "failed" || step.status === "stopped",
+  );

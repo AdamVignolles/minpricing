@@ -26,7 +26,10 @@ import { DealabsHistoryService } from "../src/api/services/DealabsHistoryService
 import { DealabsPublisherService } from "../src/api/services/DealabsPublisherService.ts";
 import { DealPageCheckService } from "../src/api/services/DealPageCheckService.ts";
 import { PriceSeriesService } from "../src/api/services/PriceSeriesService.ts";
-import { PublishProgressService } from "../src/api/services/PublishProgressService.ts";
+import {
+  PublishCancelledError,
+  PublishProgressService,
+} from "../src/api/services/PublishProgressService.ts";
 import {
   currentPublishStep,
   PUBLISH_STEPS,
@@ -301,5 +304,75 @@ describe("publish progress", () => {
       .getTools()
       .find((t) => t.name === "get_publish_progress");
     expect(tool?.options.annotations?.readOnlyHint).toBe(true);
+  });
+
+  test("stop: nothing running, then a run stopped mid-way counts no attempt", async () => {
+    expect((await progress.requestStop("vous")).ok).toBe(false);
+
+    const { deal } = await makeDeal("Ori");
+    quietPreflight();
+    vi.spyOn(
+      alepha.inject(DealabsPublisherService),
+      "publish",
+    ).mockImplementation(async () => {
+      await progress.begin("form-link");
+      const answer = await progress.requestStop("vous");
+      expect(answer.ok).toBe(true);
+      // The next step boundary is where it stops.
+      await progress.begin("form-essentials");
+      return { dealabsUrl: "https://www.dealabs.com/bons-plans/never" };
+    });
+
+    const run = alepha.inject(AutoPublishService).publishDeal(deal.id);
+    await expect(run).rejects.toBeInstanceOf(PublishCancelledError);
+    await expect(run).rejects.toThrow("rien n'a été posté");
+    const saved = await fx.drafts.findOne({
+      where: { dealId: { eq: deal.id } },
+    });
+    expect(saved?.status).toBe("draft");
+    expect(saved?.publishAttempts ?? 0).toBe(0);
+    expect(saved?.lastPublishResult).toBeUndefined();
+    const trail = JSON.parse(saved?.lastPublishSteps ?? "{}") as PublishRun;
+    expect(trail.status).toBe("cancelled");
+    expect(statusOf(trail, "form-link")).toBe("stopped");
+    expect(statusOf(trail, "form-essentials")).toBe("pending");
+    expect((await progress.get()).last?.status).toBe("cancelled");
+  });
+
+  test("stop: too late once « Envoi » started, the publish goes through", async () => {
+    const { deal } = await makeDeal("Tunic");
+    quietPreflight();
+    let answer: { ok: boolean; message: string } | undefined;
+    vi.spyOn(
+      alepha.inject(DealabsPublisherService),
+      "publish",
+    ).mockImplementation(async () => {
+      await progress.begin("submit");
+      answer = await progress.requestStop("vous");
+      await progress.begin("session-save");
+      return { dealabsUrl: "https://www.dealabs.com/bons-plans/tunic-1" };
+    });
+    const posted = await alepha.inject(AutoPublishService).publishDeal(deal.id);
+    expect(answer?.ok).toBe(false);
+    expect(answer?.message).toContain("Trop tard");
+    expect(posted.status).toBe("posted");
+  });
+
+  test("stop endpoint: admin only, the agent token is refused", async () => {
+    const drafts = alepha.inject(DraftsController);
+    await expect(
+      drafts.stopPublish.fetch({
+        headers: { authorization: `Bearer ${"p".repeat(64)}` },
+      }),
+    ).rejects.toMatchObject({ status: 401 });
+    const login = await alepha.inject(AuthController).login.fetch({
+      body: { username: "admin", password: "s3cret-admin-pass" },
+    });
+    const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const res = await drafts.stopPublish.fetch({ headers: { cookie } });
+    expect(res.data).toEqual({
+      ok: false,
+      message: "Aucune publication en cours.",
+    });
   });
 });

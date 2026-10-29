@@ -14,7 +14,10 @@ import { DealabsDraftService } from "../services/DealabsDraftService.ts";
 import { DealabsDuplicateError } from "../services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../services/DealabsSessionService.ts";
 import { DealPageCheckService } from "../services/DealPageCheckService.ts";
-import { PublishProgressService } from "../services/PublishProgressService.ts";
+import {
+  PublishCancelledError,
+  PublishProgressService,
+} from "../services/PublishProgressService.ts";
 import { PUBLISH_STEPS } from "../services/publishSteps.ts";
 import {
   REMOTE_KEYS,
@@ -41,17 +44,25 @@ const publishRunSchema = z.object({
   dealId: z.text(),
   title: z.text({ size: "rich" }),
   trigger: z.enum(["button", "schedule", "collection"]),
-  status: z.enum(["running", "done", "failed"]),
+  status: z.enum(["running", "done", "failed", "cancelled"]),
   startedAt: z.text(),
   finishedAt: z.text().optional(),
   updatedAt: z.text(),
   dealabsUrl: z.text({ maxLength: 500 }).optional(),
   error: z.text({ size: "rich" }).optional(),
+  stopRequest: z.object({ by: z.text(), at: z.text() }).optional(),
   steps: z.array(
     z.object({
       id: z.enum(PUBLISH_STEPS.map((step) => step.id) as [string, ...string[]]),
       label: z.text(),
-      status: z.enum(["pending", "running", "done", "skipped", "failed"]),
+      status: z.enum([
+        "pending",
+        "running",
+        "done",
+        "skipped",
+        "failed",
+        "stopped",
+      ]),
       startedAt: z.text().optional(),
       finishedAt: z.text().optional(),
       detail: z.text({ size: "rich" }).optional(),
@@ -130,6 +141,24 @@ export class DraftsController {
       }),
     },
     handler: () => this.progress.get(),
+  });
+
+  /**
+   * Stops the publication in progress at its next step, before anything
+   * is posted. Admin session only (the agent token never writes here).
+   * Refused once « Envoi » started: the post may already exist.
+   */
+  stopPublish = $action({
+    method: "POST",
+    path: "/dealabs/publish/stop",
+    use: [$adminSession()],
+    schema: {
+      response: z.object({
+        ok: z.boolean(),
+        message: z.text({ size: "rich" }),
+      }),
+    },
+    handler: () => this.progress.requestStop("vous"),
   });
 
   /** Is a Dealabs session saved for auto-publish, and is a login running? */
@@ -365,6 +394,9 @@ export class DraftsController {
       } catch (error) {
         if (error instanceof PublishRefusedError) {
           throw new HttpError({ status: error.status, message: error.message });
+        }
+        if (error instanceof PublishCancelledError) {
+          throw new HttpError({ status: 409, message: error.message });
         }
         if (error instanceof DealNotAvailableError) {
           throw new HttpError({

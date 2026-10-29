@@ -34,6 +34,7 @@ import {
   parisWeekday,
   randomTimes,
 } from "../src/api/services/publishPlan.ts";
+import { PublishCancelledError } from "../src/api/services/PublishProgressService.ts";
 import { PublishScheduleService } from "../src/api/services/PublishScheduleService.ts";
 
 const TOKEN = "c".repeat(64);
@@ -299,6 +300,25 @@ describe("publishing plan", () => {
     expect(late.status).toBe("skipped");
     expect(late.note).toContain("trop tard");
     expect(publish).toHaveBeenCalledTimes(4);
+    publish.mockRestore();
+  });
+
+  test("a publication stopped by hand ends the slot as cancelled", async () => {
+    const publish = vi
+      .spyOn(publisher, "publishDeal")
+      .mockRejectedValue(new PublishCancelledError("vous", "Lien du deal"));
+    await call("PUT", "/agent/schedule", {
+      ranked: ranked(),
+      times: ["17:40"],
+      agent: "deals-select",
+    });
+    setNow("2026-10-28T16:41:00.000Z");
+    const [entry] = await schedule.runDue();
+    expect(entry.status).toBe("cancelled");
+    expect(entry.note).toContain("arrêtée par vous");
+    // One deal tried, no other one started, nothing in the ledger.
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(ledger()).toEqual([]);
     publish.mockRestore();
   });
 
