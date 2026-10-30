@@ -181,19 +181,8 @@ const AppLayout: FC = () => {
                   color: "inherit",
                 }}
               >
-                <Box
-                  w={26}
-                  h={26}
-                  style={{
-                    display: "grid",
-                    placeItems: "center",
-                    borderRadius: 8,
-                    background: "var(--mantine-primary-color-filled)",
-                    color: "var(--mantine-primary-color-contrast)",
-                  }}
-                >
-                  <Icon name="bolt" size={15} strokeWidth={2.4} />
-                </Box>
+                {/* Same radar mark as the browser tab (public/favicon.svg). */}
+                <img src="/favicon.svg" alt="" width={28} height={28} />
                 <Text fw={700} fz="lg" lh={1}>
                   DealRadar
                 </Text>
