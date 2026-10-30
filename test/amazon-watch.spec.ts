@@ -261,3 +261,18 @@ describe("AmazonWatchCollector run", () => {
     expect(notes[0]).toContain(`moins de 3 jours de relevés ${worth.length}`);
   });
 });
+
+describe("formatWatchStats", () => {
+  test("known products without a readable price are said so", async () => {
+    const { formatWatchStats, emptyWatchStats } =
+      await import("../src/api/services/amazonWatch.ts");
+    const line = formatWatchStats({
+      ...emptyWatchStats(["kitchen"]),
+      knownRead: 2,
+      knownFailed: 6,
+    });
+    expect(line).toContain(
+      "produits connus relus 2, 6 sans prix lisible (indisponibles ou page refusée)",
+    );
+  });
+});

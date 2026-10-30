@@ -137,6 +137,8 @@ export interface CollectionSummary {
   updated: number;
   /** Offers turned away by the quality gate (bad reviews, bad seller…). */
   rejected?: number;
+  /** The collector's own notes on the run (`DiscoverContext.note`). */
+  notes?: string[];
   error?: string;
 }
 
@@ -654,7 +656,9 @@ export class CollectionService {
     const links = await this.watchedLinks.active(source.id);
 
     try {
-      const context = await this.discoverContext(source.id);
+      // Lines a collector wants kept (amazon-watch's run stats).
+      const notes: string[] = [];
+      const context = await this.discoverContext(source.id, notes);
       const step = (label: string, done?: number, total?: number) =>
         this.progress.step(source.id, label, done, total);
       const found: RawDeal[] = [];
@@ -802,6 +806,7 @@ export class CollectionService {
         createdVisible,
         updated,
         rejected,
+        ...(notes.length ? { notes } : {}),
       };
     } catch (error) {
       const fullMessage =
@@ -834,7 +839,10 @@ export class CollectionService {
    * Tells collectors which offers already have fresh details, so they
    * only open product pages for new or stale ones.
    */
-  protected async discoverContext(sourceId: string): Promise<DiscoverContext> {
+  protected async discoverContext(
+    sourceId: string,
+    notes?: string[],
+  ): Promise<DiscoverContext> {
     const rows = await this.deals.findMany({
       where: { sourceId: { eq: sourceId } },
     });
@@ -858,7 +866,7 @@ export class CollectionService {
         this.progress.step(sourceId, step, done, total),
       worthFetching: (title) => !qualityIssue({ title, sourceId }),
       note: (message) => {
-        this.log.info(`${sourceId}: ${message}`);
+        notes?.push(message);
         this.progress.note(message, sourceId);
       },
     };

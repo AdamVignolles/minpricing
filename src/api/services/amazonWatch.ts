@@ -298,7 +298,7 @@ export function formatWatchStats(stats: WatchRunStats): string {
   return [
     `Listes ${stats.categories.join(", ") || "aucune"} : ${stats.pagesRead} page(s) lue(s), ${stats.pagesCaptcha} contrôle(s) anti-robot, ${stats.pagesEmpty} vide(s)${stats.stoppedOnCaptcha ? " (lecture arrêtée au contrôle)" : ""}`,
     `${stats.cards} fiches, ${stats.noPrice} sans prix Amazon, ${stats.tooCheap} trop bon marché`,
-    `produits connus relus ${stats.knownRead}${stats.knownFailed ? ` (${stats.knownFailed} échec(s))` : ""}`,
+    `produits connus relus ${stats.knownRead}${stats.knownFailed ? `, ${stats.knownFailed} sans prix lisible (indisponibles ou page refusée)` : ""}`,
     `${stats.watched} prix suivis${rejected ? ` · écartés : ${rejected}` : ""}`,
     `${stats.drops} baisse(s), ${stats.promoted} déjà en promo, ${stats.unconfirmed} non confirmée(s), ${stats.deals} deal(s)`,
   ].join(" · ");

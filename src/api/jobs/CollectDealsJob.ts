@@ -84,6 +84,11 @@ export class CollectDealsJob {
             summary,
           );
         }
+        // The collector's own account of the run (amazon-watch: pages,
+        // robot checks, why no drop), kept in the run's log.
+        for (const note of summary.notes ?? []) {
+          this.log.info(`${summary.sourceId}: ${note}`);
+        }
       }
 
       const failures = summaries.filter((s) => s.error).length;
