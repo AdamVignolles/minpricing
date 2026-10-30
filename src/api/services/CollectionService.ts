@@ -959,21 +959,37 @@ export class CollectionService {
         .collect([this.watchedLinks.toRef(link)], context)
         .catch(() => [] as RawDeal[])
     ).find((deal) => deal.externalId === link.externalId);
-    if (!raw) {
+    let outcome: UpsertOutcome;
+    let listedAt: string | undefined;
+    if (raw) {
       await set(
         "page",
-        "failed",
-        "Page bloquée, produit retiré ou mise en page changée.",
+        "done",
+        `${raw.title.slice(0, 120)} : ${raw.price.toLocaleString("fr-FR")} €`,
       );
-      return finish(await this.recordLinkVerdict(link, undefined, source.type));
+      outcome = await this.upsertDeal(source.id, source.type, raw);
+    } else {
+      // Page blocked (AliExpress answers servers with a bot check): the
+      // offer collection read on the shop's own listings, when recent.
+      const listed = await this.listedDeal(link);
+      if (!listed) {
+        await set(
+          "page",
+          "failed",
+          "Page bloquée, produit retiré ou mise en page changée, et produit absent des listes lues récemment.",
+        );
+        return finish(
+          await this.recordLinkVerdict(link, undefined, source.type),
+        );
+      }
+      listedAt = String(listed.lastSeenAt);
+      await set(
+        "page",
+        "done",
+        `Fiche bloquée : offre des listes ${listed.title.slice(0, 100)} : ${listed.currentPrice.toLocaleString("fr-FR")} €`,
+      );
+      outcome = { result: "updated", dealId: listed.id };
     }
-    await set(
-      "page",
-      "done",
-      `${raw.title.slice(0, 120)} : ${raw.price.toLocaleString("fr-FR")} €`,
-    );
-
-    const outcome = await this.upsertDeal(source.id, source.type, raw);
     if (outcome.result !== "rejected") {
       const focus = [outcome.dealId];
       await set("market", "running");
@@ -1018,7 +1034,12 @@ export class CollectionService {
       );
     }
     await set("score", "running");
-    const verdict = await this.recordLinkVerdict(link, outcome, source.type);
+    const verdict = await this.recordLinkVerdict(
+      link,
+      outcome,
+      source.type,
+      listedAt,
+    );
     const deal =
       outcome.result === "rejected"
         ? undefined
@@ -1041,11 +1062,21 @@ export class CollectionService {
     link: WatchedLink,
     outcome: UpsertOutcome | undefined,
     sourceType: SourceReliability,
+    listedAt?: string,
   ): Promise<LinkVerdict> {
     const shop =
       SUPPORTED_SHOPS.find((entry) => entry.sourceId === link.sourceId)
         ?.label ?? link.sourceId;
     if (!outcome) {
+      const listed = await this.listedDeal(link);
+      if (listed) {
+        return this.recordLinkVerdict(
+          link,
+          { result: "updated", dealId: listed.id },
+          sourceType,
+          String(listed.lastSeenAt),
+        );
+      }
       const verdict = linkVerdict({ read: false, shop });
       // A failed read keeps the previous verdict's deal; only the status
       // and text change.
@@ -1076,9 +1107,33 @@ export class CollectionService {
       deal,
       warnings: evaluation.warnings,
       shop,
+      listedAt,
     });
     await this.watchedLinks.record(link.id, verdict, deal.id);
     return verdict;
+  }
+
+  /**
+   * The linked product as collection last read it on the shop's own
+   * listings, when that is recent (under {@link EXPIRE_AFTER_MS}, like a
+   * listed deal's lifetime): the fallback when its product page can't be
+   * read. Same key, so it is the same deal.
+   */
+  protected async listedDeal(link: WatchedLink) {
+    const deal = await this.deals.findOne({
+      where: {
+        and: [
+          { sourceId: { eq: link.sourceId } },
+          { externalId: { eq: link.externalId } },
+          { status: { eq: "active" } },
+        ],
+      },
+    });
+    const age = deal
+      ? new Date(this.dateTime.nowISOString()).getTime() -
+        new Date(deal.lastSeenAt).getTime()
+      : Infinity;
+    return age < EXPIRE_AFTER_MS ? deal : undefined;
   }
 
   /** Collapses whitespace and fits an error message in `Source.lastError`. */

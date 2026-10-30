@@ -283,6 +283,46 @@ describe("watched links", () => {
     expect((await links.get(link.id)).status).toBe("ok");
   });
 
+  test("blocked product page: falls back to the offer seen on the shop's listings", async () => {
+    // Collection saw the product on a listing (card data, no details).
+    amazon.discovered = [goodOffer("B0LISTED01", { details: undefined })];
+    await collection.runOne("amazon");
+    amazon.discovered = [];
+    const [listed] = await fx.deals.findMany({});
+
+    // Its product page answers with a bot check: nothing read by id.
+    const link = await add("https://www.amazon.fr/dp/B0LISTED01");
+    const checked = await collection.checkLink(link.id);
+    expect(checked.dealId).toBe(listed.id);
+    expect(checked.status).not.toBe("failed");
+    expect(checked.verdict).toMatch(
+      /^Fiche produit bloquée : évalué sur l'offre vue dans les listes Amazon\.fr le .+ \(sans les détails de la fiche\)\. /,
+    );
+    expect(JSON.parse(checked.steps ?? "[]")[1]).toMatchObject({
+      id: "page",
+      status: "done",
+      detail: expect.stringContaining("Fiche bloquée : offre des listes"),
+    });
+    expect(await fx.deals.findMany({})).toHaveLength(1);
+  });
+
+  test("blocked and on no recent listing: failed, evaluated once listed", async () => {
+    amazon.discovered = [goodOffer("B0LISTED01", { details: undefined })];
+    await collection.runOne("amazon");
+    amazon.discovered = [];
+    // Listed more than 48 h ago: too old to stand for today's price.
+    clock().ref = clock().of("2026-11-01T16:00:00.000Z");
+    const link = await add("https://www.amazon.fr/dp/B0LISTED01");
+    const checked = await collection.checkLink(link.id);
+    expect(checked.status).toBe("failed");
+    expect(checked.verdict).toMatch(/pas encore vu dans les listes Amazon\.fr/);
+
+    // A later run finds it on a listing: the link is evaluated from it.
+    amazon.discovered = [goodOffer("B0LISTED01")];
+    await collection.runOne("amazon");
+    expect((await links.get(link.id)).status).toBe("ok");
+  });
+
   test("no bypass: the quality gate refuses a linked offer too", async () => {
     const link = await add("https://www.amazon.fr/dp/B0BADREVW1");
     amazon.offers.set(
@@ -608,7 +648,9 @@ describe("link verdicts (same checks as collected deals)", () => {
   test("unreadable page", () => {
     expect(linkVerdict({ read: false, shop: "Cdiscount" })).toMatchObject({
       status: "failed",
-      verdict: expect.stringContaining("prochain passage Cdiscount"),
+      verdict: expect.stringContaining(
+        "Nouvel essai à chaque passage Cdiscount",
+      ),
     });
   });
 });

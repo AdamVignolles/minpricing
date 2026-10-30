@@ -27,6 +27,11 @@ export interface LinkCheck {
   warnings?: string[];
   /** Shop label, e.g. "Amazon.fr". */
   shop: string;
+  /**
+   * The product page could not be read, but collection saw the product on
+   * one of the shop's listings then: the verdict is about that offer.
+   */
+  listedAt?: string;
 }
 
 const euros = (value: number) =>
@@ -38,13 +43,32 @@ const euros = (value: number) =>
 const STILL_WATCHED =
   "Le lien reste surveillé : il est réévalué à chaque passage (une baisse de prix peut le rendre visible).";
 
+const parisDateTime = (iso: string) =>
+  new Date(iso).toLocaleString("fr-FR", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Paris",
+  });
+
 export function linkVerdict(check: LinkCheck, now = new Date()): LinkVerdict {
   if (!check.read) {
     return {
       status: "failed",
-      verdict: `Fiche produit illisible (page bloquée, produit retiré ou mise en page changée). Nouvel essai au prochain passage ${check.shop}.`,
+      verdict: `Fiche produit illisible (page bloquée, produit retiré ou mise en page changée), et produit pas encore vu dans les listes ${check.shop} lues par la collecte. Nouvel essai à chaque passage ${check.shop} : il sera évalué dès qu'il apparaît dans une liste.`,
     };
   }
+  const verdict = judge(check, now);
+  return check.listedAt
+    ? {
+        ...verdict,
+        verdict: `Fiche produit bloquée : évalué sur l'offre vue dans les listes ${check.shop} le ${parisDateTime(check.listedAt)} (sans les détails de la fiche). ${verdict.verdict}`,
+      }
+    : verdict;
+}
+
+function judge(check: LinkCheck, now: Date): LinkVerdict {
   if (check.rejected) {
     return {
       status: "refused",

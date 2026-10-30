@@ -417,7 +417,10 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   history focused on that deal (`focus` on `refreshStale`), `rescore`.
   `linkVerdict.ts` says the outcome in French (visible with score / gate
   reason / « pas d'argument prix » / under 40 / already live on Dealabs /
-  page unreadable). Refused links stay watched; the watch ends after 14
+  page unreadable). A blocked product page (AliExpress answers servers
+  with its bot check) falls back to the offer collection read on the
+  shop's own listings in the last 48 h (`listedDeal`, same key, verdict
+  says so); never through the shop's internal APIs. Refused links stay watched; the watch ends after 14
   days or when the deal expires. Deals carry `addedByLink`; Admin ›
   « Liens ajoutés » lists them (Revérifier, Arrêter). Manual price entry
   (`ManualCollector`, `PATCH /products/:id/price`, the `manual` and
