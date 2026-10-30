@@ -291,6 +291,12 @@ export class CollectionService {
       // headless browser: 3 is comfortable for a desktop and for
       // Cloudflare's Browser Rendering concurrency.
       COLLECT_SOURCE_CONCURRENCY: z.number().default(3),
+      /** amazon-watch: best-seller categories read per run (2 pages each). */
+      AMAZON_WATCH_CATEGORIES_PER_RUN: z.number().default(4),
+      /** amazon-watch: items under this price (€) aren't watched. */
+      AMAZON_WATCH_MIN_PRICE: z.number().default(20),
+      /** amazon-watch: known products (deals that are over) re-read per run. */
+      AMAZON_WATCH_KNOWN_PER_RUN: z.number().default(8),
     }),
   );
 
@@ -334,6 +340,11 @@ export class CollectionService {
       this.amazonWatch,
       new AmazonCollector([], 0, () => this.cloudflareBrowserBinding()),
       () => this.cloudflareBrowserBinding(),
+      {
+        categoriesPerRun: this.env.AMAZON_WATCH_CATEGORIES_PER_RUN,
+        minPrice: this.env.AMAZON_WATCH_MIN_PRICE,
+        knownPerRun: this.env.AMAZON_WATCH_KNOWN_PER_RUN,
+      },
     ),
     relances: new RelaunchCollector(
       this.hotWatchlist,
@@ -846,6 +857,10 @@ export class CollectionService {
       progress: (step, done, total) =>
         this.progress.step(sourceId, step, done, total),
       worthFetching: (title) => !qualityIssue({ title, sourceId }),
+      note: (message) => {
+        this.log.info(`${sourceId}: ${message}`);
+        this.progress.note(message, sourceId);
+      },
     };
   }
 

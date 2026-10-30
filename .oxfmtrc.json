@@ -13,6 +13,7 @@
     "public",
     ".playwright",
     "playwright-report",
-    "test-results"
+    "test-results",
+    "test/fixtures/amazon-watch"
   ]
 }

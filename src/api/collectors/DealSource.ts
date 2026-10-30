@@ -146,6 +146,11 @@ export interface DiscoverContext {
    */
   progress?(step: string, done?: number, total?: number): void;
   /**
+   * One line about the run worth keeping (amazon-watch: pages read, robot
+   * checks, why no drop), in the run's log and the progress sidebar.
+   */
+  note?(message: string): void;
+  /**
    * False when the title alone already disqualifies the offer (no-name
    * AliExpress product, low-end laptop…, see `qualityIssue`): skip it
    * before spending a product-page load on it.

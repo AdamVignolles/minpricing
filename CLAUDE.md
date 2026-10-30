@@ -265,13 +265,28 @@ deals and, separately, the visible ones (`createdVisible`).
   gg.deals (403); IsThereAnyDeal needs `ITAD_API_KEY` (free).
 - **Silent drops** (`AmazonWatchCollector`, source `amazon-watch`): Amazon
   price drops shown as no promotion. Each run reads the best-seller lists
-  of 14 categories (plain fetch, 2 pages each, ~840 products, parser in
-  `services/amazonWatch.ts`), records every price in `PriceHistory` under
-  `watch:<ASIN>` (`AmazonWatchService`, on change + daily heartbeat), and
-  flags `silentDrop`: watched ≥ 3 days, ≥ 15 % and ≥ 5 € under the usual
-  price (median of the last 30 daily prices), at or under the month's
-  low, and not more than two-thirds off (a placeholder price, not a
-  deal). Products Amazon already shows as a promotion (active `amazon`
+  of a few of 14 categories (`AMAZON_WATCH_CATEGORIES_PER_RUN`, 4, taking
+  turns hour by hour — `categoriesForRun`; plain fetch, 2 pages each, 3–6 s
+  apart, **stopping at Amazon's first robot check**, never retrying around
+  it; parser `readBestSellerPage` in `services/amazonWatch.ts`), skips
+  items under `AMAZON_WATCH_MIN_PRICE` (20 €) and « N offres à partir de »
+  cards (marketplace only), and re-reads `AMAZON_WATCH_KNOWN_PER_RUN` (8)
+  known products on their own page (Amazon/relaunch/silent-drop deals that
+  expired or were archived in the last 60 days, `knownToRead`). It
+  records every price in `PriceHistory` under `watch:<ASIN>`
+  (`AmazonWatchService`, on change + daily heartbeat), and flags a drop
+  (`assessSilentDrop`, which also says why not): watched ≥ 3 days, ≥ 15 %
+  and ≥ 5 € under the usual price (median of the last 30 daily prices),
+  at or under the month's low, not more than two-thirds off (a placeholder
+  price, not a deal), and **steady before** (≥ 70 % of the last 3 days'
+  observations within ±5 % of the usual price — a buy box changing hands
+  all day is noise). Each run notes one line (`formatWatchStats`, through
+  `DiscoverContext.note` → run log + progress sidebar): pages read / robot
+  checks / empty, cards, items without an Amazon price, too cheap, known
+  products read, prices watched, rejections by reason, drops, already
+  promoted, unconfirmed, deals. Checking prices from the cloud sandbox:
+  Amazon serves it prices **without VAT** (÷ 1.2) — never compare them
+  with production's history. Products Amazon already shows as a promotion (active `amazon`
   deal) are skipped; up to 12 product pages per run confirm the drop. The
   deal's `listPrice` is our measured usual price (`regular`). Tested and
   unavailable: camelcamelcamel (security check), Keepa deals (paid API),
