@@ -160,3 +160,25 @@ freeze whatever `cloudflare.env` looked like the one time the singleton
 was first constructed (often `undefined`, before any request had bound
 `env`), and every collection run afterwards would silently fall back to
 the (non-existent-on-Workers) `playwright` path forever.
+
+## Deploying to the Bay VM (Docker runtime)
+
+Bay 0.34+ runs every app in a hardened Docker container (read-only root,
+512 MiB, 256 pids, no host path). Chromium needs more, so the VM runs
+minpricing in its own runtime image, built **on the VM** (Bay never pulls an
+image that is already present):
+
+```bash
+docker build -t dealradar-runtime:pw-1.63.0 deploy/runtime   # keep in step with package.json's playwright
+bay runtimes set minpricing/production dealradar-runtime:pw-1.63.0
+bay harden minpricing/production --memory 1g
+bay harden minpricing/production --pids 1024
+bay harden minpricing/production --mount /tmp/.X11-unix   # host Xvfb :99, read-only
+```
+
+The instance env must say `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`,
+`DISPLAY=:99`, and point `HOME` and `TMPDIR` at the instance's writable
+`scratch/` (headed Chromium fails with "Target page, context or browser has
+been closed" otherwise). Xvfb, VNC and noVNC stay host services, so the
+« écran distant » keeps working. Backups: Bay snapshots the SQLite files in
+`data/` to S3 (the app's files are mirrored in `app_files`), no script needed.
