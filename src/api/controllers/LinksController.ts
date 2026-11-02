@@ -34,7 +34,7 @@ const linkSchema = z.object({
   shop: z.text(),
   externalId: z.text({ maxLength: 500 }),
   addedBy: z.text(),
-  status: z.enum(["pending", "ok", "refused", "failed", "ended"]),
+  status: z.enum(["pending", "ok", "refused", "failed", "ended", "removed"]),
   verdict: z.text({ size: "rich" }).optional(),
   steps: z.array(stepSchema),
   lastCheckedAt: z.text().optional(),
@@ -202,7 +202,7 @@ export class LinksController {
     },
     handler: async ({ params }) => {
       const link = await this.links.get(params.id);
-      if (link.status === "ended") {
+      if (link.status === "ended" || link.status === "removed") {
         await this.links.add(link.canonicalUrl, link.addedBy);
       } else {
         await this.links.setSteps(link.id, initialLinkSteps());

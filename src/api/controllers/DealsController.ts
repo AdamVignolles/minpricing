@@ -1,7 +1,7 @@
 import { z } from "alepha";
 import { $inject, Alepha } from "alepha";
 import { $repository, db, pageQuerySchema } from "alepha/orm";
-import { $action } from "alepha/server";
+import { $action, HttpError } from "alepha/server";
 
 import type { CloudflareBrowserBinding } from "../collectors/browser.ts";
 import { dealEntity } from "../entities/Deal.ts";
@@ -452,6 +452,32 @@ export class DealsController {
     },
     handler: async ({ params }) =>
       (await this.withLinks([await this.deals.getById(params.id)]))[0],
+  });
+
+  /**
+   * « Retirer des ajouts à la main »: the deal's pasted links stop being
+   * watched and it loses the hand-added exemptions. The deal stays; the
+   * next run applies the normal rules (quality gate, visibility bar,
+   * 48 h expiry). 404 when it was not added by hand.
+   */
+  removeHandAdded = $action({
+    method: "DELETE",
+    path: "/deals/:id/hand-added",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ id: z.text() }),
+      response: dealResponseSchema,
+    },
+    handler: async ({ params }) => {
+      const deal = await this.deals.getById(params.id);
+      if ((await this.watchedLinks.removeByDeal(deal.id)) === 0) {
+        throw new HttpError({
+          status: 404,
+          message: "Ce bon plan n'a pas été ajouté à la main.",
+        });
+      }
+      return (await this.withLinks([deal]))[0];
+    },
   });
 
   historyOf = $action({

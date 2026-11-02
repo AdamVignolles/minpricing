@@ -38,6 +38,7 @@ import PublishSteps, {
   usePublishProgress,
 } from "../components/deals/PublishSteps.tsx";
 import RemoteScreen from "../components/deals/RemoteScreen.tsx";
+import RemoveHandAdded from "../components/deals/RemoveHandAdded.tsx";
 import StoreHistoryChart from "../components/deals/StoreHistoryChart.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
@@ -524,6 +525,22 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
               >
                 {deal.status === "active" ? "Offre active" : "Offre expirée"}
               </Badge>
+              {deal.addedByLink ? (
+                <>
+                  <Badge
+                    variant="light"
+                    color="gray"
+                    leftSection={<Icon name="link" size={11} />}
+                  >
+                    Ajouté par lien
+                  </Badge>
+                  <RemoveHandAdded
+                    dealId={deal.id}
+                    title={deal.title}
+                    variant="button"
+                  />
+                </>
+              ) : null}
             </Group>
 
             <Title order={1} fz={{ base: "1.4rem", sm: "1.75rem" }} lh={1.2}>

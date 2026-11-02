@@ -8,6 +8,8 @@ import { $entity, db } from "alepha/orm";
  * offers do — same `(sourceId, externalId)` key, so a product collection
  * also finds stays one deal. Watched until `watchUntil` or until its
  * deal expires; a refused link stays watched (its price may drop).
+ * `removed`: taken out of the deals « ajoutés à la main » by hand — not
+ * watched, and its deal follows the normal rules again.
  */
 export const watchedLinkEntity = $entity({
   name: "watched_links",
@@ -22,7 +24,7 @@ export const watchedLinkEntity = $entity({
     addedBy: z.text({ maxLength: 80 }),
     status: db.default(
       z
-        .enum(["pending", "ok", "refused", "failed", "ended"])
+        .enum(["pending", "ok", "refused", "failed", "ended", "removed"])
         .meta({ mode: "text" }),
       "pending",
     ),

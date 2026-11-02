@@ -467,6 +467,100 @@ describe("watched links", () => {
     expect(report.data.candidates[0].score).toBeLessThan(40);
   });
 
+  const adminCookie = async () => {
+    const login = await alepha.inject(AuthController).login.fetch({
+      body: { username: "admin", password: "s3cret-admin-pass" },
+    });
+    return login.headers.get("set-cookie")?.split(";")[0] ?? "";
+  };
+
+  test("removed from the hand-added deals: normal rules again, deal kept", async () => {
+    const badlyRated = () =>
+      goodOffer("B0BADREVW1", {
+        details: { productRating: 3.2, productReviewCount: 120 },
+      });
+    const link = await add("https://www.amazon.fr/dp/B0BADREVW1");
+    amazon.offers.set("B0BADREVW1", badlyRated());
+    await collection.checkLink(link.id);
+    const dealId = (await links.get(link.id)).dealId as string;
+    expect((await fx.deals.getById(dealId)).status).toBe("active");
+
+    const api = alepha.inject(DealsController);
+    await expect(
+      api.removeHandAdded.fetch({ params: { id: dealId } }),
+    ).rejects.toMatchObject({ status: 401 });
+    const cookie = await adminCookie();
+    const removed = await api.removeHandAdded.fetch({
+      headers: { cookie },
+      params: { id: dealId },
+    });
+    expect(removed.data.id).toBe(dealId);
+    expect(removed.data.addedByLink).toBeUndefined();
+
+    const stored = await links.get(link.id);
+    expect(stored.status).toBe("removed");
+    expect(stored.verdict).toBe("Retiré des ajouts à la main.");
+    expect(await links.handPickedDealIds()).toEqual([]);
+    expect(await links.active()).toEqual([]);
+    const mine = await api.list.fetch({
+      headers: { cookie },
+      query: { addedByHand: true },
+    });
+    expect(mine.data.content).toHaveLength(0);
+    // The deal itself is still there until a run says otherwise.
+    expect((await fx.deals.getById(dealId)).status).toBe("active");
+
+    // Next run: the link is not read any more, and the same offer found
+    // by collection goes through the quality gate like any other.
+    amazon.discovered = [badlyRated()];
+    amazon.asked = [];
+    await collection.runOne("amazon");
+    expect(amazon.asked).toHaveLength(0);
+    expect((await fx.deals.getById(dealId)).status).toBe("archived");
+    expect((await links.get(link.id)).status).toBe("removed");
+  });
+
+  test("a removed link stays removed until its link is pasted again", async () => {
+    const link = await add("https://www.amazon.fr/dp/B0BXYCS74H");
+    amazon.offers.set("B0BXYCS74H", goodOffer("B0BXYCS74H"));
+    await collection.checkLink(link.id);
+    const dealId = (await links.get(link.id)).dealId as string;
+    expect(await links.removeByDeal(dealId)).toBe(1);
+
+    // A check queued before the removal, « Arrêter », a timed-out watch
+    // or an expired deal don't bring it back.
+    amazon.asked = [];
+    expect((await collection.checkLink(link.id)).status).toBe("removed");
+    expect(amazon.asked).toHaveLength(0);
+    expect((await links.end(link.id, "x")).status).toBe("removed");
+    await links.endForExpiredDeals([dealId]);
+    expect((await links.get(link.id)).status).toBe("removed");
+    await links.record(link.id, { status: "ok", verdict: "late check" });
+    expect((await links.get(link.id)).status).toBe("removed");
+
+    // Pasted again: hand-added again.
+    const again = await links.add(
+      "https://www.amazon.fr/Sony/dp/B0BXYCS74H",
+      "admin",
+    );
+    expect(again.ok && again.duplicate).toBe(false);
+    expect(again.ok && again.link.id).toBe(link.id);
+    expect((await links.get(link.id)).status).toBe("pending");
+    expect(await links.handPickedDealIds()).toEqual([dealId]);
+  });
+
+  test("removing a deal that was not added by hand: 404", async () => {
+    amazon.discovered = [goodOffer("B0BXYCS74H")];
+    await collection.runOne("amazon");
+    const [deal] = await fx.deals.findMany({});
+    await expect(
+      alepha.inject(DealsController).removeHandAdded.fetch({
+        headers: { cookie: await adminCookie() },
+        params: { id: deal.id },
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
   test("API: admin adds a link, gets an instant refusal or a queued check", async () => {
     const api = alepha.inject(LinksController);
     const login = await alepha.inject(AuthController).login.fetch({

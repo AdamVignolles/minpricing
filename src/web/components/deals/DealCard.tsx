@@ -8,6 +8,7 @@ import Icon from "../ui/Icon.tsx";
 import { useNow } from "../ui/useNow.ts";
 import DealImage from "./DealImage.tsx";
 import { HeatBadge } from "./HeatForecast.tsx";
+import RemoveHandAdded from "./RemoveHandAdded.tsx";
 
 const DAY_MS = 86_400_000;
 
@@ -197,6 +198,9 @@ const DealCard: FC<DealCardProps> = ({
                 ? ` · vendu par ${deal.sellerName}`
                 : ""}
             </Text>
+            {deal.addedByLink ? (
+              <RemoveHandAdded dealId={deal.id} title={deal.title} />
+            ) : null}
             <Tooltip label="Note du deal (prix réel, vendeur, avis)" withArrow>
               <Badge
                 size="sm"

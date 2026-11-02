@@ -27,7 +27,12 @@ const STATUS: Record<LinkView["status"], { label: string; color: string }> = {
   refused: { label: "Pas retenu", color: "orange" },
   failed: { label: "Illisible", color: "red" },
   ended: { label: "Plus surveillé", color: "gray" },
+  removed: { label: "Retiré", color: "gray" },
 };
+
+/** Ended or removed by hand: no longer read on each run. */
+const isWatched = (link: LinkView) =>
+  link.status !== "ended" && link.status !== "removed";
 
 /** Re-read while a check runs, so its row moves on by itself. */
 const POLL_MS = 5_000;
@@ -43,7 +48,7 @@ const AddedLinksList: FC = () => {
   const [busy, setBusy] = useState<string>();
   const [version, setVersion] = useState(0);
   const running = links?.some(
-    (link) => link.status !== "ended" && !checkFinished(link),
+    (link) => isWatched(link) && !checkFinished(link),
   );
 
   useEffect(() => {
@@ -107,7 +112,7 @@ const AddedLinksList: FC = () => {
         <Table.Tbody>
           {links.map((link) => {
             const status = STATUS[link.status];
-            const inProgress = link.status !== "ended" && !checkFinished(link);
+            const inProgress = isWatched(link) && !checkFinished(link);
             return (
               <Table.Tr key={link.id}>
                 <Table.Td maw={320}>
@@ -153,7 +158,7 @@ const AddedLinksList: FC = () => {
                         f.dateTime(link.lastCheckedAt))
                       : "pas encore"}
                   </Text>
-                  {link.status !== "ended" ? (
+                  {isWatched(link) ? (
                     <Text fz="xs" c="dimmed">
                       suivi jusqu'au {f.date(link.watchUntil)}
                     </Text>
@@ -185,7 +190,7 @@ const AddedLinksList: FC = () => {
                     >
                       Revérifier
                     </Button>
-                    {link.status !== "ended" ? (
+                    {isWatched(link) ? (
                       <Button
                         size="compact-xs"
                         variant="subtle"

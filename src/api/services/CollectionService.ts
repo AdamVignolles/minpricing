@@ -963,6 +963,8 @@ export class CollectionService {
    */
   async checkLink(linkId: string): Promise<WatchedLink> {
     const link = await this.watchedLinks.get(linkId);
+    // Removed by hand while its check was queued: not hand-added any more.
+    if (link.status === "removed") return link;
     const previous = this.linkChecks.get(link.sourceId) ?? Promise.resolve();
     const run = previous
       .catch(() => undefined)

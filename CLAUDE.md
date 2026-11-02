@@ -197,6 +197,12 @@ controllers → React console → Dealabs draft / auto-publish.
   outside every rule (except already tried today). Each run's
   `checkLinksNotRun` re-reads the active links whose shop did not run
   (spaced out or switched off), so every link is checked hourly.
+  « Retirer des ajouts à la main » (card ✕ and detail page,
+  `DELETE /deals/:id/hand-added` → `removeByDeal`) sets the deal's links to
+  `removed`: no longer read, not hand-picked, so the normal rules apply
+  again (the deal is not deleted; the next run may archive it). A queued
+  check, « Arrêter » or an expired deal never undo it; pasting the link
+  again does.
 - **Quality gate & visibility**: `services/qualityGate.ts` rejects offers at
   collection time (product < 4/5 on ≥ 20 reviews — 4.5 on AliExpress —,
   marketplace seller < 4/5 or < 50 sales, low-end Celeron/N4000 laptops,
