@@ -21,6 +21,7 @@
     "@mantine/hooks": "^9.6.3",
     "@mantine/notifications": "^9.6.3",
     "alepha": "^0.30.0",
+    "cheerio": "^1.2.0",
     "playwright": "^1.63.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

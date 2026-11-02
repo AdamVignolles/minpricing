@@ -8,6 +8,8 @@ export interface RunTiming {
   pagesRead?: number;
   /** Product pages that gave no price (challenge, timeout, layout). */
   pagesFailed?: number;
+  /** Pages read over plain HTTP; the rest needed the browser. */
+  readByFetch?: number;
   pageP50Ms?: number;
   pageP95Ms?: number;
   /** 1-minute load average when the source started and ended. */

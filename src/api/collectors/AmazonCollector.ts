@@ -1,3 +1,4 @@
+import { fetchAmazonProduct } from "./amazonProductHtml.ts";
 import { type AmazonPageText, parseAmazonSignals } from "./amazonSignals.ts";
 import type { CloudflareBrowserBinding, DealsPage } from "./browser.ts";
 import {
@@ -109,6 +110,18 @@ export class AmazonCollector implements DealSource {
     this.dealsUrls = dealsUrls;
     this.limit = limit;
   }
+
+  /**
+   * Read product pages over plain HTTP first (about 3x faster, no CPU-hungry
+   * Chromium), the browser only when that gets no price. Off on Cloudflare,
+   * where the browser binding is the only way out. Rollback switch:
+   * `sources.amazon.fetchFirst: false` in `config/collection.json`.
+   */
+  setFetchFirst(enabled: boolean): void {
+    this.fetchFirst = enabled;
+  }
+
+  protected fetchFirst = true;
 
   /**
    * Watched links (see `WatchedLink`): each ASIN's product page, read
@@ -281,6 +294,7 @@ export class AmazonCollector implements DealSource {
       // A few product pages at once (each in its own context, see
       // below) instead of one by one: the bulk of a run's time.
       let done = 0;
+      let byFetch = 0;
       const listingMs = Date.now() - startedAt;
       const pageTimes: number[] = [];
       const pagesStartedAt = Date.now();
@@ -294,9 +308,17 @@ export class AmazonCollector implements DealSource {
             // fingerprints sessions, and reusing cookies/context across
             // several sequential product-page loads causes later ones to
             // come back with the price element silently missing.
-            const priced = await withPage(browser, (page) =>
-              this.fetchPrice(page, card.url),
-            );
+            let priced =
+              this.fetchFirst && !this.getCloudflareBinding?.()
+                ? await fetchAmazonProduct(card.url)
+                : undefined;
+            if (priced) {
+              byFetch++;
+            } else {
+              priced = await withPage(browser, (page) =>
+                this.fetchPrice(page, card.url),
+              );
+            }
             if (!priced) {
               return undefined;
             }
@@ -345,6 +367,7 @@ export class AmazonCollector implements DealSource {
         candidates: candidates.length,
         pagesRead: deals.length,
         pagesFailed: candidates.length - deals.length,
+        readByFetch: byFetch,
         pageP50Ms: percentile(pageTimes, 0.5),
         pageP95Ms: percentile(pageTimes, 0.95),
         load: [loadAtStart, currentLoad()],

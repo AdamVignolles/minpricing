@@ -20,6 +20,8 @@ export interface SourceTuning {
   enabled?: boolean;
   /** Run at most once every N hours (the hourly job skips it meanwhile). */
   everyHours?: number;
+  /** Amazon: read product pages over plain HTTP first (default on). */
+  fetchFirst?: boolean;
 }
 
 export interface CollectionTuning {

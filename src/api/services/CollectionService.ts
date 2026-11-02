@@ -395,6 +395,9 @@ export class CollectionService {
       amazon.urls,
       amazon.limit,
     );
+    (this.collectorsById.amazon as AmazonCollector).setFetchFirst(
+      tuning.sources?.amazon?.fetchFirst !== false,
+    );
     (this.collectorsById.cdiscount as CdiscountCollector).setTargets(
       cdiscount.urls,
       cdiscount.limit,
