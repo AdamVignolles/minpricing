@@ -21,6 +21,7 @@ import type {
   ProductRef,
   RawDeal,
 } from "../src/api/collectors/DealSource.ts";
+import { AdminController } from "../src/api/controllers/AdminController.ts";
 import { AuthController } from "../src/api/controllers/AuthController.ts";
 import { DealsController } from "../src/api/controllers/DealsController.ts";
 import {
@@ -29,6 +30,7 @@ import {
 } from "../src/api/controllers/LinksController.ts";
 import { agentWriteEntity } from "../src/api/entities/AgentWrite.ts";
 import { dealEntity } from "../src/api/entities/Deal.ts";
+import { dealabsDraftEntity } from "../src/api/entities/DealabsDraft.ts";
 import { sourceEntity } from "../src/api/entities/Source.ts";
 import { trackedProductEntity } from "../src/api/entities/TrackedProduct.ts";
 import { watchedLinkEntity } from "../src/api/entities/WatchedLink.ts";
@@ -40,6 +42,7 @@ import { DealabsHistoryService } from "../src/api/services/DealabsHistoryService
 import { ItadService } from "../src/api/services/ItadService.ts";
 import { linkVerdict } from "../src/api/services/linkVerdict.ts";
 import { MarketReferenceService } from "../src/api/services/MarketReferenceService.ts";
+import { MyDealabsPostsService } from "../src/api/services/MyDealabsPostsService.ts";
 import { PriceSeriesService } from "../src/api/services/PriceSeriesService.ts";
 import { SeedService } from "../src/api/services/SeedService.ts";
 import { WatchedLinkService } from "../src/api/services/WatchedLinkService.ts";
@@ -96,6 +99,7 @@ class Fixtures {
   deals = $repository(dealEntity);
   links = $repository(watchedLinkEntity);
   writes = $repository(agentWriteEntity);
+  drafts = $repository(dealabsDraftEntity);
 }
 
 describe("watched links", () => {
@@ -106,6 +110,7 @@ describe("watched links", () => {
   let fx: Fixtures;
   let amazon: FakeAmazon;
   let queued: ReturnType<typeof vi.spyOn>;
+  let drafted: ReturnType<typeof vi.spyOn>;
   const clock = () => alepha.inject(DateTimeProvider) as any;
 
   beforeAll(async () => {
@@ -142,10 +147,13 @@ describe("watched links", () => {
       alepha.inject(PriceSeriesService),
       "refreshLows",
     ).mockResolvedValue([]);
+    drafted = vi
+      .spyOn(alepha.inject(DealabsDraftService), "maybeGenerateDraft")
+      .mockResolvedValue(undefined as any);
     vi.spyOn(
-      alepha.inject(DealabsDraftService),
-      "maybeGenerateDraft",
-    ).mockResolvedValue(undefined as any);
+      alepha.inject(MyDealabsPostsService),
+      "postsNow",
+    ).mockResolvedValue([]);
     // The queue is not under test: checks are run by hand below.
     queued = vi
       .spyOn(alepha.inject(LinkCheckJob).run, "push")
@@ -165,6 +173,8 @@ describe("watched links", () => {
     await fx.links.deleteMany({});
     amazon = new FakeAmazon();
     queued?.mockClear();
+    drafted?.mockClear();
+    await fx.drafts.deleteMany({});
     await fx.writes.deleteMany({});
     (collection as any).collectorsById.amazon = amazon;
   });
@@ -323,7 +333,7 @@ describe("watched links", () => {
     expect((await links.get(link.id)).status).toBe("ok");
   });
 
-  test("no bypass: the quality gate refuses a linked offer too", async () => {
+  test("added by hand: the quality gate never refuses it, only reports", async () => {
     const link = await add("https://www.amazon.fr/dp/B0BADREVW1");
     amazon.offers.set(
       "B0BADREVW1",
@@ -332,16 +342,30 @@ describe("watched links", () => {
       }),
     );
     const checked = await collection.checkLink(link.id);
-    expect(checked.status).toBe("refused");
-    expect(checked.verdict).toMatch(/^Écarté par le contrôle qualité : /);
-    expect(await fx.deals.findMany({})).toHaveLength(0);
-    expect(JSON.parse(checked.steps ?? "[]")[4]).toMatchObject({
-      id: "score",
-      status: "failed",
-    });
+    expect(checked.status).toBe("ok");
+    expect(checked.verdict).toMatch(
+      /Ajouté à la main : affiché malgré contrôle qualité \(produit mal noté/,
+    );
+    const [deal] = await fx.deals.findMany({});
+    expect(deal.status).toBe("active");
+    expect(checked.dealId).toBe(deal.id);
+    expect(drafted).toHaveBeenCalled();
+
+    // The same offer collected from a listing (not by hand) is refused.
+    amazon.discovered = [
+      goodOffer("B0BADREVW2", {
+        details: { productRating: 3.2, productReviewCount: 120 },
+      }),
+    ];
+    await collection.runOne("amazon");
+    expect(
+      await fx.deals.findMany({ where: { externalId: { eq: "B0BADREVW2" } } }),
+    ).toHaveLength(0);
+    // The hand-added one stays active through a run.
+    expect((await fx.deals.getById(deal.id)).status).toBe("active");
   });
 
-  test("a refused link is re-evaluated on later runs", async () => {
+  test("added by hand: shown and drafted under the visibility bar", async () => {
     const link = await add("https://www.amazon.fr/dp/B0BXYCS74H");
     // At its usual price: no price argument, capped under the bar.
     amazon.offers.set(
@@ -353,13 +377,94 @@ describe("watched links", () => {
       }),
     );
     await collection.runOne("amazon");
-    const refused = await links.get(link.id);
-    expect(refused.status).toBe("refused");
-    expect(refused.verdict).toMatch(/pas d'argument prix|sous le seuil/);
+    const stored = await links.get(link.id);
+    expect(stored.status).toBe("ok");
+    expect(stored.verdict).toMatch(
+      /Ajouté à la main : affiché malgré note sous le seuil de visibilité \(40\)/,
+    );
+    const deal = await fx.deals.getById(stored.dealId as string);
+    expect(deal.score).toBeLessThan(40);
+    expect(drafted).toHaveBeenCalled();
 
-    amazon.offers.set("B0BXYCS74H", goodOffer("B0BXYCS74H"));
+    // A collected deal under the bar stays hidden; the hand-added one shows.
+    amazon.offers.clear();
+    amazon.discovered = [
+      goodOffer("B0LOWSCORE", {
+        price: 379,
+        listPrice: undefined,
+        details: { ...goodOffer("x").details, lowestRecentPrice: 379 },
+      }),
+    ];
     await collection.runOne("amazon");
+    const api = alepha.inject(DealsController);
+    const headers = { authorization: `Bearer ${TOKEN}` };
+    const all = await api.list.fetch({ headers, query: { status: "active" } });
+    expect(all.data.content.map((d) => d.externalId)).toEqual(["B0BXYCS74H"]);
+    const mine = await api.list.fetch({
+      headers,
+      query: { status: "active", addedByHand: true },
+    });
+    expect(mine.data.content.map((d) => d.id)).toEqual([deal.id]);
+  });
+
+  test("filter « ajoutés à la main » with no link yet: empty", async () => {
+    amazon.discovered = [goodOffer("B0BXYCS74H")];
+    await collection.runOne("amazon");
+    const page = await alepha.inject(DealsController).list.fetch({
+      headers: { authorization: `Bearer ${TOKEN}` },
+      query: { addedByHand: true },
+    });
+    expect(page.data.content).toHaveLength(0);
+  });
+
+  test("every run checks the links of shops that did not run", async () => {
+    const link = await add("https://www.amazon.fr/dp/B0BXYCS74H");
+    amazon.offers.set("B0BXYCS74H", goodOffer("B0BXYCS74H"));
+    // Amazon ran: its links were read by its own run.
+    expect(await (collection as any).checkLinksNotRun([{ id: "amazon" }])).toBe(
+      0,
+    );
+    expect(amazon.asked).toHaveLength(0);
+    // Amazon spaced out or switched off: the link is read on its own.
+    expect(await (collection as any).checkLinksNotRun([{ id: "steam" }])).toBe(
+      1,
+    );
+    expect(amazon.asked.map((ref) => ref.externalId)).toEqual(["B0BXYCS74H"]);
     expect((await links.get(link.id)).status).toBe("ok");
+  });
+
+  test("agent report: hand-added deals always offered first, flagged", async () => {
+    const link = await add("https://www.amazon.fr/dp/B0BXYCS74H");
+    amazon.offers.set(
+      "B0BXYCS74H",
+      goodOffer("B0BXYCS74H", {
+        price: 379,
+        listPrice: undefined,
+        details: { ...goodOffer("x").details, lowestRecentPrice: 379 },
+      }),
+    );
+    amazon.discovered = [goodOffer("B0GOODDEAL")];
+    await collection.runOne("amazon");
+    const hand = (await links.get(link.id)).dealId as string;
+    for (const deal of await fx.deals.findMany({})) {
+      await fx.drafts.create({
+        dealId: deal.id,
+        title: deal.title,
+        body: "x",
+        generatedAt: NOW,
+      });
+    }
+    // Real clock in the report: make both deals "seen" just now.
+    await fx.deals.updateMany({}, { lastSeenAt: new Date().toISOString() });
+    const report = await alepha.inject(AdminController).agentReport.fetch({
+      headers: { authorization: `Bearer ${TOKEN}` },
+      query: { days: 0, perCategory: 1, limit: 1 },
+    });
+    expect(report.data.candidates.map((c) => [c.id, c.handPicked])).toEqual([
+      [hand, true],
+      [expect.any(String), undefined],
+    ]);
+    expect(report.data.candidates[0].score).toBeLessThan(40);
   });
 
   test("API: admin adds a link, gets an instant refusal or a queued check", async () => {

@@ -126,7 +126,12 @@ const AUTO_PUBLISH_STEP = "dealabs-publish";
 
 /** What `upsertDeal` did with one offer. */
 export type UpsertOutcome =
-  | { result: "created" | "updated"; dealId: string }
+  | {
+      result: "created" | "updated";
+      dealId: string;
+      /** Hand-added offer the quality gate would have refused: why. */
+      qualityNote?: string;
+    }
   | { result: "rejected"; reason: string };
 
 export interface CollectionSummary {
@@ -463,6 +468,7 @@ export class CollectionService {
           await this.progress.sourceFinished(source.id, summary);
         },
       );
+      const linksChecked = await this.checkLinksNotRun(sources);
       // Switched-off sources list nothing any more: their deals expire too.
       await this.expireUnseen([
         ...summaries,
@@ -473,7 +479,13 @@ export class CollectionService {
           updated: 0,
         })),
       ]);
-      this.logRun(runStartedAt, summaries, durations, switchedOff);
+      this.logRun(
+        runStartedAt,
+        summaries,
+        durations,
+        switchedOff,
+        linksChecked,
+      );
       await this.refreshTopOnDealabs(sources);
       if (this.autoPublish.enabled) {
         await this.publishBestDeals(runStartedAt);
@@ -487,6 +499,34 @@ export class CollectionService {
   }
 
   /**
+   * Pasted links are checked on every run, even when their shop's source
+   * did not run this time (spaced out or switched off by
+   * `config/collection.json`): each one is read on its own. Before
+   * `expireUnseen`, so a read link's deal stays active.
+   * @returns how many links were checked.
+   */
+  protected async checkLinksNotRun(
+    ran: Array<{ id: string }>,
+  ): Promise<number> {
+    const ranIds = new Set(ran.map((source) => source.id));
+    const links = await this.watchedLinks
+      .active()
+      .then((all) => all.filter((link) => !ranIds.has(link.sourceId)))
+      .catch((error: unknown) => {
+        this.log.warn("Could not list watched links", { error });
+        return [] as WatchedLink[];
+      });
+    if (links.length > 0) {
+      this.progress.note(
+        `${links.length} lien(s) ajouté(s) à la main vérifié(s) hors de leur source`,
+      );
+    }
+    // checkLink queues per shop and never throws.
+    await Promise.all(links.map((link) => this.checkLink(link.id)));
+    return links.length;
+  }
+
+  /**
    * One line per run in `data/agents/collection-runs.jsonl` (time and yield
    * of each source) for the deals-sources agent. Local only: skipped when
    * the folder doesn't exist (Workers, fresh clone).
@@ -496,6 +536,7 @@ export class CollectionService {
     summaries: CollectionSummary[],
     durations: Map<string, number>,
     switchedOff: string[],
+    linksChecked = 0,
   ): void {
     const timings = takeTimings();
     try {
@@ -506,6 +547,7 @@ export class CollectionService {
         `${JSON.stringify({
           at: startedAt,
           switchedOff,
+          linksChecked,
           sources: summaries.map((s) => ({
             id: s.sourceId,
             ms: durations.get(s.sourceId),
@@ -691,6 +733,7 @@ export class CollectionService {
         return true;
       });
       const outcomes = new Map<string, UpsertOutcome>();
+      const linkedIds = new Set(links.map((link) => link.externalId));
 
       let created = 0;
       const createdIds: string[] = [];
@@ -710,6 +753,7 @@ export class CollectionService {
             source.id,
             source.type,
             rawDeal,
+            { handPicked: linkedIds.has(rawDeal.externalId) },
           );
           outcomes.set(rawDeal.externalId, outcome);
           if (outcome.result === "rejected") {
@@ -1001,7 +1045,9 @@ export class CollectionService {
         "done",
         `${raw.title.slice(0, 120)} : ${raw.price.toLocaleString("fr-FR")} €`,
       );
-      outcome = await this.upsertDeal(source.id, source.type, raw);
+      outcome = await this.upsertDeal(source.id, source.type, raw, {
+        handPicked: true,
+      });
     } else {
       // Page blocked (AliExpress answers servers with a bot check): the
       // offer collection read on the shop's own listings, when recent.
@@ -1138,6 +1184,25 @@ export class CollectionService {
     const deal = await this.deals.getById(outcome.dealId);
     const verdict = linkVerdict({
       read: true,
+      handPicked: true,
+      qualityNote:
+        "qualityNote" in outcome
+          ? outcome.qualityNote
+          : // Not read this time (listing fallback): what the gate says of
+            // the stored offer.
+            qualityIssue({
+              title: deal.title,
+              sourceId: deal.sourceId,
+              productRating: deal.productRating ?? undefined,
+              productReviewCount: deal.productReviewCount ?? undefined,
+              soldByMerchant: deal.soldByMerchant ?? undefined,
+              sellerRating: deal.sellerRating ?? undefined,
+              sellerSalesCount: deal.sellerSalesCount ?? undefined,
+              price: deal.billingPeriod ? undefined : deal.currentPrice,
+              listPrice: deal.billingPeriod
+                ? undefined
+                : (deal.listPrice ?? undefined),
+            }),
       deal,
       warnings: evaluation.warnings,
       shop,
@@ -1237,6 +1302,7 @@ export class CollectionService {
     sourceId: string,
     sourceType: SourceReliability,
     rawDeal: RawDeal,
+    options: { handPicked?: boolean } = {},
   ): Promise<UpsertOutcome> {
     const now = this.dateTime.nowISOString();
     rawDeal = { ...rawDeal, title: fitTitle(rawDeal.title) };
@@ -1267,7 +1333,9 @@ export class CollectionService {
       price: rawDeal.billingPeriod ? undefined : rawDeal.price,
       listPrice: rawDeal.billingPeriod ? undefined : rawDeal.listPrice,
     });
-    if (reason) {
+    // A deal added by hand (pasted link) is the owner's own pick: never
+    // refused, the reason is only reported on the link.
+    if (reason && !options.handPicked) {
       // Already stored: archive it so it leaves the console.
       if (existing && existing.status !== "archived") {
         await this.deals.updateById(existing.id, { status: "archived" });
@@ -1418,11 +1486,15 @@ export class CollectionService {
     await this.rescore(dealId, sourceType);
 
     const deal = await this.deals.getById(dealId);
-    // No draft for a deal nobody should post.
-    if (deal.score >= MIN_VISIBLE_SCORE) {
+    // No draft for a deal nobody should post — unless added by hand.
+    if (deal.score >= MIN_VISIBLE_SCORE || options.handPicked) {
       await this.drafts.maybeGenerateDraft(deal);
     }
 
-    return { result: existing ? "updated" : "created", dealId };
+    return {
+      result: existing ? "updated" : "created",
+      dealId,
+      ...(reason ? { qualityNote: reason } : {}),
+    };
   }
 }

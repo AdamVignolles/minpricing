@@ -86,15 +86,17 @@ export class WatchedLinkService {
   }
 
   /**
-   * The links a run of this source reads: not ended, watch not over.
-   * Ends the ones whose time is up on the way.
+   * The links a run of this source reads (every shop's without one): not
+   * ended, watch not over. Ends the ones whose time is up on the way.
    */
-  async active(sourceId: string): Promise<WatchedLink[]> {
+  async active(sourceId?: string): Promise<WatchedLink[]> {
     const now = this.dateTime.nowISOString();
     const links = await this.links.findMany({
-      where: {
-        and: [{ sourceId: { eq: sourceId } }, { status: { ne: "ended" } }],
-      },
+      where: sourceId
+        ? {
+            and: [{ sourceId: { eq: sourceId } }, { status: { ne: "ended" } }],
+          }
+        : { status: { ne: "ended" } },
     });
     const over = links.filter(
       (link) => new Date(link.watchUntil).getTime() <= new Date(now).getTime(),
@@ -172,6 +174,17 @@ export class WatchedLinkService {
       where: { dealId: { inArray: dealIds } },
     });
     return new Map(links.map((link) => [link.dealId as string, link]));
+  }
+
+  /**
+   * Every deal a pasted link ever pointed at (watch ended or not): the
+   * deals « ajoutés à la main ».
+   */
+  async handPickedDealIds(): Promise<string[]> {
+    const links = await this.links.findMany({
+      where: { dealId: { isNotNull: true } },
+    });
+    return [...new Set(links.map((link) => link.dealId as string))];
   }
 
   /** Labels and examples, for the console's hint and refusals. */

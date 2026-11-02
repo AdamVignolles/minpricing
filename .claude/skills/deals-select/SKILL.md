@@ -20,7 +20,10 @@ Be brief: few tool calls, no commentary. `<today>` = `YYYY-MM-DD`.
    `disc` (%), `score, hot, adj` (adjusted hot chance), `rating, reviews,
 seller, sold` (sold by the merchant), `dlBest` (best Dealabs
    temperature of this product), `dlLow` (lowest price already posted).
-3. **Veto** — remove a deal only for one of these, and note why:
+   `handPicked: true` = added by hand by the owner (pasted link): listed
+   first, outside every rule.
+3. **Veto** — never veto a `handPicked` deal (bad rating, no brand, score:
+   the owner chose it). Otherwise — remove a deal only for one of these, and note why:
    - suspicious data: price ≤ 0 on a non-free item, `disc` > 90 % on
      hardware, `ref` missing and `disc` absent;
    - an accessory, bundle or spare part posing as the product;
@@ -32,7 +35,8 @@ seller, sold` (sold by the merchant), `dlBest` (best Dealabs
    - marketplace seller (`sold` false) with no rating or rating < 4;
    - `dlLow` known and `price` > `dlLow` (already posted cheaper).
      Never add a deal that isn't in the shortlist.
-4. **Order by desirability** (Dealabs votes on "I want it", not on the
+4. **Hand-picked first**: every `handPicked` deal goes at the top of the
+   queue (reason: « Ajouté à la main »), then **order by desirability** (Dealabs votes on "I want it", not on the
    percentage): put first what a large audience wants at a price they can
    say yes to — a loved brand (Lenovo, Logitech, Samsung, Ryobi, Dyson,
    LEGO, Apple, Nintendo hardware…), PC / tech / DIY tools, Amazon
@@ -40,7 +44,8 @@ seller, sold` (sold by the merchant), `dlBest` (best Dealabs
    after them unless they are a major franchise at a record low; old or
    obscure games last. Keep the shortlist order among deals of similar
    interest.
-5. Write `data/agents/queue-<today>.json`, max 10 deals, best first:
+5. Write `data/agents/queue-<today>.json`, max 10 deals (more if there
+   are more hand-picked ones), best first:
    `{"date":"<today>","rulesVersion":N,"ranked":[{"dealId":id,"title":title,"sourceId":src,"categoryId":cat,"price":price,"score":score,"hotChance":hot,"adjustedHotChance":adj,"reason":"≤ 20 mots en français : l'argument prix + l'historique Dealabs"}],"vetoed":[{"title":…,"why":…}]}`.
    The script draws how many (2–5) and when (17:30–21:30); the first ones
    in the list go first, the others replace failures. It also publishes

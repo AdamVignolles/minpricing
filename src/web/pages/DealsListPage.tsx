@@ -14,6 +14,7 @@ import {
   ScrollArea,
   Select,
   Stack,
+  Switch,
   Text,
   TextInput,
   Title,
@@ -39,6 +40,7 @@ export interface DealsQuery {
   minDiscount?: number;
   minPrice?: number;
   maxPrice?: number;
+  addedByHand?: boolean;
 }
 
 export interface DealsPageProps {
@@ -132,6 +134,12 @@ const DealsListPage: FC<DealsPageProps> = ({
 
   const activeChips = useMemo(() => {
     const chips: Array<{ label: string; clear: Partial<DealsQuery> }> = [];
+    if (query.addedByHand) {
+      chips.push({
+        label: "Ajoutés à la main",
+        clear: { addedByHand: undefined },
+      });
+    }
     if (query.search) {
       chips.push({
         label: `« ${query.search} »`,
@@ -185,6 +193,15 @@ const DealsListPage: FC<DealsPageProps> = ({
 
   const filters = (
     <Stack gap="lg">
+      <Switch
+        label="Ajoutés à la main"
+        description="Les produits dont vous avez collé le lien, même mal notés"
+        checked={!!query.addedByHand}
+        onChange={(event) =>
+          apply({ addedByHand: event.currentTarget.checked || undefined })
+        }
+      />
+
       <Stack gap="xs">
         <Text fw={600} fz="sm">
           Réduction minimale

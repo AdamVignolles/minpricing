@@ -324,8 +324,15 @@ async function shortlist() {
     scoreTropBas: 0,
     chanceHotTropBasse: 0,
   };
+  // Deals added by hand (pasted link) are the owner's picks: no rule
+  // (score, hot chance, excluded source, category cap) leaves them out,
+  // only an attempt already made today.
   const scored = report.candidates
     .filter((c) => {
+      if (c.handPicked) {
+        if (tried.has(c.id)) return (rejected.dejaTenteAujourdhui++, false);
+        return true;
+      }
       if (r.excludedSources.includes(c.sourceId))
         return (rejected.sourceExclue++, false);
       if (tried.has(c.id)) return (rejected.dejaTenteAujourdhui++, false);
@@ -340,6 +347,7 @@ async function shortlist() {
       return { ...c, adjusted };
     })
     .filter((c) => {
+      if (c.handPicked) return true;
       if (c.score < r.minScore) return (rejected.scoreTropBas++, false);
       if (c.adjusted < r.minHotChance)
         return (rejected.chanceHotTropBasse++, false);
@@ -348,31 +356,36 @@ async function shortlist() {
   // Diversity: at most `shortlistPerCategory` of one category in the list,
   // so backups aren't all the same kind of deal.
   const perCategory = {};
-  const ranked = scored
-    .sort((a, b) => b.adjusted - a.adjusted || b.score - a.score)
-    .filter((c) => {
-      perCategory[c.categoryId] = (perCategory[c.categoryId] ?? 0) + 1;
-      return perCategory[c.categoryId] <= (r.shortlistPerCategory ?? 99);
-    })
-    .slice(0, 12)
-    .map((c) => ({
-      id: c.id,
-      title: c.title.slice(0, 90),
-      src: c.sourceId,
-      cat: c.categoryId,
-      price: c.price,
-      ref: c.referencePrice,
-      disc: c.discount,
-      score: c.score,
-      hot: c.hotChance,
-      adj: c.adjusted,
-      rating: c.rating,
-      reviews: c.reviews,
-      seller: c.seller,
-      sold: c.soldByMerchant,
-      dlBest: c.dealabsBestTemperature,
-      dlLow: c.dealabsLowestPrice,
-    }));
+  const byRank = (a, b) => b.adjusted - a.adjusted || b.score - a.score;
+  const ranked = [
+    ...scored.filter((c) => c.handPicked).sort(byRank),
+    ...scored
+      .filter((c) => !c.handPicked)
+      .sort(byRank)
+      .filter((c) => {
+        perCategory[c.categoryId] = (perCategory[c.categoryId] ?? 0) + 1;
+        return perCategory[c.categoryId] <= (r.shortlistPerCategory ?? 99);
+      })
+      .slice(0, 12),
+  ].map((c) => ({
+    id: c.id,
+    title: c.title.slice(0, 90),
+    src: c.sourceId,
+    cat: c.categoryId,
+    price: c.price,
+    ref: c.referencePrice,
+    disc: c.discount,
+    score: c.score,
+    hot: c.hotChance,
+    adj: c.adjusted,
+    rating: c.rating,
+    reviews: c.reviews,
+    seller: c.seller,
+    sold: c.soldByMerchant,
+    dlBest: c.dealabsBestTemperature,
+    dlLow: c.dealabsLowestPrice,
+    ...(c.handPicked ? { handPicked: true } : {}),
+  }));
   const result = {
     date: today(),
     rulesVersion: r.version,

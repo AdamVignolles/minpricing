@@ -31,6 +31,7 @@ import {
 import { MyDealabsPostsService } from "../services/MyDealabsPostsService.ts";
 import { dropSameListings } from "../services/sameListing.ts";
 import { MIN_VISIBLE_SCORE } from "../services/ScoringService.ts";
+import { WatchedLinkService } from "../services/WatchedLinkService.ts";
 
 const richText = () => z.text({ size: "rich" });
 
@@ -58,6 +59,7 @@ export class AdminController {
   protected collectJob = $inject(CollectDealsJob);
   protected progress = $inject(CollectionProgressService);
   protected myPosts = $inject(MyDealabsPostsService);
+  protected watchedLinks = $inject(WatchedLinkService);
 
   stats = $action({
     method: "GET",
@@ -392,6 +394,8 @@ export class AdminController {
             dealabsBestTemperature: z.number().optional(),
             dealabsLowestPrice: z.number().optional(),
             freshAt: z.text().optional(),
+            /** Added by hand (pasted link): always offered, first. */
+            handPicked: z.boolean().optional(),
           }),
         ),
         posted: z.array(
@@ -441,12 +445,21 @@ export class AdminController {
       // Candidates: visible, seen recently, with a draft never attempted —
       // or stopped once by Dealabs' "possible duplicate" panel, which used
       // to be taken as a duplicate even when it suggested other products.
+      // Deals added by hand are the owner's picks: any score, any age.
+      const handIds = new Set(await this.watchedLinks.handPickedDealIds());
+      const visible = {
+        and: [
+          { score: { gte: MIN_VISIBLE_SCORE } },
+          { lastSeenAt: { gte: since.toISOString() } },
+        ],
+      };
       const seen = await this.deals.findMany({
         where: {
           and: [
             { status: { eq: "active" } },
-            { score: { gte: MIN_VISIBLE_SCORE } },
-            { lastSeenAt: { gte: since.toISOString() } },
+            handIds.size > 0
+              ? { or: [visible, { id: { inArray: [...handIds] } }] }
+              : visible,
           ],
         },
       });
@@ -482,48 +495,51 @@ export class AdminController {
               isSameProduct(deal.title, deal.currentPrice, thread),
           );
         }),
-      )
-        .sort(
-          (a, b) =>
-            (b.hotChance ?? 0) - (a.hotChance ?? 0) || b.score - a.score,
-        )
-        // The heat model favours video games (Dealabs-wide base rates), so a
-        // plain top-N is all games: keep the best N of each category instead.
-        .filter((deal, _, sorted) => {
-          if (!query.perCategory) return true;
-          const sameCategory = sorted.filter(
-            (other) => other.categoryId === deal.categoryId,
-          );
-          return sameCategory.indexOf(deal) < query.perCategory;
-        })
-        .slice(0, query.limit ?? 25)
-        .map((deal) => ({
-          id: deal.id,
-          title: deal.title.slice(0, 120),
-          sourceId: deal.sourceId,
-          categoryId: deal.categoryId,
-          price: deal.currentPrice,
-          referencePrice:
-            deal.lowestRecentPrice ?? deal.listPrice ?? deal.oldPrice,
-          discount: deal.discountPercentage,
-          score: deal.score,
-          hotChance: deal.hotChance,
-          hotReasons: deal.hotReasons?.slice(0, 200),
-          seller: deal.sellerName,
-          soldByMerchant: deal.soldByMerchant,
-          shipsFrom: deal.shipsFrom,
-          rating: deal.productRating,
-          reviews: deal.productReviewCount,
-          billingPeriod: deal.billingPeriod,
-          dealabsPosts: deal.dealabsDealsCount,
-          dealabsBestTemperature: deal.dealabsBestTemperature,
-          dealabsLowestPrice: deal.dealabsLowestPrice,
-          freshAt: deal.freshAt,
-        }));
+      ).sort(
+        (a, b) => (b.hotChance ?? 0) - (a.hotChance ?? 0) || b.score - a.score,
+      );
+      const ranked = [
+        ...candidates.filter((deal) => handIds.has(deal.id)),
+        ...candidates
+          .filter((deal) => !handIds.has(deal.id))
+          // The heat model favours video games (Dealabs-wide base rates), so
+          // a plain top-N is all games: keep the best N of each category.
+          .filter((deal, _, sorted) => {
+            if (!query.perCategory) return true;
+            const sameCategory = sorted.filter(
+              (other) => other.categoryId === deal.categoryId,
+            );
+            return sameCategory.indexOf(deal) < query.perCategory;
+          })
+          .slice(0, query.limit ?? 25),
+      ].map((deal) => ({
+        id: deal.id,
+        title: deal.title.slice(0, 120),
+        sourceId: deal.sourceId,
+        categoryId: deal.categoryId,
+        price: deal.currentPrice,
+        referencePrice:
+          deal.lowestRecentPrice ?? deal.listPrice ?? deal.oldPrice,
+        discount: deal.discountPercentage,
+        score: deal.score,
+        hotChance: deal.hotChance,
+        hotReasons: deal.hotReasons?.slice(0, 200),
+        seller: deal.sellerName,
+        soldByMerchant: deal.soldByMerchant,
+        shipsFrom: deal.shipsFrom,
+        rating: deal.productRating,
+        reviews: deal.productReviewCount,
+        billingPeriod: deal.billingPeriod,
+        dealabsPosts: deal.dealabsDealsCount,
+        dealabsBestTemperature: deal.dealabsBestTemperature,
+        dealabsLowestPrice: deal.dealabsLowestPrice,
+        freshAt: deal.freshAt,
+        ...(handIds.has(deal.id) ? { handPicked: true } : {}),
+      }));
 
       const report = {
         generatedAt: new Date(now).toISOString(),
-        candidates,
+        candidates: ranked,
         posted: [] as Array<{
           dealId: string;
           title: string;

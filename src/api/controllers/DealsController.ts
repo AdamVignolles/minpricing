@@ -147,6 +147,8 @@ export class DealsController {
         merchantId: z.text().optional(),
         sourceId: z.text().optional(),
         search: z.text().optional(),
+        /** Only deals added by hand (pasted link). */
+        addedByHand: z.boolean().optional(),
         sortBy: z
           .enum([
             "relevance",
@@ -175,15 +177,32 @@ export class DealsController {
         merchantId,
         sourceId,
         search,
+        addedByHand,
       } = query;
 
       const conditions: Record<string, unknown>[] = [];
       if (status) conditions.push({ status: { eq: status } });
       // Under MIN_VISIBLE_SCORE a deal isn't shown at all, whatever the
-      // filter asks for.
-      conditions.push({
+      // filter asks for — except a deal added by hand, the owner's pick.
+      const handPicked = await this.watchedLinks.handPickedDealIds();
+      const scoreFloor = {
         score: { gte: Math.max(minScore ?? 0, MIN_VISIBLE_SCORE) },
-      });
+      };
+      if (addedByHand) {
+        conditions.push(
+          handPicked.length > 0
+            ? { id: { inArray: handPicked } }
+            : // None yet: an empty page, not an empty IN ().
+              { id: { eq: "" } },
+        );
+        if (minScore !== undefined) {
+          conditions.push({ score: { gte: minScore } });
+        }
+      } else if (handPicked.length > 0 && !minScore) {
+        conditions.push({ or: [scoreFloor, { id: { inArray: handPicked } }] });
+      } else {
+        conditions.push(scoreFloor);
+      }
       if (minDiscount !== undefined) {
         conditions.push({ discountPercentage: { gte: minDiscount } });
       }

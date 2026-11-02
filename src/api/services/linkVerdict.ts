@@ -17,6 +17,13 @@ export interface LinkCheck {
   read: boolean;
   /** The quality gate's reason, when it rejected the offer. */
   rejected?: string;
+  /**
+   * Added by hand: the owner's pick, shown whatever the quality gate and
+   * the visibility bar say — they are only reported.
+   */
+  handPicked?: boolean;
+  /** What the quality gate holds against a hand-added offer. */
+  qualityNote?: string;
   deal?: {
     score?: number | null;
     discountPercentage?: number | null;
@@ -84,7 +91,7 @@ function judge(check: LinkCheck, now: Date): LinkVerdict {
     };
   }
   const score = deal.score ?? 0;
-  if (score < MIN_VISIBLE_SCORE) {
+  if (score < MIN_VISIBLE_SCORE && !check.handPicked) {
     const noPriceArgument = check.warnings?.some((warning) =>
       warning.startsWith("Pas d'argument prix"),
     );
@@ -111,8 +118,17 @@ function judge(check: LinkCheck, now: Date): LinkVerdict {
   const discount = deal.discountPercentage
     ? `, ${deal.discountPercentage} % sous le prix barré`
     : "";
+  const despite = [
+    check.qualityNote && `contrôle qualité (${check.qualityNote})`,
+    score < MIN_VISIBLE_SCORE &&
+      `note sous le seuil de visibilité (${MIN_VISIBLE_SCORE})`,
+  ].filter(Boolean);
   return {
     status: "ok",
-    verdict: `Visible : note ${score}/100 à ${euros(deal.currentPrice)}${discount}.`,
+    verdict: `Visible : note ${score}/100 à ${euros(deal.currentPrice)}${discount}.${
+      despite.length
+        ? ` Ajouté à la main : affiché malgré ${despite.join(" et ")}.`
+        : ""
+    }`,
   };
 }

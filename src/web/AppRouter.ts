@@ -27,6 +27,7 @@ const dealListQuerySchema = z.object({
   minDiscount: z.number().min(0).max(100).optional(),
   minPrice: z.number().min(0).optional(),
   maxPrice: z.number().min(0).optional(),
+  addedByHand: z.boolean().optional(),
   page: z.number().optional(),
 });
 

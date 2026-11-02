@@ -186,6 +186,17 @@ controllers → React console → Dealabs draft / auto-publish.
   promos (marketplace with fake struck prices); Apple refurbished (no
   reference price); Materiel.net (no struck prices); Dell, Lookfantastic
   (promo codes, not prices).
+- **Hand-added deals** (pasted links, `WatchedLink`; a deal is hand-added
+  when a link's `dealId` points at it — `WatchedLinkService.handPickedDealIds`):
+  the owner's picks. `upsertDeal(..., { handPicked: true })` skips every
+  quality-gate rejection (the reason is only reported on the link's
+  verdict) and drafts them under the score-40 bar; lists show them under
+  the bar too, and `/deals?addedByHand=true` (switch « Ajoutés à la main »
+  in Bons plans) lists only them. `/admin/agent-report` always offers them
+  first, flagged `handPicked`, and `dealradar.mjs shortlist` keeps them
+  outside every rule (except already tried today). Each run's
+  `checkLinksNotRun` re-reads the active links whose shop did not run
+  (spaced out or switched off), so every link is checked hourly.
 - **Quality gate & visibility**: `services/qualityGate.ts` rejects offers at
   collection time (product < 4/5 on ≥ 20 reviews — 4.5 on AliExpress —,
   marketplace seller < 4/5 or < 50 sales, low-end Celeron/N4000 laptops,
