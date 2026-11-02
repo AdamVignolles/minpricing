@@ -14,6 +14,7 @@ import type {
   DiscoverContext,
   RawDeal,
 } from "./DealSource.ts";
+import { currentLoad, noteTiming, percentile } from "./runTimings.ts";
 
 /** Cards announcing less than this ("-12 %") aren't worth opening. */
 const MIN_BADGE_PERCENT = 20;
@@ -108,6 +109,8 @@ export class AmazonCollector implements DealSource {
   }
 
   async discover(context?: DiscoverContext): Promise<RawDeal[]> {
+    const startedAt = Date.now();
+    const loadAtStart = currentLoad();
     return withBrowser(
       async (browser) => {
         type Card = {
@@ -237,10 +240,14 @@ export class AmazonCollector implements DealSource {
         // A few product pages at once (each in its own context, see
         // below) instead of one by one: the bulk of a run's time.
         let done = 0;
+        const listingMs = Date.now() - startedAt;
+        const pageTimes: number[] = [];
+        const pagesStartedAt = Date.now();
         const found = await mapWithConcurrency(
           candidates,
           PAGE_CONCURRENCY,
           async (card): Promise<RawDeal | undefined> => {
+            const pageStartedAt = Date.now();
             try {
               // Each product page is fetched in its own browser context: Amazon
               // fingerprints sessions, and reusing cookies/context across
@@ -280,6 +287,7 @@ export class AmazonCollector implements DealSource {
               // must not block the rest of the deals found this run.
               return undefined;
             } finally {
+              pageTimes.push(Date.now() - pageStartedAt);
               context?.progress?.(
                 "Fiches produits (prix, vendeur, avis)",
                 ++done,
@@ -290,6 +298,16 @@ export class AmazonCollector implements DealSource {
         );
         deals.push(...found.filter((deal): deal is RawDeal => !!deal));
 
+        noteTiming(this.id, {
+          listingMs,
+          pagesMs: Date.now() - pagesStartedAt,
+          candidates: candidates.length,
+          pagesRead: deals.length,
+          pagesFailed: candidates.length - deals.length,
+          pageP50Ms: percentile(pageTimes, 0.5),
+          pageP95Ms: percentile(pageTimes, 0.95),
+          load: [loadAtStart, currentLoad()],
+        });
         return deals;
       },
       this.getCloudflareBinding?.(),

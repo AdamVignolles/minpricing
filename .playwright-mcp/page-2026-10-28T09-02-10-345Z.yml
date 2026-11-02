@@ -1,0 +1,16 @@
+- generic [ref=e2]:
+    - generic [ref=e5]:
+        - generic [ref=e6]:
+            - heading "DealRadar" [level=2] [ref=e10]
+            - paragraph [ref=e11]: Console privée — connectez-vous pour continuer.
+        - generic [ref=e13]:
+            - generic [ref=e14]:
+                - generic [ref=e15]: Nom d'utilisateur *
+                - textbox "Nom d'utilisateur" [active] [ref=e17]
+            - generic [ref=e18]:
+                - generic [ref=e19]: Mot de passe *
+                - generic [ref=e20]:
+                    - textbox "Mot de passe" [ref=e22]
+                    - button "Toggle password visibility" [ref=e24] [cursor=pointer]
+            - button "Se connecter" [ref=e30] [cursor=pointer]
+    - button "Feedback" [ref=e33] [cursor=pointer]

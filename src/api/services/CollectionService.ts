@@ -24,6 +24,7 @@ import type {
 } from "../collectors/DealSource.ts";
 import { ManualCollector } from "../collectors/ManualCollector.ts";
 import { RelaunchCollector } from "../collectors/RelaunchCollector.ts";
+import { takeTimings } from "../collectors/runTimings.ts";
 import { SteamCollector } from "../collectors/SteamCollector.ts";
 import {
   CastoramaCollector,
@@ -472,6 +473,7 @@ export class CollectionService {
     switchedOff: string[],
   ): void {
     const fallbacks = takeLightpandaFallbacks();
+    const timings = takeTimings();
     try {
       const dir = join(process.cwd(), "data", "agents");
       if (!existsSync(dir)) return;
@@ -489,6 +491,7 @@ export class CollectionService {
             updated: s.updated,
             rejected: s.rejected,
             ...(s.error ? { error: s.error.slice(0, 120) } : {}),
+            ...(timings[s.sourceId] ? { timing: timings[s.sourceId] } : {}),
             ...(fallbacks[s.sourceId]
               ? { lightpandaFallbacks: fallbacks[s.sourceId] }
               : {}),

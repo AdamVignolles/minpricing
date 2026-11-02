@@ -1,0 +1,22 @@
+- generic [ref=e2]:
+    - generic [ref=e3]:
+        - generic [ref=e4]:
+            - button "Language" [ref=e5] [cursor=pointer]
+            - button "Mode daltonien" [ref=e8] [cursor=pointer]
+            - button "Changer le thème" [ref=e11] [cursor=pointer]
+        - generic [ref=e15]:
+            - img "Hitachi" [ref=e17]
+            - heading "Transcity Capacity" [level=1] [ref=e18]
+            - paragraph [ref=e19]: Planification des capacités
+            - generic [ref=e20]:
+                - generic [ref=e21]:
+                    - generic [ref=e22]: Nom d’utilisateur
+                    - textbox "Nom d’utilisateur" [active] [ref=e23]: admin
+                - generic [ref=e24]:
+                    - generic [ref=e25]: Mot de passe
+                    - generic [ref=e26]:
+                        - textbox "Mot de passe" [ref=e27]: Thales01*
+                        - button [ref=e28] [cursor=pointer]
+                - button "Se connecter" [ref=e32] [cursor=pointer]
+            - generic [ref=e33]: © 2026 Hitachi, Ltd.
+    - button "Feedback" [ref=e34] [cursor=pointer]

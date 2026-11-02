@@ -1,0 +1,170 @@
+- generic [ref=e2]:
+    - button "Feedback" [ref=e34] [cursor=pointer]
+    - generic [ref=e37]:
+        - generic [ref=e40]:
+            - list [ref=e42]:
+                - listitem [ref=e43]:
+                    - link "Transcity Planification des capacités Build 2026-10-28" [ref=e44] [cursor=pointer]:
+                        - /url: /
+                        - generic [ref=e48]:
+                            - generic [ref=e49]: Transcity
+                            - generic [ref=e50]: Planification des capacités
+                            - generic "2026-10-28T09:17:04.906Z" [ref=e51]: Build 2026-10-28
+            - generic [ref=e52]:
+                - generic [ref=e53]:
+                    - generic [ref=e54]: Principal
+                    - list [ref=e56]:
+                        - listitem [ref=e57]:
+                            - link "Tableau de bord" [ref=e58] [cursor=pointer]:
+                                - /url: /
+                        - listitem [ref=e65]:
+                            - link "Compétences" [ref=e66] [cursor=pointer]:
+                                - /url: /skills
+                        - listitem [ref=e71]:
+                            - link "Équipe" [ref=e72] [cursor=pointer]:
+                                - /url: /team
+                        - listitem [ref=e79]:
+                            - link "Feuille de route" [ref=e80] [cursor=pointer]:
+                                - /url: /roadmap
+                - generic [ref=e84]:
+                    - generic [ref=e85]: Planification & Capacité
+                    - list [ref=e87]:
+                        - listitem [ref=e88]:
+                            - link "Matrice de capacité" [ref=e89] [cursor=pointer]:
+                                - /url: /capacity
+                        - listitem [ref=e93]:
+                            - link "Disponibilité" [ref=e94] [cursor=pointer]:
+                                - /url: /availability
+                        - listitem [ref=e98]:
+                            - link "Charge de travail" [ref=e99] [cursor=pointer]:
+                                - /url: /workload
+                        - listitem [ref=e103]:
+                            - link "Planification" [ref=e104] [cursor=pointer]:
+                                - /url: /planning
+                        - listitem [ref=e107]:
+                            - link "Chronologie des ressources" [ref=e108] [cursor=pointer]:
+                                - /url: /resource-timeline
+                - generic [ref=e113]:
+                    - generic [ref=e114]: Reporting
+                    - list [ref=e116]:
+                        - listitem [ref=e117]:
+                            - link "Analytique" [ref=e118] [cursor=pointer]:
+                                - /url: /analytics
+                        - listitem [ref=e122]:
+                            - link "Suivi d'activité" [ref=e123] [cursor=pointer]:
+                                - /url: /activity-tracking
+                - generic [ref=e128]:
+                    - generic [ref=e129]: Configuration
+                    - list [ref=e131]:
+                        - listitem [ref=e132]:
+                            - link "Départements" [ref=e133] [cursor=pointer]:
+                                - /url: /departments
+                        - listitem [ref=e138]:
+                            - link "Releases" [ref=e139] [cursor=pointer]:
+                                - /url: /releases
+                        - listitem [ref=e143]:
+                            - link "Types" [ref=e144] [cursor=pointer]:
+                                - /url: /configuration
+                        - listitem [ref=e148]:
+                            - link "Reporting" [ref=e149] [cursor=pointer]:
+                                - /url: /reporting-configuration
+                        - listitem [ref=e154]:
+                            - link "Paramètres" [ref=e155] [cursor=pointer]:
+                                - /url: /settings
+            - list [ref=e159]:
+                - listitem [ref=e160]:
+                    - button "A admin Administrateur" [ref=e161] [cursor=pointer]:
+                        - generic [ref=e162]: A
+                        - generic [ref=e163]:
+                            - generic [ref=e164]: admin
+                            - generic [ref=e165]: Administrateur
+        - main [ref=e169]:
+            - generic [ref=e170]:
+                - generic [ref=e171]:
+                    - button "Toggle Sidebar" [ref=e172] [cursor=pointer]
+                    - heading "Tableau de bord" [level=1] [ref=e175]
+                - button "Rechercher... ⌘ K" [ref=e176] [cursor=pointer]:
+                    - generic [ref=e180]: Rechercher...
+                    - generic:
+                        - generic: ⌘
+                        - text: K
+                - generic [ref=e181]:
+                    - heading "Rechercher..." [level=2] [ref=e182]
+                    - paragraph [ref=e183]: Search for a command to run...
+                - generic [ref=e184]:
+                    - button "Documentation" [ref=e185] [cursor=pointer]
+                    - button "Language" [ref=e188] [cursor=pointer]
+                    - button "Mode daltonien" [ref=e191] [cursor=pointer]
+                    - button "Changer le thème" [ref=e194] [cursor=pointer]
+            - main [ref=e197]:
+                - generic [ref=e198]:
+                    - combobox [ref=e199] [cursor=pointer]:
+                        - generic [ref=e200]: Toutes les releases
+                        - img [aria-hidden]: ▼
+                    - textbox [aria-hidden] [ref=e201]: all
+                - generic [ref=e202]:
+                    - generic [ref=e203]:
+                        - generic [ref=e204]: ETP
+                        - generic [ref=e208]:
+                            - generic [ref=e209]: 0.0 Permanents
+                            - paragraph [ref=e210]: 0.0 Total
+                    - generic [ref=e211]:
+                        - generic [ref=e212]: Financier (K€)
+                        - generic [ref=e217]:
+                            - generic [ref=e218]: Budget 0 / 0
+                            - generic [ref=e219]: Devis 0 / 0
+                    - generic [ref=e220]:
+                        - generic [ref=e221]: Utilisation
+                        - generic [ref=e225]:
+                            - generic [ref=e226]:
+                                - text: 0%
+                                - generic "Part de la capacité déjà consommée par les éléments validés." [ref=e227]: · 0% Validé
+                            - paragraph [ref=e228]: 0h / 0h
+                    - generic [ref=e229]:
+                        - generic [ref=e230]: Avancement théorique
+                        - generic [ref=e234]:
+                            - generic [ref=e235]: —
+                            - paragraph [ref=e236]: Aucune release active
+                - generic [ref=e237]:
+                    - generic [ref=e238]: Analyse du suivi
+                    - paragraph [ref=e241]: Aucun statut n’est marqué « Dans les statistiques ». Activez l’option sur un statut dans la Configuration du reporting pour alimenter ce graphique.
+                - generic [ref=e242]:
+                    - generic [ref=e243]:
+                        - generic [ref=e244]: Équipe par département
+                        - table [ref=e248]:
+                            - rowgroup [ref=e249]:
+                                - row [ref=e250]:
+                                    - columnheader "Département" [ref=e251]
+                                    - columnheader "Membres" [ref=e252]
+                                    - columnheader "ETP total" [ref=e253]
+                                    - columnheader "Prestataires" [ref=e254]
+                            - rowgroup
+                    - generic [ref=e255]:
+                        - generic [ref=e256]: Charge par catégorie
+                        - table [ref=e260]:
+                            - rowgroup [ref=e261]:
+                                - row [ref=e262]:
+                                    - columnheader "Catégorie" [ref=e263]
+                                    - columnheader "Disponible" [ref=e264]
+                                    - columnheader "Alloué" [ref=e265]
+                                    - columnheader "Delta" [ref=e266]
+                                    - columnheader "Delta %" [ref=e267]
+                            - rowgroup
+                - generic [ref=e268]:
+                    - generic [ref=e269]:
+                        - generic [ref=e270]: Utilisation des capacités
+                        - generic [ref=e273]:
+                            - img "Capacity utilization chart" [ref=e274]:
+                                - generic [ref=e277]: 0%
+                            - generic [ref=e278]:
+                                - generic [ref=e279]:
+                                    - text: "Alloué :"
+                                    - generic [ref=e280]: 0h
+                                - generic [ref=e281]:
+                                    - text: "Disponible :"
+                                    - generic [ref=e282]: 0h
+                                - generic [ref=e283]:
+                                    - text: "Restant :"
+                                    - generic [ref=e284]: 0h
+                    - generic [ref=e285]: Répartition ETP par département
+    - region "Notifications alt+T"
