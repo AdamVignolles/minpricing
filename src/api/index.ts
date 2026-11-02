@@ -22,6 +22,7 @@ import { PublishScheduleJob } from "./jobs/PublishScheduleJob.ts";
 import { AgentFilesService } from "./services/AgentFilesService.ts";
 import { AgentsService } from "./services/AgentsService.ts";
 import { AmazonWatchService } from "./services/AmazonWatchService.ts";
+import { AppFilesService } from "./services/AppFilesService.ts";
 import { AutoPublishService } from "./services/AutoPublishService.ts";
 import { CategorizationService } from "./services/CategorizationService.ts";
 import { CollectionProgressService } from "./services/CollectionProgressService.ts";
@@ -77,6 +78,7 @@ export const ApiModule = $module({
     CollectionService,
     AgentsService,
     AgentFilesService,
+    AppFilesService,
     PublishScheduleService,
     CollectionProgressService,
     PublishProgressService,

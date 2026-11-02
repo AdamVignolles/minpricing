@@ -339,7 +339,13 @@ controllers → React console → Dealabs draft / auto-publish.
   (`GET /agent/changes`, MCP `get_agent_changes`). Reports, code
   proposals and whitelisted daily files (`data/agents/<kind>-<date>.json`)
   go through `/agent/reports|proposals|data`. All files live under
-  `appDir()` (Bay's persistent `APP_FILES_DIR`). `dealradar.mjs` in remote
+  `appDir()` (Bay's persistent `APP_FILES_DIR`) and are mirrored in SQLite
+  (`AppFilesService`, table `app_files`, rules in `services/appFiles.ts`:
+  `config/*`, `data/agents/**`, `docs/*-changelog.md`, the publish pause;
+  never hidden files, the Dealabs session or databases): saved every
+  2 min and at stop, written back at startup when missing or older on
+  disk — so Bay's backup of the SQLite files in `data/` to S3 is the whole
+  backup, and a fresh host restored from it gets them back. `dealradar.mjs` in remote
   mode (`DEALRADAR_URL` + `DEALRADAR_TOKEN`) pulls configs and today's
   files before a command and pushes back what it wrote (data files and
   the last 2 days' reports by sha1, `.data-base.json`); `push-config` /

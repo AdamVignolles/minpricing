@@ -55,20 +55,24 @@ export default defineConfig({
     infra({
       environments: {
         cloudflare: cloudflare(), // workers.dev subdomain; pass { domain: "..." } for a custom one
-        // AWS VM running Bay. "minpricing-aws" is an alias in ~/.ssh/config
-        // (HostName ec2-13-38-216-109.eu-west-3.compute.amazonaws.com,
-        // User ubuntu, IdentityFile ~/.ssh/aws). The control socket sits
-        // under a non-default root, so it must be given.
-        bay: bay({
-          host: "minpricing-aws",
-          domain: "13.38.216.109.sslip.io",
-          socket: "/run/bay/control.sock",
-        }),
-        // The copy Lore created for the same VM (what dealradar.vmh1 serves).
+        // AWS VM running Bay ("minpricing-aws" is an alias in ~/.ssh/config:
+        // HostName ec2-13-38-216-109.eu-west-3.compute.amazonaws.com, User
+        // ubuntu, IdentityFile ~/.ssh/aws), served as dealradar.vmh1. The
+        // control socket sits under a non-default root, so it must be given.
         production: bay({
           host: "minpricing-aws",
           domain: "dealradar.vmh1.alepha.dev",
           socket: "/run/bay/control.sock",
+          // Bay backs up every SQLite file in data/ — app.db, which also
+          // holds the agents' files (AppFilesService) — to the host's S3,
+          // under this app's own prefix, and restores it on a fresh host.
+          backup: {
+            enabled: true,
+            schedule: { every: "2h", timezone: "Europe/Paris" },
+            onDeploy: true,
+            retention: { keep: 12, daily: 30, weekly: 12, monthly: 6 },
+            verify: { every: "168h" },
+          },
         }),
       },
     }),
