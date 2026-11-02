@@ -1,7 +1,7 @@
 import { z } from "alepha";
 import { $head } from "alepha/react/head";
 import { $page, Redirection } from "alepha/react/router";
-import { HttpError } from "alepha/server";
+import { isHttpError } from "alepha/server";
 import { $client } from "alepha/server/links";
 
 import type { AdminController } from "../api/controllers/AdminController.ts";
@@ -93,8 +93,8 @@ export class AppRouter {
     // redirect once here, on the parent, covers every child page below —
     // a leaf page without its own `errorHandler` lets the error bubble up.
     errorHandler: (error) => {
-      if (HttpError.is(error, 401)) {
-        return new Redirection("/login");
+      if (isHttpError(error, 401)) {
+        return new Redirection({ redirect: "/login" });
       }
     },
   });

@@ -74,7 +74,7 @@ nombre de produits suivis grossit significativement.
 
 - **Alepha** comme framework unique (API + jobs + ORM + React SSR), pas
   d'Express/Fastify parallèle.
-- **Cloudflare Workers** comme runtime de prod, via `alepha/cli/platform`
+- **Cloudflare Workers** comme runtime de prod, via `alepha/cli/infra`
   (adapter `cloudflare`).
 - **D1** (SQLite) pour toutes les données relationnelles (Deal, PriceHistory,
   Source, Merchant, Category) — largement suffisant pour un catalogue de
@@ -484,7 +484,7 @@ index sur `(sourceId, status)` et `(dealId, observedAt)`, pagination simple
 
 ## 18. Déploiement
 
-Local (`alepha dev`, sqlite locale) → `alepha platform up --env production`
+Local (`alepha dev`, sqlite locale) → `alepha deploy --env production`
 (Cloudflare : D1 + Workers + Cron), secrets poussés via le plugin
 `platform` (voir `AGENTS.md`). Pas d'environnement de staging séparé
 nécessaire vu l'usage personnel — un simple `--dry-run`/`platform plan`
@@ -561,8 +561,8 @@ non nécessaire au MVP.
    `Deal` + `PriceHistory`, testé sur des cas fixtures.
 8. **Console React** — liste + détail + graphique + vue brouillon.
 9. **Panneau admin** — état des sources, erreurs.
-10. **Déploiement Cloudflare** — `alepha platform plan` puis `up`,
-    vérification via `alepha platform status`.
+10. **Déploiement Cloudflare** — `alepha infra plan` puis `up`,
+    vérification via `alepha infra status`.
 
 Chaque étape se valide avec `alepha test` (unités concernées) et, pour les
 étapes API/cron, un test manuel via `alepha dev`.

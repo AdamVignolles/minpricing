@@ -214,8 +214,8 @@ controllers → React console → Dealabs draft / auto-publish.
   before `freshAt` get their first-seen date at startup
   (`SeedService.backfillDealMetadata`, one `updateMany` with
   `sql\`"first_seen_at"\``): the dev server can add a new column itself,
-so a migration's own `UPDATE` may never run. Run summaries count new
-deals and, separately, the visible ones (`createdVisible`).
+  so a migration's own `UPDATE` may never run. Run summaries count new
+  deals and, separately, the visible ones (`createdVisible`).
 - **Greyed cards**: lists and the dashboard add `onDealabs` to each deal
   (`DealsController.withDealabsStatus`): « Publié par vous » for a
   published draft or one of our live posts read from our profile
@@ -399,7 +399,7 @@ deals and, separately, the visible ones (`createdVisible`).
 - **Add by link** (epic 16): a product page link pasted in the console
   (« Ajouter un lien », dashboard and deals page) or sent by an agent
   (`POST /agent/links`, audited, 20/24 h; `dealradar.mjs add-link <url>
-[agent] [reason] [--wait]`). `services/linkResolver.ts` (pure, tested)
+  [agent] [reason] [--wait]`). `services/linkResolver.ts` (pure, tested)
   follows short links (amzn.to, s.click.aliexpress… 5 hops, never a
   Dealabs link), drops tracking params and matches `SUPPORTED_SHOPS`
   (Amazon.fr, Cdiscount, AliExpress, Steam) → the same
@@ -411,7 +411,7 @@ deals and, separately, the visible ones (`createdVisible`).
   `fetchPrice`, Cdiscount `fetchDetails` incl. the page's own price,
   AliExpress `fetchDetails`, Steam appdetails — `readProductPages` in
   `browser.ts`): right away by `LinkCheckJob` → `CollectionService.
-checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
+  checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   the link and polled by the console), then on every run of that shop.
   No bypass: `upsertDeal` (quality gate), market comparison and Dealabs
   history focused on that deal (`focus` on `refreshStale`), `rescore`.
@@ -449,7 +449,7 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   tables. New migrations under `migrations/sqlite/` are written by hand (or by
   driving Alepha's migration provider directly); check the SQL for an
   unexpected `DROP TABLE` and validate with `alepha db migrations check`.
-- **After the first deploy, never run `alepha platform up` again**: it
+- **After the first deploy, never run `alepha deploy` again**: it
   regenerates `dist/wrangler.jsonc` and drops the Browser Rendering binding the
   Amazon/Cdiscount collectors need. Use `npm run deploy:cloudflare`, which runs
   `scripts/patch-cloudflare-browser-binding.mjs` to restore it.

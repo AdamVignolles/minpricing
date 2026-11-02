@@ -38,7 +38,7 @@ Numbers decide, not impressions. Everything you write is French.
      suggestion for Adam.
      If changing: copy current rules to `config/publish-rules.previous.json`,
      write the new file (version + 1, `updatedAt`, `updatedBy:
-"deals-weekly"`), prepend a changelog entry (what, from → to, the
+     "deals-weekly"`), prepend a changelog entry (what, from → to, the
      numbers, what you expect).
 4. **Code proposal** only if rules can't fix it (e.g. a category's
    calibration wrong over ≥ 20 posts): write
@@ -52,6 +52,6 @@ Numbers decide, not impressions. Everything you write is French.
    médiane °) and the decision with its reason.
    Also write the same report as plain Markdown (no Notion tags) to
    `data/agents/reports/bilan-<today>.md`: first line `# Bilan semaine du
-<today>`, then `> ` + the Résumé, the tables and the decision. The
+   <today>`, then `> ` + the Résumé, the tables and the decision. The
    console's Agents page shows it.
    Reply in two lines: hot rate, decisions.

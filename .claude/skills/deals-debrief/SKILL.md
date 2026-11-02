@@ -76,7 +76,7 @@ in this order:
    Also write the same report as plain Markdown (headings, tables, lists,
    **bold**, links — no Notion tags) to
    `data/agents/reports/debrief-<today>.md`: first line `# Debrief du
-<today>`, then `> ` + the Résumé, then the 5 sections. The console's
+   <today>`, then `> ` + the Résumé, then the 5 sections. The console's
    Agents page shows it.
    Reply in two lines: main finding, changes.
 

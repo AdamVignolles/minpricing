@@ -101,10 +101,10 @@ $action API → React console (+ Dealabs draft)`.
 
 ## Deployment gotchas (see `DEPLOY.md` for full detail)
 
-- Deploys via Cloudflare Workers using Alepha's `platform` plugin
+- Deploys via Cloudflare Workers using Alepha's `infra` plugin
   (`alepha.config.ts`), which auto-provisions D1/R2/KV/Queues/cron from
   `$repository`/`$storage`/`$cache`/`$job` declarations.
-- After the first `alepha platform up`, **don't run `up` again** — it
+- After the first `alepha deploy`, **don't run `up` again** — it
   regenerates `dist/wrangler.jsonc` and drops the `browser` binding the
   Amazon/Cdiscount collectors need. Use `npm run deploy:cloudflare`
   instead, which builds, runs `scripts/patch-cloudflare-browser-binding.mjs`

@@ -72,9 +72,9 @@ alepha lint              # Format and lint
 alepha typecheck         # Type checking
 alepha test              # Run tests
 alepha build             # Build
-alepha platform plan     # Show planned cloud topology (requires platform plugin)
-alepha platform up       # Provision + deploy to a configured environment
-alepha platform status   # Inspect deployed resources
+alepha infra plan     # Show planned cloud topology (requires the infra plugin)
+alepha deploy            # Provision + deploy to a configured environment
+alepha infra status   # Inspect deployed resources
 ```
 
 ## Testing
@@ -86,16 +86,16 @@ alepha platform status   # Inspect deployed resources
 
 ## Cloud deployment (Cloudflare Workers)
 
-Add the `platform` plugin to `alepha.config.ts` to manage cloud
+Add the `infra` plugin to `alepha.config.ts` to manage cloud
 provisioning, deploy, secrets, and DB migrations end-to-end:
 
 ```ts
 import { defineConfig } from "alepha/cli/config";
-import { cloudflare, platform } from "alepha/cli/platform";
+import { cloudflare, infra } from "alepha/cli/infra";
 
 export default defineConfig({
   plugins: [
-    platform({
+    infra({
       environments: {
         production: cloudflare({
           domain: "yourapp.com",
@@ -107,7 +107,7 @@ export default defineConfig({
 });
 ```
 
-Then: `alepha platform up --env production` (auth via `wrangler login` on first run).
+Then: `alepha deploy --env production` (auth via `wrangler login` on first run).
 
 Supported adapters: `cloudflare`, `bay`. The Cloudflare adapter provisions
 D1 (or Hyperdrive when `DATABASE_URL` is postgres), KV, R2, Queues, and pushes

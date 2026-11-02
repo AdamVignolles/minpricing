@@ -247,10 +247,10 @@ export class LinksController {
     handler: async ({ body }) => {
       const since = new Date(Date.now() - 86_400_000);
       if ((await this.files.countSince("link", since)) >= AGENT_LINKS_PER_DAY) {
-        throw new HttpError({
-          status: 429,
-          message: `${AGENT_LINKS_PER_DAY} liens par 24 h au plus`,
-        });
+        throw new HttpError(
+          { status: 429 },
+          { message: `${AGENT_LINKS_PER_DAY} liens par 24 h au plus` },
+        );
       }
       const request = this.alepha.store.get("alepha.http.request");
       const agent =

@@ -181,7 +181,10 @@ export class AgentsController {
     handler: ({ params }) => {
       const report = this.agents.report(params.id);
       if (!report)
-        throw new HttpError({ status: 404, message: "Rapport introuvable" });
+        throw new HttpError(
+          { status: 404 },
+          { message: "Rapport introuvable" },
+        );
       return report;
     },
   });

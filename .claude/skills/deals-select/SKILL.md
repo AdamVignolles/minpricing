@@ -18,7 +18,7 @@ Be brief: few tool calls, no commentary. `<today>` = `YYYY-MM-DD`.
    today). `publishToday` false → reply "pas de publication aujourd'hui";
    stop. Fields: `id, title, src, cat, price, ref` (reference price),
    `disc` (%), `score, hot, adj` (adjusted hot chance), `rating, reviews,
-seller, sold` (sold by the merchant), `dlBest` (best Dealabs
+   seller, sold` (sold by the merchant), `dlBest` (best Dealabs
    temperature of this product), `dlLow` (lowest price already posted).
 3. **Veto** — remove a deal only for one of these, and note why:
    - suspicious data: price ≤ 0 on a non-free item, `disc` > 90 % on

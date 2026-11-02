@@ -67,7 +67,7 @@ export class AgentFilesService {
     if (existsSync(file)) return readFileSync(file, "utf8");
     const shipped = join(process.cwd(), "config", AGENT_CONFIGS[name].file);
     if (existsSync(shipped)) return readFileSync(shipped, "utf8");
-    throw new HttpError({ status: 404, message: `${name} introuvable` });
+    throw new HttpError({ status: 404 }, { message: `${name} introuvable` });
   }
 
   async writeConfig(
@@ -78,10 +78,10 @@ export class AgentFilesService {
     const previous = this.readConfig(name);
     const { errors, changes } = checkAgentConfig(name, previous, content);
     if (errors.length > 0) {
-      throw new HttpError({
-        status: 422,
-        message: `Refusé : ${errors.join(" ; ")}`,
-      });
+      throw new HttpError(
+        { status: 422 },
+        { message: `Refusé : ${errors.join(" ; ")}` },
+      );
     }
     if (previous === content) return { changes: [] };
 
@@ -140,12 +140,12 @@ export class AgentFilesService {
   async writeData(name: string, content: string, input: AgentWriteInput) {
     this.assertDataName(name);
     if (Buffer.byteLength(content, "utf8") > AGENT_DATA_MAX_BYTES) {
-      throw new HttpError({ status: 413, message: "fichier trop gros" });
+      throw new HttpError({ status: 413 }, { message: "fichier trop gros" });
     }
     try {
       JSON.parse(content);
     } catch {
-      throw new HttpError({ status: 422, message: "JSON invalide" });
+      throw new HttpError({ status: 422 }, { message: "JSON invalide" });
     }
     writeAtomic(join(appDir(), "data", "agents", name), content);
     await this.audit({ ...input, kind: "data", target: name });
@@ -211,16 +211,19 @@ export class AgentFilesService {
 
   protected assertMarkdown(id: string, markdown: string) {
     if (!AGENT_REPORT_ID.test(id)) {
-      throw new HttpError({ status: 400, message: "identifiant invalide" });
+      throw new HttpError({ status: 400 }, { message: "identifiant invalide" });
     }
     if (Buffer.byteLength(markdown, "utf8") > AGENT_DATA_MAX_BYTES) {
-      throw new HttpError({ status: 413, message: "texte trop long" });
+      throw new HttpError({ status: 413 }, { message: "texte trop long" });
     }
   }
 
   protected assertDataName(name: string) {
     if (!AGENT_DATA_FILE.test(name)) {
-      throw new HttpError({ status: 400, message: "nom de fichier refusé" });
+      throw new HttpError(
+        { status: 400 },
+        { message: "nom de fichier refusé" },
+      );
     }
   }
 }

@@ -1,7 +1,7 @@
 # Deploying to Cloudflare
 
 This app deploys as a single Cloudflare Worker via Alepha's built-in
-`platform` plugin (already enabled in `alepha.config.ts`). D1, R2, KV,
+`infra` plugin (already enabled in `alepha.config.ts`). D1, R2, KV,
 Queues and cron triggers are auto-provisioned from the app's
 `$repository`/`$storage`/`$cache`/`$job` declarations — there is no
 `wrangler.toml`/`wrangler.jsonc` to maintain by hand, **except** for one
@@ -26,8 +26,8 @@ see `src/api/collectors/browser.ts`).
 ## First deploy
 
 ```bash
-npx alepha platform plan --env cloudflare   # preview what will be created
-npx alepha platform up --env cloudflare     # provisions D1/R2/KV + builds + migrates + deploys
+npx alepha infra plan --env cloudflare   # preview what will be created
+npx alepha deploy --env cloudflare     # provisions D1/R2/KV + builds + migrates + deploys
 ```
 
 This first `up` deploys successfully, but Amazon/Cdiscount will silently
@@ -36,7 +36,7 @@ doesn't exist yet — Steam still works, it's a plain API call).
 
 ## Every deploy after that
 
-`alepha platform up` regenerates `dist/wrangler.jsonc` from scratch and
+`alepha deploy` regenerates `dist/wrangler.jsonc` from scratch and
 doesn't know how to declare a `browser` binding (Alepha's Cloudflare
 adapter currently supports D1/R2/KV/Queues/cron only), so **don't use
 `up` again** — run the build/deploy steps separately instead, so a small
@@ -48,19 +48,19 @@ npm run deploy:cloudflare
 
 This runs, in order:
 
-1. `alepha platform build --env cloudflare` — bundles the Worker and
+1. `alepha infra build --env cloudflare` — bundles the Worker and
    (re)writes `dist/wrangler.jsonc` from the app's resource declarations.
 2. `node scripts/patch-cloudflare-browser-binding.mjs` — adds
-   `"browser": { "binding": "BROWSER" }` to that file. `alepha platform
-deploy` only ever merges `.vars` into it afterwards, so this survives.
-3. `alepha platform db migrate --env cloudflare` — applies any new D1 schema
+   `"browser": { "binding": "BROWSER" }` to that file. `alepha infra
+   deploy` only ever merges `.vars` into it afterwards, so this survives.
+3. `alepha infra db migrate --env cloudflare` — applies any new D1 schema
    migrations.
-4. `alepha platform deploy --env cloudflare` — uploads the patched config.
+4. `alepha infra deploy --env cloudflare` — uploads the patched config.
 
 ## Inspecting a deployment
 
 ```bash
-npx alepha platform status --env cloudflare
+npx alepha infra status --env cloudflare
 ```
 
 ## Using Cloudflare's dashboard "Workers Builds" (git-push auto-deploy)
@@ -75,16 +75,16 @@ wrong for this app and is exactly what was failing):
 - **Deploy command**: `npx wrangler deploy --config dist/wrangler.jsonc`
 - **Environment variables** (Settings → Environment variables, for the
   _Build_ step, not just runtime secrets): `CLOUDFLARE_API_TOKEN` and
-  `CLOUDFLARE_ACCOUNT_ID` — `alepha platform build` needs them to look up
+  `CLOUDFLARE_ACCOUNT_ID` — `alepha infra build` needs them to look up
   the D1 database it must bind to (created once by the first `alepha
-platform up` below, run locally).
+  deploy` below, run locally).
 
 The `--config` flag on the deploy command is what stops wrangler from
 falling into its "no config found, let me guess your framework" wizard
 (the `Detected Project Settings: Framework: Hydrogen` error) — it now
 points straight at the real, already-built config instead.
 
-You still need to run `alepha platform up --env cloudflare` **once**,
+You still need to run `alepha deploy --env cloudflare` **once**,
 locally, before wiring this up: it's the only command that provisions the
 D1 database in the first place; the dashboard's build only ever
 regenerates config for resources that already exist.
@@ -92,7 +92,7 @@ regenerates config for resources that already exist.
 ## Migrations: `alepha db migrations create` is unreliable here
 
 This project's schema-drift check (`alepha db migrations check`, and the
-`migrate d1` step inside `alepha platform up`) correctly reads every
+`migrate d1` step inside `alepha deploy`) correctly reads every
 `$entity` in the app. `alepha db migrations create`, however, boots the app
 through a separate script that only sees repositories that have actually
 been _instantiated_ — in this app that resolves to just Alepha's own

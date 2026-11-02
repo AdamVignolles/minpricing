@@ -9,21 +9,21 @@
     "lint": "alepha lint",
     "typecheck": "alepha typecheck",
     "verify": "alepha verify",
-    "deploy:cloudflare": "alepha platform build --env cloudflare && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform db migrate --env cloudflare && alepha platform deploy --env cloudflare",
-    "build:cloudflare": "alepha platform build --env cloudflare && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform db migrate --env cloudflare",
+    "deploy:cloudflare": "alepha infra build --env cloudflare && node scripts/patch-cloudflare-browser-binding.mjs && alepha infra db migrate --env cloudflare && alepha infra deploy --env cloudflare",
+    "build:cloudflare": "alepha infra build --env cloudflare && node scripts/patch-cloudflare-browser-binding.mjs && alepha infra db migrate --env cloudflare",
     "dealabs:login": "node scripts/dealabs-login.mjs"
   },
   "dependencies": {
-    "@alepha/lore": "^0.30.0",
+    "@alepha/lore": "^0.34.0",
     "@cloudflare/puppeteer": "^1.4.0",
     "@mantine/charts": "^9.6.3",
     "@mantine/core": "^9.6.3",
     "@mantine/hooks": "^9.6.3",
     "@mantine/notifications": "^9.6.3",
-    "alepha": "^0.30.0",
+    "alepha": "^0.34.0",
     "playwright": "^1.63.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "recharts": "^3.10.1"
   },
   "devDependencies": {

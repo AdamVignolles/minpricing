@@ -97,10 +97,10 @@ export function $adminSession(): Middleware {
           request?.metadata?.mcpAgent !== true &&
           !agentRead
         ) {
-          throw new HttpError({
-            status: 401,
-            message: "Authentication required",
-          });
+          throw new HttpError(
+            { status: 401 },
+            { message: "Authentication required" },
+          );
         }
         return next(...args);
       };
@@ -158,10 +158,10 @@ export function $agentAuth(): Middleware {
           env.AGENT_TOKEN,
         );
         if (!agent && !session.get()) {
-          throw new HttpError({
-            status: 401,
-            message: "Agent token or admin session required",
-          });
+          throw new HttpError(
+            { status: 401 },
+            { message: "Agent token or admin session required" },
+          );
         }
         if (request) {
           request.metadata ??= {};

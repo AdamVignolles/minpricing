@@ -82,7 +82,7 @@ export class McpOAuthController {
 
   /** 401 with the RFC 9728 challenge on `/mcp` without a valid token. */
   gate = $hook({
-    on: "server:onRequest",
+    on: "server:request:before",
     handler: ({ route, request }) => {
       if (route.path !== MCP_PATH || request.method !== "POST") return;
       const auth = request.headers.authorization;

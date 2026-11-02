@@ -179,16 +179,16 @@ export class PublishScheduleService {
     const day = parisDay(now);
     const r = this.rules();
     if (!input.dryRun && !r.publishDays?.includes(parisWeekday(now))) {
-      throw new HttpError({
-        status: 409,
-        message: "Pas de publication ce jour (publishDays).",
-      });
+      throw new HttpError(
+        { status: 409 },
+        { message: "Pas de publication ce jour (publishDays)." },
+      );
     }
     if (input.ranked.length === 0 || input.ranked.length > MAX_QUEUE) {
-      throw new HttpError({
-        status: 422,
-        message: `Entre 1 et ${MAX_QUEUE} deals classés attendus.`,
-      });
+      throw new HttpError(
+        { status: 422 },
+        { message: `Entre 1 et ${MAX_QUEUE} deals classés attendus.` },
+      );
     }
 
     // Our own data wins over what the agent copied (title, price…).
@@ -214,10 +214,10 @@ export class PublishScheduleService {
       });
     }
     if (ranked.length === 0) {
-      throw new HttpError({
-        status: 422,
-        message: "Aucun deal actif dans la liste.",
-      });
+      throw new HttpError(
+        { status: 422 },
+        { message: "Aucun deal actif dans la liste." },
+      );
     }
 
     const done = this.ledger(day).filter((e) => e.result === "success").length;
@@ -236,34 +236,38 @@ export class PublishScheduleService {
       times = [];
       for (const hhmm of [...input.times].sort()) {
         if (!HHMM.test(hhmm)) {
-          throw new HttpError({
-            status: 422,
-            message: `Heure invalide : ${hhmm}`,
-          });
+          throw new HttpError(
+            { status: 422 },
+            { message: `Heure invalide : ${hhmm}` },
+          );
         }
         const at = atParis(day, hhmm);
         if (at.getTime() < now.getTime()) {
-          throw new HttpError({
-            status: 422,
-            message: `${hhmm} est déjà passé`,
-          });
+          throw new HttpError(
+            { status: 422 },
+            { message: `${hhmm} est déjà passé` },
+          );
         }
         if (
           !input.dryRun &&
           (at.getTime() < windowStart || at.getTime() > windowEnd)
         ) {
-          throw new HttpError({
-            status: 422,
-            message: `${hhmm} hors de la fenêtre ${r.window.start}–${r.window.end}`,
-          });
+          throw new HttpError(
+            { status: 422 },
+            {
+              message: `${hhmm} hors de la fenêtre ${r.window.start}–${r.window.end}`,
+            },
+          );
         }
         times.push(at);
       }
       if (times.length > room) {
-        throw new HttpError({
-          status: 422,
-          message: `${times.length} heures pour ${room} publication(s) possibles aujourd'hui`,
-        });
+        throw new HttpError(
+          { status: 422 },
+          {
+            message: `${times.length} heures pour ${room} publication(s) possibles aujourd'hui`,
+          },
+        );
       }
     } else {
       const drawn =
@@ -346,7 +350,10 @@ export class PublishScheduleService {
   async cancel(id: string, by: string) {
     const entry = await this.entries.getById(id);
     if (entry.status !== "planned") {
-      throw new HttpError({ status: 409, message: `Déjà ${entry.status}.` });
+      throw new HttpError(
+        { status: 409 },
+        { message: `Déjà ${entry.status}.` },
+      );
     }
     await this.files.audit({
       agent: by,
@@ -363,14 +370,23 @@ export class PublishScheduleService {
   async reschedule(id: string, hhmm: string, by: string) {
     const entry = await this.entries.getById(id);
     if (entry.status !== "planned") {
-      throw new HttpError({ status: 409, message: `Déjà ${entry.status}.` });
+      throw new HttpError(
+        { status: 409 },
+        { message: `Déjà ${entry.status}.` },
+      );
     }
     if (!HHMM.test(hhmm)) {
-      throw new HttpError({ status: 422, message: `Heure invalide : ${hhmm}` });
+      throw new HttpError(
+        { status: 422 },
+        { message: `Heure invalide : ${hhmm}` },
+      );
     }
     const at = atParis(entry.date, hhmm);
     if (at.getTime() < this.now().getTime()) {
-      throw new HttpError({ status: 422, message: `${hhmm} est déjà passé` });
+      throw new HttpError(
+        { status: 422 },
+        { message: `${hhmm} est déjà passé` },
+      );
     }
     await this.files.audit({
       agent: by,

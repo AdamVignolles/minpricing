@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
  * Injects the Cloudflare Workers "Browser Rendering" binding into
- * `dist/wrangler.jsonc`, which `alepha platform build` regenerates from
+ * `dist/wrangler.jsonc`, which `alepha infra build` regenerates from
  * scratch on every build and knows nothing about (it only understands D1,
  * R2, KV, Queues and cron triggers).
  *
- * Run this AFTER `alepha platform build --env <env>` and BEFORE
- * `alepha platform deploy --env <env>` — `deploy` only merges `.vars` into
+ * Run this AFTER `alepha infra build --env <env>` and BEFORE
+ * `alepha infra deploy --env <env>` — `deploy` only merges `.vars` into
  * the existing file, so a binding added here survives it untouched.
  *
  * See DEPLOY.md for the full deploy sequence and why this step exists

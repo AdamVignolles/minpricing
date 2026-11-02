@@ -51,7 +51,7 @@ export class AgentApiController {
 
   protected configName(name: string) {
     if (!isAgentConfigName(name)) {
-      throw new HttpError({ status: 404, message: "fichier inconnu" });
+      throw new HttpError({ status: 404 }, { message: "fichier inconnu" });
     }
     return name;
   }
@@ -279,13 +279,16 @@ export class AgentApiController {
     handler: async ({ body }) => {
       const urls = [...new Set(body.urls)];
       if (urls.length > 6 || !urls.every(isDealabsThreadUrl)) {
-        throw new HttpError({
-          status: 400,
-          message: "6 URLs de fils Dealabs au plus",
-        });
+        throw new HttpError(
+          { status: 400 },
+          { message: "6 URLs de fils Dealabs au plus" },
+        );
       }
       if (this.alepha.isServerless()) {
-        throw new HttpError({ status: 503, message: "pas de navigateur ici" });
+        throw new HttpError(
+          { status: 503 },
+          { message: "pas de navigateur ici" },
+        );
       }
       return { comments: await this.comments.read(urls) };
     },

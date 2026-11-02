@@ -184,10 +184,10 @@ export class DraftsController {
     },
     handler: ({ body }) => {
       if (body.paused && body.until && new Date(body.until) <= new Date()) {
-        throw new HttpError({
-          status: 422,
-          message: "La fin de la pause doit être dans le futur.",
-        });
+        throw new HttpError(
+          { status: 422 },
+          { message: "La fin de la pause doit être dans le futur." },
+        );
       }
       return this.pause.set(body, "vous");
     },
@@ -234,10 +234,10 @@ export class DraftsController {
       try {
         return this.dealabsSession.startLogin();
       } catch (error) {
-        throw new HttpError({
-          status: 400,
-          message: error instanceof Error ? error.message : String(error),
-        });
+        throw new HttpError(
+          { status: 400 },
+          { message: error instanceof Error ? error.message : String(error) },
+        );
       }
     },
   });
@@ -279,10 +279,10 @@ export class DraftsController {
         if (body.text) await this.screen.type(body.text);
         if (body.key) await this.screen.press(body.key);
       } catch (error) {
-        throw new HttpError({
-          status: 409,
-          message: error instanceof Error ? error.message : String(error),
-        });
+        throw new HttpError(
+          { status: 409 },
+          { message: error instanceof Error ? error.message : String(error) },
+        );
       }
       // Let the page react before the picture goes back.
       await new Promise((resolve) => setTimeout(resolve, 400));
@@ -339,10 +339,10 @@ export class DraftsController {
         where: { dealId: { eq: params.id } },
       });
       if (!existing) {
-        throw new HttpError({
-          status: 404,
-          message: `No draft for deal ${params.id}`,
-        });
+        throw new HttpError(
+          { status: 404 },
+          { message: `No draft for deal ${params.id}` },
+        );
       }
       return this.drafts.updateById(existing.id, body);
     },
@@ -372,18 +372,18 @@ export class DraftsController {
         where: { dealId: { eq: params.id } },
       });
       if (!existing) {
-        throw new HttpError({
-          status: 404,
-          message: `No draft for deal ${params.id}`,
-        });
+        throw new HttpError(
+          { status: 404 },
+          { message: `No draft for deal ${params.id}` },
+        );
       }
 
       const host = new URL(body.dealabsUrl).hostname;
       if (!/(^|\.)dealabs\.com$/.test(host)) {
-        throw new HttpError({
-          status: 400,
-          message: "Only dealabs.com links can be verified.",
-        });
+        throw new HttpError(
+          { status: 400 },
+          { message: "Only dealabs.com links can be verified." },
+        );
       }
 
       let matched = false;
@@ -443,34 +443,41 @@ export class DraftsController {
         return await this.autoPublisher.publishDeal(params.id);
       } catch (error) {
         if (error instanceof PublishRefusedError) {
-          throw new HttpError({ status: error.status, message: error.message });
+          throw new HttpError(
+            { status: error.status },
+            { message: error.message },
+          );
         }
         if (error instanceof PublishCancelledError) {
-          throw new HttpError({ status: 409, message: error.message });
+          throw new HttpError({ status: 409 }, { message: error.message });
         }
         if (error instanceof DealNotAvailableError) {
-          throw new HttpError({
-            status: 422,
-            message: shortError(error.message),
-          });
+          throw new HttpError(
+            { status: 422 },
+            { message: shortError(error.message) },
+          );
         }
         if (error instanceof DealabsDuplicateError) {
-          throw new HttpError({
-            status: 409,
-            message: shortError(
-              error.existingUrl && !error.message.includes(error.existingUrl)
-                ? `${error.message} : ${error.existingUrl}`
-                : error.message,
-            ),
-          });
+          throw new HttpError(
+            { status: 409 },
+            {
+              message: shortError(
+                error.existingUrl && !error.message.includes(error.existingUrl)
+                  ? `${error.message} : ${error.existingUrl}`
+                  : error.message,
+              ),
+            },
+          );
         }
-        throw new HttpError({
-          status: 502,
-          message:
-            error instanceof Error
-              ? shortError(error.message)
-              : "Auto-publish failed for an unknown reason.",
-        });
+        throw new HttpError(
+          { status: 502 },
+          {
+            message:
+              error instanceof Error
+                ? shortError(error.message)
+                : "Auto-publish failed for an unknown reason.",
+          },
+        );
       }
     },
   });
