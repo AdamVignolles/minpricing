@@ -141,6 +141,12 @@ export interface DealDetails {
 export interface DiscoverContext {
   needsDetails(externalId: string): boolean;
   /**
+   * True when the deal's details are fresh and its stored price equals
+   * `price`: the product page would tell nothing new, so the collector can
+   * report the deal from its listing card alone (it is still "seen").
+   */
+  isUnchanged?(externalId: string, price: number): boolean;
+  /**
    * Reports where the collector is ("Pages bons plans", 3 of 14) for the
    * console's live progress sidebar. Cheap to call often.
    */

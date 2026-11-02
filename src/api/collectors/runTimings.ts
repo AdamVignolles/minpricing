@@ -10,6 +10,7 @@ export interface RunTiming {
   pagesFailed?: number;
   /** Pages read over plain HTTP; the rest needed the browser. */
   readByFetch?: number;
+  skippedUnchanged?: number;
   pageP50Ms?: number;
   pageP95Ms?: number;
   /** 1-minute load average when the source started and ended. */

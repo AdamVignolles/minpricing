@@ -179,6 +179,8 @@ export class AmazonCollector implements DealSource {
         categoryHint?: string;
         /** The card's "-xx %" badge, when it shows one. */
         badgePercent?: number;
+        /** The card's current price ("Prix Flash: 79,99 €"), when shown. */
+        cardPrice?: number;
       };
       // One list per collection page, interleaved below so every category
       // gets its share of `limit` (see `interleave`).
@@ -248,6 +250,10 @@ export class AmazonCollector implements DealSource {
                         title: img?.alt || null,
                         imageUrl: img?.src || null,
                         badgePercent: badge ? Number(badge[1]) : null,
+                        priceText:
+                          (el as HTMLElement).innerText.match(
+                            /Prix[^:\n]*:\s*([\d\s.]+,\d{2})\s?€/,
+                          )?.[1] ?? null,
                       };
                     }),
                   ),
@@ -267,6 +273,9 @@ export class AmazonCollector implements DealSource {
                 imageUrl: card.imageUrl,
                 categoryHint,
                 badgePercent: card.badgePercent ?? undefined,
+                cardPrice: card.priceText
+                  ? parsePriceFr(card.priceText)
+                  : undefined,
               }));
           } catch {
             // One listing page failing (challenge, layout change, timeout)
@@ -295,6 +304,7 @@ export class AmazonCollector implements DealSource {
       // below) instead of one by one: the bulk of a run's time.
       let done = 0;
       let byFetch = 0;
+      let skipped = 0;
       const listingMs = Date.now() - startedAt;
       const pageTimes: number[] = [];
       const pagesStartedAt = Date.now();
@@ -304,6 +314,26 @@ export class AmazonCollector implements DealSource {
         async (card): Promise<RawDeal | undefined> => {
           const pageStartedAt = Date.now();
           try {
+            // Known deal, fresh details, same price as on its card: nothing
+            // a product page could add. Still reported, so it stays "seen"
+            // (the service keeps the stored details, struck price and text).
+            if (
+              card.cardPrice !== undefined &&
+              context?.isUnchanged?.(card.asin, card.cardPrice)
+            ) {
+              skipped++;
+              return {
+                externalId: card.asin,
+                title: card.title,
+                url: card.url.split("?")[0],
+                imageUrl: upscaleAmazonImage(card.imageUrl ?? undefined),
+                price: card.cardPrice,
+                currency: "EUR",
+                availability: "in_stock",
+                merchantId: "amazon",
+                categoryHint: card.categoryHint,
+              };
+            }
             // Each product page is fetched in its own browser context: Amazon
             // fingerprints sessions, and reusing cookies/context across
             // several sequential product-page loads causes later ones to
@@ -368,6 +398,7 @@ export class AmazonCollector implements DealSource {
         pagesRead: deals.length,
         pagesFailed: candidates.length - deals.length,
         readByFetch: byFetch,
+        skippedUnchanged: skipped,
         pageP50Ms: percentile(pageTimes, 0.5),
         pageP95Ms: percentile(pageTimes, 0.95),
         load: [loadAtStart, currentLoad()],

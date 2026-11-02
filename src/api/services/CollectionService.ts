@@ -853,6 +853,9 @@ export class CollectionService {
       where: { sourceId: { eq: sourceId } },
     });
     const now = Date.now();
+    const priceById = new Map(
+      rows.map((deal) => [deal.externalId, deal.currentPrice]),
+    );
     const fresh = new Set(
       rows
         .filter(
@@ -868,6 +871,8 @@ export class CollectionService {
     );
     return {
       needsDetails: (externalId) => !fresh.has(externalId),
+      isUnchanged: (externalId, price) =>
+        fresh.has(externalId) && priceById.get(externalId) === price,
       progress: (step, done, total) =>
         this.progress.step(sourceId, step, done, total),
       worthFetching: (title) => !qualityIssue({ title, sourceId }),
