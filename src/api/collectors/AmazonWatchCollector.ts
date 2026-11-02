@@ -8,6 +8,10 @@ import {
 import type { AmazonWatchService } from "../services/AmazonWatchService.ts";
 import type { AmazonCollector } from "./AmazonCollector.ts";
 import {
+  type AmazonProductRead,
+  fetchAmazonProduct,
+} from "./amazonProductHtml.ts";
+import {
   type CloudflareBrowserBinding,
   withBrowser,
   withPage,
@@ -173,100 +177,120 @@ export class AmazonWatchCollector implements DealSource {
     return min + Math.random() * (max - min);
   }
 
-  /** Known products on their own page: their price today, read by Amazon. */
-  protected readKnown(
-    known: Array<{ asin: string; title: string }>,
-    context?: DiscoverContext,
-  ): Promise<WatchedItem[]> {
-    return withBrowser(async (browser) => {
-      const items: WatchedItem[] = [];
-      for (const [index, { asin, title }] of known.entries()) {
-        context?.progress?.(
-          "Produits connus (fiches)",
-          index + 1,
-          known.length,
-        );
-        const url = `https://www.amazon.fr/dp/${asin}`;
+  /**
+   * Reads product pages: a plain fetch first (a second or two each), the
+   * browser only for the pages the fetch couldn't read — and not even
+   * launched when there are none.
+   */
+  protected async readPages(
+    urls: string[],
+    onStep?: (done: number) => void,
+  ): Promise<Map<string, AmazonProductRead | undefined>> {
+    const reads = new Map<string, AmazonProductRead | undefined>();
+    if (!this.getCloudflareBinding?.()) {
+      for (const [index, url] of urls.entries()) {
+        reads.set(url, await fetchAmazonProduct(url));
+        onStep?.(index + 1);
+      }
+    }
+    const missing = urls.filter((url) => !reads.get(url));
+    if (missing.length === 0) return reads;
+    await withBrowser(async (browser) => {
+      for (const url of missing) {
         try {
-          const priced = await withPage(browser, (page) =>
-            this.amazon.fetchPrice(page, url),
-          );
-          if (!priced) continue;
-          items.push({
-            asin,
-            title: priced.title || title,
-            price: priced.price,
+          reads.set(
             url,
-            imageUrl: priced.imageUrl,
-            rating: priced.details?.productRating,
-            reviewCount: priced.details?.productReviewCount,
-          });
+            await withPage(browser, (page) =>
+              this.amazon.fetchPrice(page, url),
+            ),
+          );
         } catch {
           // One product page failing doesn't stop the others.
         }
       }
-      return items;
     }, this.getCloudflareBinding?.());
+    return reads;
+  }
+
+  /** Known products on their own page: their price today, read by Amazon. */
+  protected async readKnown(
+    known: Array<{ asin: string; title: string }>,
+    context?: DiscoverContext,
+  ): Promise<WatchedItem[]> {
+    const urls = known.map(({ asin }) => `https://www.amazon.fr/dp/${asin}`);
+    const reads = await this.readPages(urls, (done) =>
+      context?.progress?.("Produits connus (fiches)", done, known.length),
+    );
+    const items: WatchedItem[] = [];
+    for (const [index, { asin, title }] of known.entries()) {
+      const priced = reads.get(urls[index]);
+      if (!priced) continue;
+      items.push({
+        asin,
+        title: priced.title || title,
+        price: priced.price,
+        url: urls[index],
+        imageUrl: priced.imageUrl,
+        rating: priced.details?.productRating,
+        reviewCount: priced.details?.productReviewCount,
+      });
+    }
+    return items;
   }
 
   /** The product page must confirm the drop before it becomes a deal. */
-  protected confirm(
+  protected async confirm(
     drops: Awaited<ReturnType<AmazonWatchService["findDrops"]>>,
     context: DiscoverContext | undefined,
     stats: { unconfirmed: number },
   ): Promise<RawDeal[]> {
-    return withBrowser(async (browser) => {
-      const deals: RawDeal[] = [];
-      for (const [index, { item, drop }] of drops.entries()) {
+    const reads = await this.readPages(
+      drops.map(({ item }) => item.url),
+      (done) =>
         context?.progress?.(
           "Fiches des produits en baisse",
-          index + 1,
+          done,
           drops.length,
-        );
-        try {
-          const priced = await withPage(browser, (page) =>
-            this.amazon.fetchPrice(page, item.url),
-          );
-          // The page must confirm the drop (a list can lag behind).
-          if (!priced || priced.price > item.price * 1.02) {
-            stats.unconfirmed++;
-            continue;
-          }
-          const usual = drop.usualPrice.toFixed(2).replace(".", ",");
-          deals.push({
-            externalId: item.asin,
-            title: item.title,
-            url: item.url,
-            imageUrl: item.imageUrl,
-            price: priced.price,
-            // Our own measurement of the usual price: a real former price.
-            listPrice: drop.usualPrice,
-            currency: "EUR",
-            availability: "in_stock",
-            merchantId: "amazon",
-            categoryHint: priced.breadcrumb
-              ? `amazon-crumb:${priced.breadcrumb}`
-              : undefined,
-            description: [
-              priced.description,
-              `- Baisse non affichée par Amazon : prix habituel ${usual} € (relevé par DealRadar sur ${drop.days} jours)`,
-            ]
-              .filter(Boolean)
-              .join("\n"),
-            details: {
-              ...priced.details,
-              listPriceKind: "regular",
-              productRating: priced.details?.productRating ?? item.rating,
-              productReviewCount:
-                priced.details?.productReviewCount ?? item.reviewCount,
-            },
-          });
-        } catch {
-          // One product page failing doesn't stop the others.
-          stats.unconfirmed++;
-        }
+        ),
+    );
+    const deals: RawDeal[] = [];
+    for (const { item, drop } of drops) {
+      const priced = reads.get(item.url);
+      // The page must confirm the drop (a list can lag behind).
+      if (!priced || priced.price > item.price * 1.02) {
+        stats.unconfirmed++;
+        continue;
       }
-      return deals;
-    }, this.getCloudflareBinding?.());
+      const usual = drop.usualPrice.toFixed(2).replace(".", ",");
+      deals.push({
+        externalId: item.asin,
+        title: item.title,
+        url: item.url,
+        imageUrl: item.imageUrl,
+        price: priced.price,
+        // Our own measurement of the usual price: a real former price.
+        listPrice: drop.usualPrice,
+        currency: "EUR",
+        availability: "in_stock",
+        merchantId: "amazon",
+        categoryHint: priced.breadcrumb
+          ? `amazon-crumb:${priced.breadcrumb}`
+          : undefined,
+        description: [
+          priced.description,
+          `- Baisse non affichée par Amazon : prix habituel ${usual} € (relevé par DealRadar sur ${drop.days} jours)`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        details: {
+          ...priced.details,
+          listPriceKind: "regular",
+          productRating: priced.details?.productRating ?? item.rating,
+          productReviewCount:
+            priced.details?.productReviewCount ?? item.reviewCount,
+        },
+      });
+    }
+    return deals;
   }
 }
