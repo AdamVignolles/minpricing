@@ -146,9 +146,21 @@ const DealCard: FC<DealCardProps> = ({
       ) : null}
 
       <Stack gap={compact ? 6 : 8} mt={compact ? 0 : "sm"} style={{ flex: 1 }}>
-        <Text fz="sm" fw={500} lh={1.35} className="clamp-2" title={deal.title}>
-          {deal.title}
-        </Text>
+        <Group gap={4} align="flex-start" wrap="nowrap">
+          <Text
+            fz="sm"
+            fw={500}
+            lh={1.35}
+            className="clamp-2"
+            title={deal.title}
+            style={{ flex: 1, minWidth: 0 }}
+          >
+            {deal.title}
+          </Text>
+          {deal.addedByLink ? (
+            <RemoveHandAdded dealId={deal.id} title={deal.title} />
+          ) : null}
+        </Group>
 
         <Group gap={8} align="baseline" mt="auto" wrap="wrap">
           <Text fz={compact ? "lg" : "xl"} fw={700} lh={1.1} className="tnum">
@@ -198,9 +210,6 @@ const DealCard: FC<DealCardProps> = ({
                 ? ` · vendu par ${deal.sellerName}`
                 : ""}
             </Text>
-            {deal.addedByLink ? (
-              <RemoveHandAdded dealId={deal.id} title={deal.title} />
-            ) : null}
             <Tooltip label="Note du deal (prix réel, vendeur, avis)" withArrow>
               <Badge
                 size="sm"
