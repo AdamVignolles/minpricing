@@ -1,11 +1,11 @@
 {
   "$comment": "Collection focus, re-read before each collection run (no restart), steered by the deals-sources skill (logged in docs/sources-changelog.md). `limit` = product pages opened per run (each one is a request the shop may flag); `extraPages` are verified listing pages added to the defaults — only pages listed here can be enabled, agents never add URLs. `sources`: per-source schedule — `enabled: false` skips a source in scheduled runs (its code and data stay), `everyHours` (1–24) runs it at most every N hours. `lockedSources` (Adam) are never switched off.",
-  "version": 4,
-  "updatedAt": "2026-10-24",
+  "version": 5,
+  "updatedAt": "2026-10-28",
   "updatedBy": "deals-sources",
   "amazon": {
-    "limit": 250,
-    "bounds": [150, 300],
+    "limit": 100,
+    "bounds": [50, 300],
     "extraPages": {
       "electronics": {
         "url": "https://www.amazon.fr/deals?bubble-id=deals-collection-electronics",
@@ -22,8 +22,8 @@
     }
   },
   "cdiscount": {
-    "limit": 250,
-    "bounds": [150, 300],
+    "limit": 100,
+    "bounds": [50, 300],
     "extraPages": {
       "ecrans": {
         "url": "https://www.cdiscount.com/informatique/ecrans-informatiques/l-10732.html",
@@ -43,33 +43,35 @@
   "sources": {
     "steam": {
       "enabled": true,
-      "everyHours": 6
+      "everyHours": 12
     },
     "amazon": {
       "enabled": true
     },
     "cdiscount": {
-      "enabled": true
+      "enabled": true,
+      "engine": "lightpanda"
     },
     "aliexpress": {
-      "enabled": true,
-      "everyHours": 24
+      "enabled": false,
+      "everyHours": 24,
+      "engine": "lightpanda"
     },
     "orange": {
       "enabled": true,
-      "everyHours": 12
+      "everyHours": 24
     },
     "free": {
       "enabled": true,
-      "everyHours": 12
+      "everyHours": 24
     },
     "bouygues": {
       "enabled": true,
-      "everyHours": 12
+      "everyHours": 24
     },
     "sfr": {
       "enabled": true,
-      "everyHours": 12
+      "everyHours": 24
     },
     "sosh": {
       "enabled": true,
@@ -77,70 +79,76 @@
     },
     "epic": {
       "enabled": true,
-      "everyHours": 12
+      "everyHours": 24
     },
     "gog": {
       "enabled": true,
-      "everyHours": 6
+      "everyHours": 12
     },
     "nintendo": {
       "enabled": true,
-      "everyHours": 6
+      "everyHours": 12
     },
     "playstation": {
-      "enabled": true
+      "enabled": true,
+      "everyHours": 12
     },
     "xbox": {
       "enabled": true,
-      "everyHours": 6
+      "everyHours": 12
     },
     "lidl": {
       "enabled": true,
-      "everyHours": 6
+      "everyHours": 12
     },
     "ikea": {
       "enabled": true,
-      "everyHours": 12
+      "everyHours": 24
     },
     "leclerc": {
       "enabled": true,
-      "everyHours": 6
+      "everyHours": 12
     },
     "carrefour": {
       "enabled": true,
-      "everyHours": 6
+      "everyHours": 12,
+      "engine": "lightpanda"
     },
     "grosbill": {
       "enabled": true,
-      "everyHours": 6
+      "everyHours": 12
     },
     "nike": {
       "enabled": true,
-      "everyHours": 6
+      "everyHours": 12
     },
     "footlocker": {
       "enabled": true,
-      "everyHours": 12
+      "everyHours": 24
     },
     "castorama": {
-      "enabled": true
+      "enabled": true,
+      "everyHours": 12
     },
     "freegames": {
-      "enabled": true
+      "enabled": true,
+      "everyHours": 12
     },
     "lenovo": {
-      "enabled": true
+      "enabled": true,
+      "everyHours": 12
     },
     "relances": {
       "enabled": true,
-      "everyHours": 6
+      "everyHours": 12
     },
     "itjustgood": {
-      "enabled": true,
+      "enabled": false,
       "everyHours": 24
     },
     "joybuy": {
-      "enabled": true
+      "enabled": true,
+      "everyHours": 12
     },
     "amazon-watch": {
       "enabled": true
@@ -174,5 +182,9 @@
     "camelcamelcamel": "contrôle de sécurité",
     "psprices": "403",
     "gg-deals": "403"
+  },
+  "aliexpress": {
+    "limit": 100,
+    "bounds": [50, 300]
   }
 }
