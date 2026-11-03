@@ -196,7 +196,16 @@ controllers → React console → Dealabs draft / auto-publish.
   pages of 48 in its best-seller order, keyed by the product code; the
   « AU LIEU DE » struck price is France's legal 30-day reference, so
   `regular` + `lowestRecentPrice`; reviews are client-side, not read), Nike product-wall API, Foot Locker sale pages, Castorama
-  "offre du moment" pages. `CarrefourCollector` reads Carrefour's non-food
+  "offre du moment" pages. Watch shops (epic 24, parsers in
+  `collectors/watchOffers.ts`): Timeshop24 « Vente de montres » (MSRP
+  struck price) and Ocarat's watch sale page (`black-friday-montre`,
+  seasonal), both `listPriceKind: "rrp"`, so they show through a real
+  drop or the cross-search by watch reference on Amazon/Cdiscount
+  (`refreshByModel` with `watchReference` + `matchesSameWatch`); hints
+  `watch:classic` → Mode, `watch:smart` → Téléphonie. Maty, Cleor,
+  Casio.fr, Galeries Lafayette block even a real browser (affiliate
+  feeds: Cleor on Awin); Histoire d'Or / Marc Orian load prices client-
+  side. `CarrefourCollector` reads Carrefour's non-food
   "bons plans high-tech & maison" page in the browser (403 to plain fetch;
   food promotions are loyalty-card/multi-buy mechanics, left out).
   Tested and left out: Fnac, Darty, Boulanger, Decathlon, Leroy Merlin,

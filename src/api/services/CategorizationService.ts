@@ -23,6 +23,9 @@ const HINTS: Array<{ pattern: RegExp; categoryId: string }> = [
     pattern: /^aliexpress:(mini-pc|ordinateur-portable|laptop)/,
     categoryId: "computing",
   },
+  // Watch shops (`watchCategoryHint`): connected watches are High-Tech.
+  { pattern: /^watch:smart$/, categoryId: "phones" },
+  { pattern: /^watch:/, categoryId: "fashion" },
   // Amazon deals collections (`/deals?bubble-id=deals-collection-…`)
   { pattern: /^amazon:(toys|baby)$/, categoryId: "kids" },
   { pattern: /^amazon:(home-and-kitchen|furniture)$/, categoryId: "home" },

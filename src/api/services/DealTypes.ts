@@ -30,6 +30,8 @@ export const DEFAULT_MERCHANT_BY_SOURCE: Record<string, string> = {
   carrefour: "carrefour",
   grosbill: "grosbill",
   screwfix: "screwfix",
+  timeshop24: "timeshop24",
+  ocarat: "ocarat",
   nike: "nike",
   lenovo: "lenovo",
   itjustgood: "itjustgood",

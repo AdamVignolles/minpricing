@@ -11,10 +11,14 @@ import type {
 } from "../collectors/browser.ts";
 import { parsePriceFr, withBrowser, withPage } from "../collectors/browser.ts";
 import { joybuyModelQuery } from "../collectors/joybuyOffers.ts";
+import { matchesSameWatch, watchReference } from "../collectors/watchOffers.ts";
 import { dealEntity } from "../entities/Deal.ts";
 import { type MarketComparison, matchesSameModel } from "./crossSearch.ts";
 import type { Deal } from "./DealTypes.ts";
 import { comparablePlans, TELECOM_SOURCES } from "./telecomMarket.ts";
+
+/** Watch shops (epic 24), cross-searched by reference. */
+const WATCH_SOURCES = new Set(["timeshop24", "ocarat"]);
 
 /** A market price is re-checked at most once a day per deal. */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -157,6 +161,18 @@ export class MarketReferenceService {
         focus,
       );
     }
+    // Watch shops: a « prix conseillé » struck price and no EAN; the
+    // watch's reference is what other merchants list it under.
+    if (WATCH_SOURCES.has(sourceId)) {
+      return this.refreshByModel(
+        sourceId,
+        watchReference,
+        getCloudflareBinding,
+        onProgress,
+        focus,
+        matchesSameWatch,
+      );
+    }
     // Mobile plans: compared with the other operators' plans, no browser.
     if (TELECOM_SOURCES.has(sourceId)) {
       return this.refreshTelecom(sourceId);
@@ -272,6 +288,11 @@ export class MarketReferenceService {
     getCloudflareBinding?: () => CloudflareBrowserBinding | undefined,
     onProgress?: (done: number, total: number) => void,
     focus?: string[],
+    matches: (
+      ourTitle: string,
+      model: string,
+      theirTitle: string,
+    ) => { match: boolean; variantUnverified?: boolean } = matchesSameModel,
   ): Promise<string[]> {
     const now = Date.now();
     const stale = (
@@ -313,7 +334,7 @@ export class MarketReferenceService {
             const best = results
               .map((result) => ({
                 result,
-                verdict: matchesSameModel(deal.title, model, result.title),
+                verdict: matches(deal.title, model, result.title),
               }))
               .filter(
                 ({ result, verdict }) =>

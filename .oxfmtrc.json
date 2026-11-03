@@ -15,6 +15,7 @@
     "playwright-report",
     "test-results",
     "test/fixtures/amazon-watch",
-    "test/fixtures/screwfix"
+    "test/fixtures/screwfix",
+    "test/fixtures/watches"
   ]
 }

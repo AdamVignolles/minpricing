@@ -111,6 +111,16 @@ export class SeedService {
         name: "Screwfix (déstockage)",
         type: "scrape" as const,
       },
+      {
+        id: "timeshop24",
+        name: "Timeshop24 (montres en vente)",
+        type: "scrape" as const,
+      },
+      {
+        id: "ocarat",
+        name: "Ocarat (montres en promotion)",
+        type: "scrape" as const,
+      },
       { id: "nike", name: "Nike (promotions)", type: "api" as const },
       {
         id: "itjustgood",
@@ -272,6 +282,8 @@ export class SeedService {
       { id: "carrefour", name: "Carrefour", domain: "carrefour.fr" },
       { id: "grosbill", name: "Grosbill", domain: "grosbill.com" },
       { id: "screwfix", name: "Screwfix", domain: "screwfix.fr" },
+      { id: "timeshop24", name: "Timeshop24", domain: "timeshop24.fr" },
+      { id: "ocarat", name: "Ocarat", domain: "ocarat.com" },
       { id: "nike", name: "Nike", domain: "nike.com" },
       { id: "lenovo", name: "Lenovo", domain: "lenovo.com" },
       { id: "itjustgood", name: "ITJustGood", domain: "itjustgood.com" },

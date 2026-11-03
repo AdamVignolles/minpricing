@@ -23,6 +23,7 @@ import {
   parsePlayStationGrid,
   parseXboxDeals,
 } from "./storeOffers.ts";
+import { parseOcaratListing, parseTimeshop24Listing } from "./watchOffers.ts";
 
 /**
  * Stores read with plain `fetch` — their own public JSON APIs or
@@ -354,6 +355,66 @@ export class ScrewfixCollector implements DealSource {
       }
     }
     return uniqueById(deals);
+  }
+}
+
+/**
+ * A watch shop's sale listing, page after page (`?p=N`), a few seconds
+ * apart, until a page is empty or fails (Ocarat's Black Friday page is
+ * seasonal: gone, the source simply finds nothing). See `watchOffers.ts`.
+ */
+abstract class WatchShopCollector implements DealSource {
+  abstract id: string;
+  abstract name: string;
+  protected abstract pages: number;
+  protected abstract pageUrl(page: number): string;
+  protected abstract parse(html: string): RawDeal[];
+
+  constructor(
+    protected sleep: (ms: number) => Promise<void> = (ms) =>
+      new Promise((resolve) => setTimeout(resolve, ms)),
+  ) {}
+
+  async discover(context?: DiscoverContext): Promise<RawDeal[]> {
+    const deals: RawDeal[] = [];
+    for (let page = 1; page <= this.pages; page++) {
+      context?.progress?.("Montres en promotion", page, this.pages);
+      if (page > 1) await this.sleep(2_000 + Math.random() * 2_000);
+      try {
+        const found = this.parse(await fetchText(this.pageUrl(page)));
+        if (found.length === 0) break;
+        deals.push(...found);
+      } catch {
+        break;
+      }
+    }
+    return uniqueById(deals);
+  }
+}
+
+/** Timeshop24 « Vente de montres » (~160 watches, 35 a page). */
+export class Timeshop24Collector extends WatchShopCollector {
+  id = "timeshop24";
+  name = "Timeshop24 (montres en vente)";
+  protected pages = 5;
+  protected pageUrl(page: number) {
+    return `https://www.timeshop24.fr/montres/vente.html${page > 1 ? `?p=${page}` : ""}`;
+  }
+  protected parse(html: string) {
+    return parseTimeshop24Listing(html);
+  }
+}
+
+/** Ocarat's watch sale page (40 a page). */
+export class OcaratCollector extends WatchShopCollector {
+  id = "ocarat";
+  name = "Ocarat (montres en promotion)";
+  protected pages = 4;
+  protected pageUrl(page: number) {
+    return `https://ocarat.com/black-friday-montre/${page > 1 ? `?p=${page}` : ""}`;
+  }
+  protected parse(html: string) {
+    return parseOcaratListing(html);
   }
 }
 
