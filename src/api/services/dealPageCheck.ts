@@ -16,11 +16,48 @@ export interface DealPageSnapshot {
   prices: number[];
   /** schema.org availability from JSON-LD/microdata, when present. */
   availability?: string;
+  /**
+   * Prices the page states as the product's own (JSON-LD offers, price
+   * meta tags, a store API), as opposed to any euro amount in its text.
+   */
+  statedPrices?: number[];
 }
+
+/** Why a page refused the deal, for what the publisher does next. */
+export type DealPageProblem =
+  | "unreachable"
+  | "gone"
+  | "out-of-stock"
+  | "no-price"
+  | "price";
 
 export type DealPageVerdict =
   | { ok: true; matchedPrice?: number }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      problem?: DealPageProblem;
+      /** `price`: the amount closest to ours, as shown in the reason. */
+      seenPrice?: number;
+      /** `price`: the one price the page states for the product, if one. */
+      statedPrice?: number;
+    };
+
+/**
+ * The single price the page states for the product (JSON-LD offer, price
+ * meta, store API), to the cent; `undefined` when it states none or
+ * several different ones (variants, bundles): then nothing is trusted.
+ */
+export function statedPrice(page: DealPageSnapshot): number | undefined {
+  const distinct = [
+    ...new Set(
+      (page.statedPrices ?? [])
+        .filter((price) => Number.isFinite(price) && price > 0)
+        .map((price) => Math.round(price * 100)),
+    ),
+  ];
+  return distinct.length === 1 ? distinct[0] / 100 : undefined;
+}
 
 const MAINTENANCE =
   /maintenance in progress|en maintenance|site (?:est )?temporairement indisponible|temporarily unavailable|we'?ll be back soon|service unavailable/i;
@@ -67,6 +104,7 @@ export function assessDealPage(
     return {
       ok: false,
       reason: `page introuvable chez le marchand (${page.status})`,
+      problem: "gone",
     };
   }
   const head = `${page.title}\n${page.text.slice(0, 3000)}`;
@@ -74,25 +112,32 @@ export function assessDealPage(
     return {
       ok: false,
       reason: `site marchand indisponible ou en maintenance${page.status >= 500 ? ` (${page.status})` : ""}`,
+      problem: "unreachable",
     };
   }
   if (GONE.test(head)) {
     return {
       ok: false,
       reason: "le produit n'est plus disponible chez le marchand",
+      problem: "gone",
     };
   }
   if (page.availability && OUT_OF_STOCK_SCHEMA.test(page.availability)) {
     return {
       ok: false,
       reason: "produit en rupture de stock (indiqué par la page)",
+      problem: "out-of-stock",
     };
   }
   if (
     !page.availability?.match(/InStock|PreOrder/i) &&
     OUT_OF_STOCK.test(page.text.slice(0, 20_000))
   ) {
-    return { ok: false, reason: "produit en rupture de stock" };
+    return {
+      ok: false,
+      reason: "produit en rupture de stock",
+      problem: "out-of-stock",
+    };
   }
 
   if (deal.currentPrice <= 0) return { ok: true };
@@ -100,6 +145,7 @@ export function assessDealPage(
     return {
       ok: false,
       reason: "prix introuvable sur la page (page bloquée ou non chargée)",
+      problem: "no-price",
     };
   }
   const tolerance = Math.max(0.01, deal.currentPrice * 0.01);
@@ -115,5 +161,8 @@ export function assessDealPage(
   return {
     ok: false,
     reason: `le prix a changé : ${deal.currentPrice.toFixed(2)} € attendu, la page affiche ${closest.toFixed(2)} €`,
+    problem: "price",
+    seenPrice: closest,
+    statedPrice: statedPrice(page),
   };
 }

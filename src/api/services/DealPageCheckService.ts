@@ -66,6 +66,7 @@ export class DealPageCheckService {
         text: "",
         prices:
           final !== undefined ? [final / 100] : app.data?.is_free ? [0] : [],
+        statedPrices: final !== undefined ? [final / 100] : [],
         availability: "https://schema.org/InStock",
       };
     }
@@ -92,6 +93,9 @@ export class DealPageCheckService {
         title: doc.title ?? "Nintendo eShop",
         text: "",
         prices: [doc.price_discounted_f ?? doc.price_regular_f].filter(
+          (price): price is number => price !== undefined,
+        ),
+        statedPrices: [doc.price_discounted_f ?? doc.price_regular_f].filter(
           (price): price is number => price !== undefined,
         ),
         availability: "https://schema.org/InStock",
@@ -207,6 +211,7 @@ export class DealPageCheckService {
               title: read.title,
               text: read.text,
               prices: [...read.structuredPrices, ...euroAmounts(read.text)],
+              statedPrices: read.structuredPrices,
               availability: read.availability,
             };
           }),
@@ -220,6 +225,7 @@ export class DealPageCheckService {
       return {
         ok: false,
         reason: `page marchand impossible à charger (${message.slice(0, 120)})`,
+        problem: "unreachable",
       };
     }
     const verdict = assessDealPage(snapshot, deal);

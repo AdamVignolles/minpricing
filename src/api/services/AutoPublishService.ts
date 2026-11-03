@@ -5,6 +5,7 @@ import { $repository } from "alepha/orm";
 
 import { dealEntity } from "../entities/Deal.ts";
 import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
+import { AgentFilesService } from "./AgentFilesService.ts";
 import { DealabsDraftService } from "./DealabsDraftService.ts";
 import { DealabsHistoryService } from "./DealabsHistoryService.ts";
 import {
@@ -12,8 +13,15 @@ import {
   DealabsPublisherService,
 } from "./DealabsPublisherService.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
+import type { DealPageProblem } from "./dealPageCheck.ts";
 import { DealPageCheckService } from "./DealPageCheckService.ts";
+import type { Deal } from "./DealTypes.ts";
 import { keepaChartForDeal } from "./keepa.ts";
+import {
+  decideAfterRefresh,
+  priceChangeText,
+  samePrice,
+} from "./priceRecheck.ts";
 import { PriceSeriesService } from "./PriceSeriesService.ts";
 import { PublishPauseService } from "./PublishPauseService.ts";
 import {
@@ -52,6 +60,26 @@ export class PublishRefusedError extends Error {
     this.name = "PublishRefusedError";
   }
 }
+
+/** A deal read again from its shop during a publish (epic 25). */
+export interface DealRefresh {
+  /** Read through the shop's collector, from the page's stated price, or not. */
+  read: "shop" | "page" | "none";
+  before: number;
+  after?: number;
+  /** The deal as stored after the update. */
+  deal?: Deal;
+  handPicked?: boolean;
+  /** Quality gate refused it (the deal was archived). */
+  rejected?: string;
+  /** Why it couldn't be read. */
+  reason?: string;
+}
+
+type DealRefresher = (
+  dealId: string,
+  pagePrice?: number,
+) => Promise<DealRefresh>;
 
 export interface AutoPublishOutcome {
   /** Why nothing was attempted at all, when that's the case. */
@@ -112,6 +140,111 @@ export class AutoPublishService {
     }),
   );
 
+  /**
+   * Re-reads a deal from its shop (`CollectionService.refreshDeal`, which
+   * registers itself here: it already depends on this service).
+   */
+  protected refreshDeal?: DealRefresher;
+
+  useDealRefresher(refresher: DealRefresher): true {
+    this.refreshDeal = refresher;
+    return true;
+  }
+
+  protected agentFiles = $inject(AgentFilesService);
+
+  /** Thresholds of an automatic publish: the schedule's rules, else ours. */
+  protected autoThresholds(trigger: PublishTrigger): {
+    minScore: number;
+    minHotChance: number;
+  } {
+    const fallback = {
+      minScore: this.env.AUTO_PUBLISH_MIN_SCORE,
+      minHotChance: this.env.AUTO_PUBLISH_MIN_HOT_CHANCE,
+    };
+    if (trigger !== "schedule") return fallback;
+    try {
+      const rules = JSON.parse(this.agentFiles.readConfig("publish-rules"));
+      return {
+        minScore: Number(rules.minScore ?? fallback.minScore),
+        minHotChance: Number(rules.minHotChance ?? fallback.minHotChance),
+      };
+    } catch {
+      return fallback;
+    }
+  }
+
+  /**
+   * The merchant page shows another price: read the deal again from its
+   * shop, store it (price, history, score), then go on at the new price
+   * if it still passes the rules this publish was started under, or stop
+   * saying why. Returns the updated deal to publish.
+   * @throws DealNotAvailableError when it must not go out.
+   */
+  protected async followPriceChange(
+    deal: Deal,
+    verdict: { reason: string; seenPrice?: number; statedPrice?: number },
+    trigger: PublishTrigger,
+  ): Promise<Deal> {
+    const refresh = this.refreshDeal
+      ? await this.refreshDeal(deal.id, verdict.statedPrice)
+      : undefined;
+    if (!refresh || refresh.read === "none" || !refresh.deal) {
+      throw new DealNotAvailableError(
+        `Pas publié : ${verdict.reason} ; deal non mis à jour (${refresh?.reason ?? "relecture indisponible"})`,
+      );
+    }
+    const after = refresh.after ?? refresh.deal.currentPrice;
+    const change = priceChangeText(refresh.before, after);
+    if (refresh.rejected) {
+      throw new DealNotAvailableError(
+        `Pas publié : prix ${change}, deal mis à jour puis écarté : ${refresh.rejected}`,
+      );
+    }
+    // The shop's own reading must be what the page shows (± 1 %).
+    if (
+      refresh.read === "shop" &&
+      verdict.seenPrice !== undefined &&
+      !samePrice(after, verdict.seenPrice) &&
+      !(
+        verdict.statedPrice !== undefined &&
+        samePrice(after, verdict.statedPrice)
+      )
+    ) {
+      throw new DealNotAvailableError(
+        `Pas publié : ${verdict.reason} ; la boutique relue indique ${priceChangeText(refresh.before, after).split(" → ")[1]} (deal mis à jour, prix à confirmer)`,
+      );
+    }
+    if (samePrice(after, refresh.before)) {
+      // The shop still says our price: the page's amount was another one
+      // (an accessory, delivery…). Publish as planned.
+      await this.progress.done(
+        "merchant-check",
+        `Prix confirmé par la boutique : ${priceChangeText(refresh.before, after).split(" → ")[1]}`,
+      );
+      return refresh.deal;
+    }
+    const duplicate = await this.dealabsHistory
+      .findLiveDuplicate(refresh.deal)
+      .catch(() => undefined);
+    const decision = decideAfterRefresh({
+      trigger,
+      before: refresh.before,
+      after,
+      score: refresh.deal.score,
+      hotChance: refresh.deal.hotChance,
+      handPicked: refresh.handPicked ?? false,
+      ...this.autoThresholds(trigger),
+      duplicate,
+    });
+    if (!decision.go) throw new DealNotAvailableError(decision.reason);
+    await this.progress.done("merchant-check", decision.detail, {
+      from: refresh.before,
+      to: after,
+    });
+    return refresh.deal;
+  }
+
   /** One publish at a time: the button and the run share one browser flow. */
   protected busy = false;
 
@@ -170,7 +303,7 @@ export class AutoPublishService {
       | { publishAttempts: number; lastPublishAttemptAt: string }
       | undefined;
     try {
-      const deal = await this.deals.getById(dealId);
+      let deal: Deal = await this.deals.getById(dealId);
       await this.progress.start({ dealId, title: deal.title, trigger });
       await this.progress.done(
         "checks",
@@ -201,13 +334,17 @@ export class AutoPublishService {
       if (this.pageCheck.enabled) {
         await this.progress.begin("merchant-check", deal.url);
         const verdict = await this.pageCheck.check(deal);
-        if (!verdict.ok) {
+        if (!verdict.ok && verdict.problem === "price") {
+          deal = await this.followPriceChange(deal, verdict, trigger);
+        } else if (!verdict.ok) {
+          await this.markUnavailable(deal, verdict.problem);
           throw new DealNotAvailableError(`Pas publié : ${verdict.reason}`);
+        } else {
+          await this.progress.done(
+            "merchant-check",
+            "Page en ligne, produit disponible au bon prix",
+          );
         }
-        await this.progress.done(
-          "merchant-check",
-          "Page en ligne, produit disponible au bon prix",
-        );
       } else {
         await this.progress.skip(
           "merchant-check",
@@ -288,6 +425,29 @@ export class AutoPublishService {
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * The page says the product is gone or out of stock: the deal says so
+   * too, instead of staying listed as active until the next run.
+   */
+  protected async markUnavailable(
+    deal: Deal,
+    problem: DealPageProblem | undefined,
+  ): Promise<void> {
+    const change =
+      problem === "gone"
+        ? { status: "expired" as const }
+        : problem === "out-of-stock"
+          ? { availability: "out_of_stock" as const }
+          : undefined;
+    if (!change) return;
+    await this.deals.updateById(deal.id, change).catch((error) =>
+      this.log.warn("Deal not marked unavailable", {
+        dealId: deal.id,
+        error,
+      }),
+    );
   }
 
   /** The finished run's steps, as stored on the draft. */

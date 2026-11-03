@@ -60,7 +60,7 @@ import { sourceEntity } from "../entities/Source.ts";
 import { trackedProductEntity } from "../entities/TrackedProduct.ts";
 import { AmazonWatchService } from "./AmazonWatchService.ts";
 import { appDir } from "./appDir.ts";
-import { AutoPublishService } from "./AutoPublishService.ts";
+import { AutoPublishService, type DealRefresh } from "./AutoPublishService.ts";
 import { CategorizationService } from "./CategorizationService.ts";
 import { CollectionProgressService } from "./CollectionProgressService.ts";
 import {
@@ -71,7 +71,7 @@ import {
 } from "./collectionTuning.ts";
 import { DealabsDraftService } from "./DealabsDraftService.ts";
 import { DealabsHistoryService } from "./DealabsHistoryService.ts";
-import { DEFAULT_MERCHANT_BY_SOURCE } from "./DealTypes.ts";
+import { DEFAULT_MERCHANT_BY_SOURCE, type Deal } from "./DealTypes.ts";
 import { freshnessOnUpdate } from "./freshness.ts";
 import { predictDealHeat } from "./heatPrediction.ts";
 import { HotWatchlistService } from "./HotWatchlistService.ts";
@@ -964,6 +964,103 @@ export class CollectionService {
 
   /** One link check at a time per shop (its browser budget). */
   protected linkChecks = new Map<string, Promise<unknown>>();
+
+  /** Publishing re-reads a deal whose price moved through this service. */
+  protected registerDealRefresher = this.autoPublish.useDealRefresher(
+    (dealId, pagePrice) => this.refreshDeal(dealId, pagePrice),
+  );
+
+  /**
+   * Reads one deal again from its shop now — `collect()` with its product
+   * id, the path a link check takes — and stores what it finds through
+   * `upsertDeal` (quality gate, price history on change, rescore). Shops
+   * read only from their listings have no `collect()`: then the price the
+   * merchant page states for the product (`pagePrice`, JSON-LD or price
+   * meta, never a loose amount from the text) is applied instead.
+   * Queued with the shop's link checks. Never throws (epic 25).
+   */
+  async refreshDeal(dealId: string, pagePrice?: number): Promise<DealRefresh> {
+    const deal = await this.deals.getById(dealId);
+    const previous = this.linkChecks.get(deal.sourceId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => this.runDealRefresh(deal, pagePrice))
+      .catch((error: unknown): DealRefresh => ({
+        read: "none",
+        before: deal.currentPrice,
+        reason: `relecture impossible (${error instanceof Error ? error.message.slice(0, 160) : String(error)})`,
+      }));
+    this.linkChecks.set(deal.sourceId, run);
+    return run;
+  }
+
+  protected async runDealRefresh(
+    deal: Deal,
+    pagePrice?: number,
+  ): Promise<DealRefresh> {
+    const before = deal.currentPrice;
+    const source = await this.sources.findOne({
+      where: { id: { eq: deal.sourceId } },
+    });
+    if (!source) {
+      return { read: "none", before, reason: "source inconnue" };
+    }
+    const handPicked = (await this.watchedLinks.handPickedDealIds()).includes(
+      deal.id,
+    );
+    const collector = this.collectorsById[deal.sourceId];
+    let raw: RawDeal | undefined;
+    let read: DealRefresh["read"] = "shop";
+    if (collector?.collect) {
+      const context = await this.discoverContext(source.id);
+      raw = (
+        await collector
+          .collect(
+            [{ id: deal.id, url: deal.url, externalId: deal.externalId }],
+            context,
+          )
+          .catch(() => [] as RawDeal[])
+      ).find((item) => item.externalId === deal.externalId);
+    }
+    if (!raw && pagePrice !== undefined && pagePrice > 0) {
+      read = "page";
+      raw = {
+        externalId: deal.externalId,
+        title: deal.title,
+        url: deal.url,
+        imageUrl: deal.imageUrl,
+        description: deal.description,
+        price: pagePrice,
+        listPrice: deal.listPrice,
+        currency: deal.currency,
+        availability: "in_stock",
+        merchantId: deal.merchantId,
+        categoryId: deal.categoryId,
+        billingPeriod: deal.billingPeriod,
+      };
+    }
+    if (!raw) {
+      return {
+        read: "none",
+        before,
+        reason: collector?.collect
+          ? "fiche produit illisible pour la boutique"
+          : "la page n'indique pas un prix unique pour le produit",
+      };
+    }
+    const outcome = await this.upsertDeal(source.id, source.type, raw, {
+      handPicked,
+    });
+    const fresh = await this.deals.getById(deal.id);
+    return {
+      read,
+      before,
+      after: raw.price,
+      deal: fresh,
+      handPicked,
+      ...(outcome.result === "rejected" ? { rejected: outcome.reason } : {}),
+    };
+  }
 
   /**
    * Reads one pasted link now, through exactly what a run of its shop

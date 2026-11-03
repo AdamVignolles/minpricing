@@ -88,6 +88,9 @@ describe("assessDealPage", () => {
     expect(verdict).toEqual({
       ok: false,
       reason: "le prix a changé : 24.49 € attendu, la page affiche 29.99 €",
+      problem: "price",
+      seenPrice: 29.99,
+      statedPrice: undefined,
     });
   });
 

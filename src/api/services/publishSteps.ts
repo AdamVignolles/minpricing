@@ -47,6 +47,8 @@ export interface PublishStep {
   detail?: string;
   /** Someone has to act in the « écran distant » (Cloudflare, login). */
   needsHuman?: boolean;
+  /** The merchant page's price moved and the deal was updated (epic 25). */
+  priceChange?: { from: number; to: number };
 }
 
 export type PublishTrigger = "button" | "schedule" | "collection";

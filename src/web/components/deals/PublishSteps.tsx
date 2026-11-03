@@ -247,6 +247,22 @@ const PublishSteps: FC<{ run: PublishRun; compact?: boolean }> = ({
                     Action requise dans l'écran distant
                   </Badge>
                 ) : null}
+                {step.priceChange ? (
+                  <Badge
+                    size="sm"
+                    color={
+                      step.priceChange.to > step.priceChange.from
+                        ? "orange"
+                        : "signal"
+                    }
+                    variant="light"
+                    w="fit-content"
+                  >
+                    {step.priceChange.to > step.priceChange.from
+                      ? "Prix en hausse, deal mis à jour"
+                      : "Prix en baisse, deal mis à jour"}
+                  </Badge>
+                ) : null}
                 {step.detail ? (
                   <Text
                     fz="xs"

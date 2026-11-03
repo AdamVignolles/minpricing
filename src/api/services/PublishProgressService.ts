@@ -195,13 +195,18 @@ export class PublishProgressService {
   }
 
   /** `id` is done (it may not have been begun: then it took no time). */
-  async done(id: PublishStepId, detail?: string): Promise<void> {
+  async done(
+    id: PublishStepId,
+    detail?: string,
+    priceChange?: { from: number; to: number },
+  ): Promise<void> {
     this.update((run, now) => {
       const step = this.find(run, id);
       if (!step) return;
       step.startedAt ??= now;
       this.close(step, "done", now);
       if (detail !== undefined) step.detail = detail;
+      if (priceChange) step.priceChange = priceChange;
     });
     await this.flush();
   }

@@ -412,6 +412,8 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
       const updated = await request;
       setCurrent(updated as Draft);
       setDealabsUrlInput(updated.dealabsUrl ?? "");
+      // Posted, maybe at a price updated on the way (epic 25).
+      await router.invalidate().catch(() => undefined);
       notifications.show({
         message: "Publié automatiquement sur Dealabs.",
         color: "signal",
@@ -438,6 +440,11 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
         .byDeal({ params: { id: deal.id } })
         .catch(() => null);
       if (refreshed) setCurrent(refreshed as Draft);
+      // The merchant page's price moved and the deal was updated before
+      // stopping: show its new price, score and history.
+      if (error instanceof Error && error.message.includes("deal mis à jour")) {
+        await router.invalidate().catch(() => undefined);
+      }
     } finally {
       setAutoPublishing(false);
     }
