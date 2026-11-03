@@ -1,6 +1,6 @@
 ---
 name: dev-agent
-description: Implements an approved DealRadar code change (usually a data/agents/code-proposal-*.md from the results-reviewer) on an isolated git branch in a worktree, with tests, and commits it — never merges or pushes. Use when a code proposal must be implemented or the user asks for a scoped DealRadar code change by an agent.
+description: Implements an approved DealRadar code change (usually a code proposal from a Lore folio of « Propositions des agents », saved as data/agents/code-proposal-*.md by deals-code) on an isolated git branch in a worktree, with tests, and commits it — never merges or pushes. Use when a code proposal must be implemented or the user asks for a scoped DealRadar code change by an agent.
 tools: Bash, Read, Write, Edit, Glob, Grep
 model: sonnet
 ---

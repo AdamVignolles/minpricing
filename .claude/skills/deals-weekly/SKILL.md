@@ -41,9 +41,14 @@ Numbers decide, not impressions. Everything you write is French.
 "deals-weekly"`), prepend a changelog entry (what, from → to, the
      numbers, what you expect).
 4. **Code proposal** only if rules can't fix it (e.g. a category's
-   calibration wrong over ≥ 20 posts): write
-   `data/agents/code-proposal-<today>.md` — problem with numbers, exact
-   change (files, functions, constants), tests to add.
+   calibration wrong over ≥ 20 posts): write it as a **Lore folio** in project 79, folder « Propositions des agents »
+   (`directory_shortId` 1): `folio_create` with `project` 79,
+   `directory_shortId` 1, title
+   `Proposition — <subject> (<today>)`, a one-sentence `summary`, and as
+   `content`: the problem with numbers, the exact change (files,
+   functions, constants), tests to add. List the folder first
+   (`directory_list`) and don't repeat a subject already proposed. Never
+   write a `data/agents/code-proposal-*.md` file: no one can read it.
 5. Notion "Journal DealRadar" (`collection://f778ed4c-ae4c-4614-bd67-8a60b1f2563d`),
    one row: Titre "Bilan semaine du <today>", Type "📊 Bilan hebdo", Date,
    Publiés (agents' successes this week), Taux hot (7 j) = overall

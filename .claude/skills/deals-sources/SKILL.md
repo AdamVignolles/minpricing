@@ -84,14 +84,21 @@ more than 60 days ago for "bloque les robots" (a re-test counts in the 10):
 2. `node scripts/agents/dealradar.mjs probe <https url>` → `status`,
    `blocked`, `euroPrices`, `ldJsonOffers`, `embeddedState`, `sample`.
 3. Readable (200, not blocked, prices or structured data present) →
-   write `data/agents/code-proposal-<today>-source-<shop>.md` — up to 10
-   a day, no weekly limit, but never a second one for a shop that already
-   has a `data/agents/code-proposal-*-source-<shop>*.md` file: the shop, the URL(s), the probe
-   result, what the page carries (struck price? reviews? category?), why
-   it should find hot deals (Dealabs figures), the collector to write
-   (`StoreCollectors.ts` / `retailOffers.ts` pattern, parser + fixture
-   test), and its category. Sunday's `deals-code` implements it on a
-   branch for Adam's review.
+   write the source proposal as a **Lore folio** in project 79, folder « Propositions des agents »
+   (`directory_shortId` 1): `folio_create` with `project` 79,
+   `directory_shortId` 1, title
+   `Proposition — source <shop> (<today>)`, a one-sentence `summary`, and
+   the proposal as `content` (Markdown) — up to 10 a day, no weekly
+   limit, but never a second one for a shop that already has one: list
+   the folder first (`directory_list`, `project` 79, `directory_shortId`
+   1) and skip a shop whose title is there. The proposal says: the shop,
+   the URL(s), the probe result, what the page carries (struck price?
+   reviews? category?), why it should find hot deals (Dealabs figures),
+   the collector to write (`StoreCollectors.ts` / `retailOffers.ts`
+   pattern, parser + fixture test), and its category. Adam reads it in
+   Lore and decides; nothing implements it on its own. Never write a
+   `data/agents/code-proposal-*.md` file: the server keeps it where no one
+   can read it.
 4. Blocked / nothing rendered → look for a **legitimate route** first
    (below); if there is none, add it to `rejectedSources` with the reason
    and the date (`"<reason> (testé le <today>)"`).
@@ -100,7 +107,8 @@ more than 60 days ago for "bloque les robots" (a re-test counts in the 10):
 robots but publishes its data officially — an affiliate product feed
 (Awin, Effinity, Rakuten Advertising, CJ, Kelkoo…), a public API, an
 open data / price feed — write the source proposal for that route
-(`code-proposal-<today>-source-<shop>.md`, same rules as above): which
+(a Lore folio `Proposition — source <shop> (<today>)` in the same folder,
+same rules as above): which
 network, the feed or API, what it carries (price, struck price,
 availability, EAN, category), and the env variables the collector reads
 (e.g. `AWIN_API_KEY`, `AWIN_PUBLISHER_ID`, feed URL) — no-op while they
