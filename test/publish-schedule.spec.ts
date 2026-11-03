@@ -376,6 +376,38 @@ describe("publishing plan", () => {
     check.mockRestore();
   });
 
+  test("dry run on a moved price: the deal is rechecked, nothing published", async () => {
+    const publish = vi.spyOn(publisher, "publishDeal");
+    const check = vi
+      .spyOn(alepha.inject(DealPageCheckService), "check")
+      .mockResolvedValue({
+        ok: false,
+        problem: "price",
+        reason: "le prix a changé : 89.00 € attendu, la page affiche 89.99 €",
+        seenPrice: 89.99,
+      } as any);
+    const recheck = vi.spyOn(publisher, "recheckPrice").mockResolvedValue({
+      go: false,
+      reason:
+        "Pas publié : prix remonté (89,00 € → 89,99 €), deal mis à jour : plus d'argument prix (score 34 < 40)",
+    });
+    await call("PUT", "/agent/schedule", {
+      ranked: ranked(),
+      now: true,
+      dryRun: true,
+      agent: "health-check",
+    });
+    setNow("2026-10-28T16:20:00.000Z");
+    const ran = await schedule.runDue();
+    expect(ran.length).toBeGreaterThan(0);
+    expect(recheck).toHaveBeenCalled();
+    expect(ran[0].note).toContain("deal mis à jour : plus d'argument prix");
+    expect(publish).not.toHaveBeenCalled();
+    publish.mockRestore();
+    check.mockRestore();
+    recheck.mockRestore();
+  });
+
   test("cancel and move a planned entry", async () => {
     const plan = (await (
       await call("PUT", "/agent/schedule", {

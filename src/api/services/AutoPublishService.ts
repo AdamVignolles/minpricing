@@ -176,34 +176,46 @@ export class AutoPublishService {
 
   /**
    * The merchant page shows another price: read the deal again from its
-   * shop, store it (price, history, score), then go on at the new price
-   * if it still passes the rules this publish was started under, or stop
-   * saying why. Returns the updated deal to publish.
-   * @throws DealNotAvailableError when it must not go out.
+   * shop, store it (price, history, score), then decide whether it can go
+   * out at the new price under the rules this publish was started with.
+   * Nothing is reported to the publish progress: the schedule's dry run
+   * uses it as is.
    */
-  protected async followPriceChange(
+  async recheckPrice(
     deal: Deal,
     verdict: { reason: string; seenPrice?: number; statedPrice?: number },
     trigger: PublishTrigger,
-  ): Promise<Deal> {
+  ): Promise<
+    | {
+        go: true;
+        deal: Deal;
+        detail: string;
+        priceChange?: { from: number; to: number };
+      }
+    | { go: false; reason: string }
+  > {
     const refresh = this.refreshDeal
       ? await this.refreshDeal(deal.id, verdict.statedPrice)
       : undefined;
     if (!refresh || refresh.read === "none" || !refresh.deal) {
-      throw new DealNotAvailableError(
-        `Pas publié : ${verdict.reason} ; deal non mis à jour (${refresh?.reason ?? "relecture indisponible"})`,
-      );
+      return {
+        go: false,
+        reason: `Pas publié : ${verdict.reason} ; deal non mis à jour (${refresh?.reason ?? "relecture indisponible"})`,
+      };
     }
     const after = refresh.after ?? refresh.deal.currentPrice;
     const change = priceChangeText(refresh.before, after);
+    const now = change.split(" → ")[1];
     if (refresh.rejected) {
-      throw new DealNotAvailableError(
-        `Pas publié : prix ${change}, deal mis à jour puis écarté : ${refresh.rejected}`,
-      );
+      return {
+        go: false,
+        reason: `Pas publié : prix ${change}, deal mis à jour puis écarté : ${refresh.rejected}`,
+      };
     }
     // The shop's own reading must be what the page shows (± 1 %).
     if (
       refresh.read === "shop" &&
+      !samePrice(after, refresh.before) &&
       verdict.seenPrice !== undefined &&
       !samePrice(after, verdict.seenPrice) &&
       !(
@@ -211,18 +223,19 @@ export class AutoPublishService {
         samePrice(after, verdict.statedPrice)
       )
     ) {
-      throw new DealNotAvailableError(
-        `Pas publié : ${verdict.reason} ; la boutique relue indique ${priceChangeText(refresh.before, after).split(" → ")[1]} (deal mis à jour, prix à confirmer)`,
-      );
+      return {
+        go: false,
+        reason: `Pas publié : ${verdict.reason} ; la boutique relue indique ${now} (deal mis à jour, prix à confirmer)`,
+      };
     }
     if (samePrice(after, refresh.before)) {
       // The shop still says our price: the page's amount was another one
       // (an accessory, delivery…). Publish as planned.
-      await this.progress.done(
-        "merchant-check",
-        `Prix confirmé par la boutique : ${priceChangeText(refresh.before, after).split(" → ")[1]}`,
-      );
-      return refresh.deal;
+      return {
+        go: true,
+        deal: refresh.deal,
+        detail: `Prix confirmé par la boutique : ${now}`,
+      };
     }
     const duplicate = await this.dealabsHistory
       .findLiveDuplicate(refresh.deal)
@@ -237,12 +250,29 @@ export class AutoPublishService {
       ...this.autoThresholds(trigger),
       duplicate,
     });
-    if (!decision.go) throw new DealNotAvailableError(decision.reason);
-    await this.progress.done("merchant-check", decision.detail, {
-      from: refresh.before,
-      to: after,
-    });
-    return refresh.deal;
+    if (!decision.go) return decision;
+    return {
+      go: true,
+      deal: refresh.deal,
+      detail: decision.detail,
+      priceChange: { from: refresh.before, to: after },
+    };
+  }
+
+  /** {@link recheckPrice} inside a publish: reports it, or stops it. */
+  protected async followPriceChange(
+    deal: Deal,
+    verdict: { reason: string; seenPrice?: number; statedPrice?: number },
+    trigger: PublishTrigger,
+  ): Promise<Deal> {
+    const outcome = await this.recheckPrice(deal, verdict, trigger);
+    if (!outcome.go) throw new DealNotAvailableError(outcome.reason);
+    await this.progress.done(
+      "merchant-check",
+      outcome.detail,
+      outcome.priceChange,
+    );
+    return outcome.deal;
   }
 
   /** One publish at a time: the button and the run share one browser flow. */

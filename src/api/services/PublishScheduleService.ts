@@ -507,18 +507,36 @@ export class PublishScheduleService {
       if (entry.dryRun) {
         const verdict = this.pageCheck.enabled
           ? await this.pageCheck.check(deal).catch((error: unknown) => ({
-              ok: false,
+              ok: false as const,
               reason: String(error).slice(0, 300),
             }))
-          : { ok: true, reason: "vérification de page désactivée" };
+          : { ok: true as const, reason: "vérification de page désactivée" };
+        let note = verdict.ok
+          ? `essai à blanc : serait publié (${"reason" in verdict ? verdict.reason : "page du marchand OK"})`
+          : `essai à blanc : page refusée — ${verdict.reason}`;
+        // A moved price updates the deal even in a dry run (it is only a
+        // read of the shop), then says what a real publish would do.
+        if (
+          !verdict.ok &&
+          "problem" in verdict &&
+          verdict.problem === "price"
+        ) {
+          const recheck = await this.publisher
+            .recheckPrice(deal, verdict, "schedule")
+            .catch((error: unknown) => ({
+              go: false as const,
+              reason: String(error).slice(0, 300),
+            }));
+          note = recheck.go
+            ? `essai à blanc : serait publié — ${recheck.detail}`
+            : `essai à blanc : ${recheck.reason}`;
+        }
         return this.finish(entry, {
           status: "done",
           result: "dry-run",
           dealId: deal.id,
           title: deal.title,
-          note: verdict.ok
-            ? `essai à blanc : serait publié (${"reason" in verdict ? verdict.reason : "page du marchand OK"})`
-            : `essai à blanc : page refusée — ${"reason" in verdict ? verdict.reason : ""}`,
+          note,
         });
       }
 
