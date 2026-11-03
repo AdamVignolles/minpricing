@@ -139,7 +139,23 @@ controllers → React console → Dealabs draft / auto-publish.
   drawn by `PublishSteps.tsx` on the deal page (polled while a run is
   active), in « Ce soir » and on the dashboard card. The finished run is
   saved on the draft (`lastPublishSteps`, JSON) so a night failure names
-  its step. The console sends the long auto-publish POST alone before it
+  its step. **Price moved** (epic 25): when the merchant page shows
+  another price (`assessDealPage` → `problem: "price"`), the deal is read
+  again from its shop (`CollectionService.refreshDeal`: `collect()` by id
+  like a link check — Amazon, Cdiscount, AliExpress, Steam, Leclerc by
+  EAN; for listing-only shops the page's single stated price, a JSON-LD
+  `Offer` price or price meta, never a loose amount nor an
+  AggregateOffer's `lowPrice`), stored (history, rescore), then
+  `decideAfterRefresh` (`services/priceRecheck.ts`) goes on at the new
+  price (« Prix mis à jour : X € → Y € », step `priceChange`) or stops
+  naming both prices: visible bar for the button, the schedule rules' /
+  `AUTO_PUBLISH_MIN_*` bars for automatic runs, live duplicate re-checked,
+  hand-added deals exempt. A page that does show our price is still
+  confirmed by the shop's reader when there is one (Leclerc's page also
+  lists the cheapest marketplace seller). A gone or out-of-stock page
+  expires the deal / marks it out of stock. The schedule's dry run does
+  the same reads (they update the deal, never publish) and never uses up
+  a deal for the real slots. The console sends the long auto-publish POST alone before it
   starts polling: the client batches calls made within 10 ms, and a poll
   batched with it would wait for the whole publication.
   **Stopping**: `POST /dealabs/publish/stop` (admin session only) asks the
