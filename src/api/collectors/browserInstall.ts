@@ -42,9 +42,9 @@ export function isMissingExecutable(error: unknown): boolean {
 
 const short = (error: unknown) =>
   (error instanceof Error ? error.message : String(error))
-    .split("\n")[0]
     .replace(/\s+/g, " ")
-    .slice(0, 160);
+    .trim()
+    .slice(0, 500);
 
 /** Runs `playwright install chromium chromium-headless-shell`. */
 async function runPlaywrightInstall(): Promise<void> {
@@ -59,12 +59,15 @@ async function runPlaywrightInstall(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, [cli, "install", ...BROWSER_BUILDS], {
       env: process.env,
-      stdio: ["ignore", "ignore", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    let stderr = "";
-    child.stderr?.on("data", (chunk) => {
-      stderr = (stderr + String(chunk)).slice(-2_000);
-    });
+    // Playwright prints its reasons on either stream.
+    let output = "";
+    const keep = (chunk: unknown) => {
+      output = (output + String(chunk)).slice(-2_000);
+    };
+    child.stdout?.on("data", keep);
+    child.stderr?.on("data", keep);
     const timer = setTimeout(() => child.kill("SIGKILL"), 15 * 60_000);
     child.on("error", (error) => {
       clearTimeout(timer);
@@ -76,7 +79,7 @@ async function runPlaywrightInstall(): Promise<void> {
       else
         reject(
           new Error(
-            `installation Playwright échouée (code ${code}) ${stderr.trim().slice(-300)}`,
+            `installation Playwright échouée (code ${code}) : ${output.replace(/\s+/g, " ").trim().slice(-400) || "aucune sortie"}`,
           ),
         );
     });
