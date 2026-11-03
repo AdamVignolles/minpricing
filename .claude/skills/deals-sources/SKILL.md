@@ -90,8 +90,9 @@ more than 60 days ago for "bloque les robots" (a re-test counts in the 10):
    `Proposition — source <shop> (<today>)`, a one-sentence `summary`, and
    the proposal as `content` (Markdown) — up to 10 a day, no weekly
    limit, but never a second one for a shop that already has one: list
-   the folder first (`directory_list`, `project` 79, `directory_shortId`
-   1) and skip a shop whose title is there. The proposal says: the shop,
+   the folder first (`directory_list` with `project` 79 and
+   `directory_shortId` 1) and skip a shop whose title is there. The
+   proposal says: the shop,
    the URL(s), the probe result, what the page carries (struck price?
    reviews? category?), why it should find hot deals (Dealabs figures),
    the collector to write (`StoreCollectors.ts` / `retailOffers.ts`
