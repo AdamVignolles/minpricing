@@ -58,8 +58,7 @@ controllers → React console → Dealabs draft / auto-publish.
   `BrowserUnavailableError` (« Navigateur indisponible sur le serveur… »,
   shown as such on a link check and the dashboard's Collecte card;
   `browser` in `/admin/stats`). When Bay's `PLAYWRIGHT_BROWSERS_PATH`
-  and its parent are unreachable from the app (ENOENT on mkdir,
-  2026-11-03), `useReachableBrowsersPath` installs to `browsers/` under
+  can't be created by the app (ENOENT on mkdir, 2026-11-03), `useReachableBrowsersPath` installs to `browsers/` under
   `appDir()` instead (shown as `browser.path`). Playwright is pinned exactly in
   package.json, and `npm run build` rewrites `dist/package.json`'s caret
   ranges to the installed versions (`scripts/pin-dist-deps.mjs`): deploy

@@ -9,7 +9,7 @@
  * Node branch alone runs it.
  */
 
-import { existsSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { appDir } from "../services/appDir.ts";
@@ -36,25 +36,35 @@ export const BROWSER_BUILDS = ["chromium", "chromium-headless-shell"];
 
 let current: BrowserState = { state: "unknown" };
 let movedFrom: string | undefined;
+let movedTo: string | undefined;
 
 /**
  * Bay sets `PLAYWRIGHT_BROWSERS_PATH` to a folder beside the app that the
  * app can't create (2026-11-03: « ENOENT: mkdir …/browsers », its parent is
- * not visible from the app). When neither that folder nor its parent
- * exists, the builds go to `browsers/` under the app's persistent files
+ * a dangling link or a parent the app can't see). When that folder can't
+ * be created, the builds go to `browsers/` under the app's persistent files
  * (`appDir()`) instead. Must run before the first `import("playwright")`,
  * which reads the variable once.
  */
 export function useReachableBrowsersPath(
   env: NodeJS.ProcessEnv = process.env,
-  exists: (path: string) => boolean = existsSync,
+  create: (path: string) => void = (path) =>
+    mkdirSync(path, { recursive: true }),
   fallback: () => string = () => join(appDir(), "browsers"),
 ): string | undefined {
   const configured = env.PLAYWRIGHT_BROWSERS_PATH;
-  if (!configured || configured === "0") return configured;
-  if (exists(configured) || exists(dirname(configured))) return configured;
+  if (!configured || configured === "0" || configured === movedTo) {
+    return configured;
+  }
+  try {
+    create(configured);
+    return configured;
+  } catch {
+    // e.g. a dangling symlink, or a parent the app can't see.
+  }
   movedFrom ??= configured;
-  env.PLAYWRIGHT_BROWSERS_PATH = fallback();
+  movedTo = fallback();
+  env.PLAYWRIGHT_BROWSERS_PATH = movedTo;
   return env.PLAYWRIGHT_BROWSERS_PATH;
 }
 let pending: Promise<BrowserState> | undefined;
@@ -187,4 +197,6 @@ export async function launchWithInstall<T>(
 export function resetBrowserState(): void {
   current = { state: "unknown" };
   pending = undefined;
+  movedFrom = undefined;
+  movedTo = undefined;
 }

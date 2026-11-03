@@ -111,21 +111,25 @@ describe("Playwright is pinned to the tested version", () => {
 });
 
 describe("useReachableBrowsersPath", () => {
-  test("keeps Bay's folder when it or its parent exists", () => {
+  beforeEach(() => resetBrowserState());
+
+  test("keeps Bay's folder when it can be created", () => {
     const env = { PLAYWRIGHT_BROWSERS_PATH: "/opt/bay/app/browsers" };
     const path = useReachableBrowsersPath(
       env,
-      (p) => p === "/opt/bay/app",
+      () => {},
       () => "/files/browsers",
     );
     expect(path).toBe("/opt/bay/app/browsers");
   });
 
-  test("moves to the app's files when the parent is gone (ENOENT on mkdir)", () => {
+  test("moves to the app's files when mkdir fails (ENOENT)", () => {
     const env = { PLAYWRIGHT_BROWSERS_PATH: "/opt/bay/app/browsers" };
     const path = useReachableBrowsersPath(
       env,
-      () => false,
+      () => {
+        throw new Error("ENOENT: no such file or directory, mkdir");
+      },
       () => "/files/browsers",
     );
     expect(path).toBe("/files/browsers");
@@ -134,7 +138,7 @@ describe("useReachableBrowsersPath", () => {
 
   test("no variable: Playwright's default cache, untouched", () => {
     const env: NodeJS.ProcessEnv = {};
-    expect(useReachableBrowsersPath(env, () => false)).toBeUndefined();
+    expect(useReachableBrowsersPath(env, () => {})).toBeUndefined();
     expect(env.PLAYWRIGHT_BROWSERS_PATH).toBeUndefined();
   });
 });
