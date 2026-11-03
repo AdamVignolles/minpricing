@@ -23,6 +23,8 @@ const HINTS: Array<{ pattern: RegExp; categoryId: string }> = [
     pattern: /^aliexpress:(mini-pc|ordinateur-portable|laptop)/,
     categoryId: "computing",
   },
+  // Screwfix's déstockage: tools and DIY.
+  { pattern: /^screwfix:/, categoryId: "diy" },
   // Watch shops (`watchCategoryHint`): connected watches are High-Tech.
   { pattern: /^watch:smart$/, categoryId: "phones" },
   { pattern: /^watch:/, categoryId: "fashion" },

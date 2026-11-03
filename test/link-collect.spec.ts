@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AliExpressCollector } from "../src/api/collectors/AliExpressCollector.ts";
 import { AmazonCollector } from "../src/api/collectors/AmazonCollector.ts";
@@ -52,6 +52,19 @@ afterEach(() => {
 });
 
 describe("collect(products) reads one product by id", () => {
+  // Amazon is read with a plain request first, then the browser: both
+  // get the saved pages, never the network.
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) =>
+        served.has(String(input))
+          ? new Response(served.get(String(input)))
+          : new Response("", { status: 404 }),
+      ),
+    );
+  });
+
   it("Amazon: product page by ASIN, same parser as collection", async () => {
     served.set(
       "https://www.amazon.fr/dp/B0DQVFFXN2",

@@ -139,7 +139,11 @@ export class AmazonCollector implements DealSource {
       async (page, product): Promise<RawDeal | undefined> => {
         const asin = product.externalId as string;
         const url = `https://www.amazon.fr/dp/${asin}`;
-        const priced = await this.fetchPrice(page, url);
+        // Same order as a run: a plain request first, the browser after.
+        const priced =
+          (this.fetchFirst && !this.getCloudflareBinding?.()
+            ? await fetchAmazonProduct(url)
+            : undefined) ?? (await this.fetchPrice(page, url));
         if (!priced) return undefined;
         return {
           externalId: asin,

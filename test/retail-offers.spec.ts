@@ -15,6 +15,7 @@ import {
   parseScrewfixListing,
 } from "../src/api/collectors/retailOffers.ts";
 import { LeclercCollector } from "../src/api/collectors/StoreCollectors.ts";
+import { CategorizationService } from "../src/api/services/CategorizationService.ts";
 
 describe("Leclerc", () => {
   const offer = (shop: string, base: number, now?: number) => ({
@@ -267,6 +268,14 @@ describe("parseScrewfixListing (saved 2026-11 déstockage page)", () => {
         lowestRecentPrice: 199.99,
       },
     });
+  });
+
+  test("its deals go to Bricolage", () => {
+    expect(
+      new CategorizationService().fromHint(
+        parseScrewfixListing(html)[0].categoryHint,
+      ),
+    ).toBe("diy");
   });
 
   test("a card without a struck price has no reference", () => {
