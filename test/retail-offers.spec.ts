@@ -85,6 +85,22 @@ describe("Grosbill", () => {
   });
 });
 
+describe("Grosbill (2026-11 markup)", () => {
+  test("cents in a nested tag are kept: data-price first", () => {
+    const html = `<article class="card" data-gsl-pid="146600"><img src="/media/m/b.webp" alt="">
+      <a class="card-name" href="/kingston-snv3s-1to-146600">Kingston SNV3S 1To M.2</a>
+      <div class="card-price" data-price="169.99"> <span class="price">169<span class="price-dec"><span class="price-sep">,</span>99</span><span class="price-cur"> €</span></span>
+      <span class="price-old">209,99 €</span> <span class="card-discount">−40 €</span> </div><span class="card-stock in">En stock</span></article>`;
+    expect(parseGrosbillCards(html)[0]).toMatchObject({
+      price: 169.99,
+      listPrice: 209.99,
+    });
+    expect(
+      parseGrosbillCards(html.replace(' data-price="169.99"', ""))[0]?.price,
+    ).toBe(169.99);
+  });
+});
+
 describe("Nike", () => {
   test("one deal per model, brand not doubled", () => {
     const [deal] = parseNikeWall({

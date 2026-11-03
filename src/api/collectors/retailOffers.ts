@@ -128,7 +128,21 @@ export function parseGrosbillCards(html: string): RawDeal[] {
     .flatMap((card) => {
       const id = card.match(/data-gsl-pid="(\d+)"/)?.[1];
       const link = card.match(/class="card-name" href="([^"]+)">([^<]+)</);
-      const price = parseEuro(card.match(/class="price">([^<]+)</)?.[1]);
+      // `data-price` holds the exact amount; the visible one now splits
+      // its cents into a nested tag (« 169<span>,99</span> »), which a
+      // text match read as 169 € (epic 25: every Grosbill price lost its
+      // cents and failed the publish page check).
+      const dataPrice = Number(
+        card.match(/class="card-price" data-price="([\d.]+)"/)?.[1],
+      );
+      const price =
+        Number.isFinite(dataPrice) && dataPrice > 0
+          ? dataPrice
+          : (parseEuro(
+              card
+                .match(/class="price">([\s\S]*?)<span class="price-cur"/)?.[1]
+                ?.replace(/<[^>]+>/g, ""),
+            ) ?? parseEuro(card.match(/class="price">([^<]+)</)?.[1]));
       const list = parseEuro(card.match(/class="price-old">([^<]+)</)?.[1]);
       if (!id || !link || !price || !list || price >= list) return [];
       if (/card-stock out/.test(card)) return [];
