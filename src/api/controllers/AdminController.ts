@@ -81,6 +81,7 @@ export class AdminController {
           state: z.enum(["unknown", "installing", "ready", "failed"]),
           detail: z.text({ size: "rich" }).optional(),
           checkedAt: z.text().optional(),
+          path: z.text().optional(),
         }),
         sources: z.array(
           z.object({

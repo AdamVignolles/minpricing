@@ -13,6 +13,7 @@ import {
   isMissingExecutable,
   launchWithInstall,
   resetBrowserState,
+  useReachableBrowsersPath,
 } from "../src/api/collectors/browserInstall.ts";
 
 /** The error production logged from 2026-11-02 (epic 23). */
@@ -106,5 +107,34 @@ describe("Playwright is pinned to the tested version", () => {
       "playwright-core": "1.63.0",
       gone: "^1.0.0",
     });
+  });
+});
+
+describe("useReachableBrowsersPath", () => {
+  test("keeps Bay's folder when it or its parent exists", () => {
+    const env = { PLAYWRIGHT_BROWSERS_PATH: "/opt/bay/app/browsers" };
+    const path = useReachableBrowsersPath(
+      env,
+      (p) => p === "/opt/bay/app",
+      () => "/files/browsers",
+    );
+    expect(path).toBe("/opt/bay/app/browsers");
+  });
+
+  test("moves to the app's files when the parent is gone (ENOENT on mkdir)", () => {
+    const env = { PLAYWRIGHT_BROWSERS_PATH: "/opt/bay/app/browsers" };
+    const path = useReachableBrowsersPath(
+      env,
+      () => false,
+      () => "/files/browsers",
+    );
+    expect(path).toBe("/files/browsers");
+    expect(env.PLAYWRIGHT_BROWSERS_PATH).toBe("/files/browsers");
+  });
+
+  test("no variable: Playwright's default cache, untouched", () => {
+    const env: NodeJS.ProcessEnv = {};
+    expect(useReachableBrowsersPath(env, () => false)).toBeUndefined();
+    expect(env.PLAYWRIGHT_BROWSERS_PATH).toBeUndefined();
   });
 });

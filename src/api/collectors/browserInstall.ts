@@ -5,15 +5,22 @@
  * every browser source then failed with « Executable doesn't exist »
  * (epic 23). Now the app installs what it needs itself, with Playwright's
  * own installer: at startup, and once more when a launch finds the
- * executable missing. Node only; never imported on Workers (dynamic
- * imports, like `playwright` itself).
+ * executable missing. Node only: imported by `browser.ts`, whose
+ * Node branch alone runs it.
  */
+
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+import { appDir } from "../services/appDir.ts";
 
 export interface BrowserState {
   state: "unknown" | "installing" | "ready" | "failed";
   /** What went wrong, in French, when `failed`. */
   detail?: string;
   checkedAt?: string;
+  /** Where the builds are, when not where Bay said (see below). */
+  path?: string;
 }
 
 /** A browser that can't start: not a page problem. */
@@ -28,9 +35,34 @@ export class BrowserUnavailableError extends Error {
 export const BROWSER_BUILDS = ["chromium", "chromium-headless-shell"];
 
 let current: BrowserState = { state: "unknown" };
+let movedFrom: string | undefined;
+
+/**
+ * Bay sets `PLAYWRIGHT_BROWSERS_PATH` to a folder beside the app that the
+ * app can't create (2026-11-03: « ENOENT: mkdir …/browsers », its parent is
+ * not visible from the app). When neither that folder nor its parent
+ * exists, the builds go to `browsers/` under the app's persistent files
+ * (`appDir()`) instead. Must run before the first `import("playwright")`,
+ * which reads the variable once.
+ */
+export function useReachableBrowsersPath(
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync,
+  fallback: () => string = () => join(appDir(), "browsers"),
+): string | undefined {
+  const configured = env.PLAYWRIGHT_BROWSERS_PATH;
+  if (!configured || configured === "0") return configured;
+  if (exists(configured) || exists(dirname(configured))) return configured;
+  movedFrom ??= configured;
+  env.PLAYWRIGHT_BROWSERS_PATH = fallback();
+  return env.PLAYWRIGHT_BROWSERS_PATH;
+}
 let pending: Promise<BrowserState> | undefined;
 
-export const browserState = (): BrowserState => current;
+export const browserState = (): BrowserState => ({
+  ...current,
+  ...(movedFrom ? { path: process.env.PLAYWRIGHT_BROWSERS_PATH } : {}),
+});
 
 /** Playwright's « Executable doesn't exist at … » launch error. */
 export function isMissingExecutable(error: unknown): boolean {
@@ -50,7 +82,6 @@ const short = (error: unknown) =>
 async function runPlaywrightInstall(): Promise<void> {
   const { spawn } = await import("node:child_process");
   const { createRequire } = await import("node:module");
-  const { dirname, join } = await import("node:path");
   const require = createRequire(import.meta.url);
   const cli = join(
     dirname(require.resolve("playwright/package.json")),
@@ -94,6 +125,7 @@ async function runPlaywrightInstall(): Promise<void> {
 export function ensureBrowsers(
   install: () => Promise<void> = runPlaywrightInstall,
 ): Promise<BrowserState> {
+  useReachableBrowsersPath();
   pending ??= (async () => {
     current = { state: "installing", checkedAt: new Date().toISOString() };
     try {
@@ -122,6 +154,7 @@ export async function launchWithInstall<T>(
   launch: () => Promise<T>,
   install: () => Promise<BrowserState> = () => ensureBrowsers(),
 ): Promise<T> {
+  useReachableBrowsersPath();
   if (pending) await pending;
   try {
     const browser = await launch();
