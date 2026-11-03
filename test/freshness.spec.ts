@@ -25,4 +25,23 @@ describe("freshness", () => {
       droppedFrom: 29.99,
     });
   });
+
+  test("back at the price it dropped from: the drop is undone", () => {
+    const now = "2026-11-03T11:00:00.000Z";
+    const current = {
+      freshReason: "price-drop",
+      droppedFrom: 31.99,
+      firstSeenAt: "2026-10-27T17:23:30.640Z",
+    };
+    expect(freshnessOnUpdate(22.95, 32.4, now, current)).toEqual({
+      freshAt: "2026-10-27T17:23:30.640Z",
+      freshReason: "new",
+    });
+    // Still well under it: the drop stands.
+    expect(freshnessOnUpdate(22.95, 27.99, now, current)).toBe(undefined);
+    // A deal that never dropped is left alone.
+    expect(
+      freshnessOnUpdate(22.95, 32.4, now, { ...current, freshReason: "new" }),
+    ).toBe(undefined);
+  });
 });

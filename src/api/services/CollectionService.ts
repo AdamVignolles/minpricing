@@ -1598,7 +1598,11 @@ export class CollectionService {
         ...(existing.freshAt
           ? {}
           : { freshAt: existing.firstSeenAt, freshReason: "new" as const }),
-        ...freshnessOnUpdate(existing.currentPrice, rawDeal.price, now),
+        ...freshnessOnUpdate(existing.currentPrice, rawDeal.price, now, {
+          freshReason: existing.freshReason,
+          droppedFrom: existing.droppedFrom,
+          firstSeenAt: existing.firstSeenAt,
+        }),
         ...details,
       });
     }

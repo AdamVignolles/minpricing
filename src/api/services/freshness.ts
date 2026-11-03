@@ -31,8 +31,29 @@ export function freshnessOnUpdate(
   previousPrice: number,
   newPrice: number,
   now: string,
+  /** What the deal says now: a drop it announces may be undone. */
+  current?: {
+    freshReason?: string | null;
+    droppedFrom?: number | null;
+    firstSeenAt: string;
+  },
 ): Freshness | undefined {
-  return isRealPriceDrop(previousPrice, newPrice)
-    ? { freshAt: now, freshReason: "price-drop", droppedFrom: previousPrice }
-    : undefined;
+  if (isRealPriceDrop(previousPrice, newPrice)) {
+    return {
+      freshAt: now,
+      freshReason: "price-drop",
+      droppedFrom: previousPrice,
+    };
+  }
+  // Back at (or above) the price it « dropped from »: no drop to show any
+  // more (« Prix en baisse · était 31,99 € » at 32,40 €), and nothing new
+  // either — the deal goes back to when it first appeared.
+  if (
+    current?.freshReason === "price-drop" &&
+    current.droppedFrom &&
+    !isRealPriceDrop(current.droppedFrom, newPrice)
+  ) {
+    return { freshAt: current.firstSeenAt, freshReason: "new" };
+  }
+  return undefined;
 }
