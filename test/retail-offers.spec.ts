@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { parseCarrefourPrices } from "../src/api/collectors/CarrefourCollector.ts";
 import {
@@ -14,6 +14,7 @@ import {
   parseNikeWall,
   parseScrewfixListing,
 } from "../src/api/collectors/retailOffers.ts";
+import { LeclercCollector } from "../src/api/collectors/StoreCollectors.ts";
 
 describe("Leclerc", () => {
   const offer = (shop: string, base: number, now?: number) => ({
@@ -65,6 +66,53 @@ describe("Leclerc", () => {
     expect(parseLeclercProducts(product([offer("Leclerc", 44900)]))).toEqual(
       [],
     );
+  });
+});
+
+describe("Leclerc collect() by EAN", () => {
+  test("reads the products asked for, through the same product API", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            label: "Pokemon Battle Disc Showdown Game Pikachu & Larvitar",
+            variants: [
+              {
+                sku: "0191726947813",
+                slug: "pokemon-battle-disc",
+                offers: [
+                  {
+                    basePrice: {
+                      price: { price: 3999 },
+                      discountPrice: { price: { price: 3240 } },
+                    },
+                    shop: { id: "Leclerc", label: "E.Leclerc" },
+                    stock: 5,
+                  },
+                ],
+              },
+            ],
+          },
+        ]),
+      ),
+    );
+    const deals = await new LeclercCollector().collect([
+      {
+        id: "d1",
+        url: "https://www.e.leclerc/fp/x",
+        externalId: "0191726947813",
+      },
+      { id: "d2", url: "https://www.e.leclerc/fp/y", externalId: "not-an-ean" },
+    ]);
+    expect(deals).toHaveLength(1);
+    expect(deals[0]).toMatchObject({
+      externalId: "0191726947813",
+      price: 32.4,
+      listPrice: 39.99,
+    });
+    expect(String(fetchSpy.mock.calls[0][0])).toContain("skus=0191726947813");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
   });
 });
 

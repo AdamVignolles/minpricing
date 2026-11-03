@@ -1,4 +1,9 @@
-import type { DealSource, DiscoverContext, RawDeal } from "./DealSource.ts";
+import type {
+  DealSource,
+  DiscoverContext,
+  ProductRef,
+  RawDeal,
+} from "./DealSource.ts";
 import { parseJoybuyOffers } from "./joybuyOffers.ts";
 import {
   leclercFeaturedEans,
@@ -292,6 +297,36 @@ export class LeclercCollector implements DealSource {
       }
     }
     return uniqueById(deals);
+  }
+
+  /**
+   * Given products by EAN (`externalId`), through the same product API:
+   * Leclerc's own offer first, as in `discover`. A product with no
+   * discount any more comes back empty (epic 25: the publish re-read).
+   */
+  async collect(products: ProductRef[]): Promise<RawDeal[]> {
+    const eans = products
+      .map((product) => product.externalId)
+      .filter((ean): ean is string => !!ean && /^\d{8,14}$/.test(ean));
+    const deals: RawDeal[] = [];
+    for (let i = 0; i < eans.length; i += 20) {
+      const query = eans
+        .slice(i, i + 20)
+        .map((ean) => `skus=${ean}`)
+        .join("&");
+      try {
+        deals.push(
+          ...parseLeclercProducts(
+            await fetchJson(
+              `${LECLERC_API}/stores/0100-0000/products-details-by-skus?${query}`,
+            ),
+          ),
+        );
+      } catch {
+        // Unreadable: the caller treats the product as not read.
+      }
+    }
+    return deals;
   }
 }
 
