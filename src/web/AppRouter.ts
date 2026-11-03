@@ -160,6 +160,7 @@ export class AppRouter {
           ? {
               running: adminStats.running,
               nextRunAt: adminStats.nextRunAt,
+              browser: adminStats.browser,
               lastRun,
               failingSources: adminStats.sources
                 .filter(

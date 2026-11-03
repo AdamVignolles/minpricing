@@ -13,6 +13,10 @@ import {
   type CloudflareBrowserBinding,
   mapWithConcurrency,
 } from "../collectors/browser.ts";
+import {
+  BrowserUnavailableError,
+  isMissingExecutable,
+} from "../collectors/browserInstall.ts";
 import { CarrefourCollector } from "../collectors/CarrefourCollector.ts";
 import { CdiscountCollector } from "../collectors/CdiscountCollector.ts";
 import type {
@@ -1036,10 +1040,23 @@ export class CollectionService {
 
     await set("page", "running");
     const context = await this.discoverContext(source.id);
+    // A browser that can't start is not the page's fault: say so.
+    let browserDown: string | undefined;
     const raw = (
       await collector
         .collect([this.watchedLinks.toRef(link)], context)
-        .catch(() => [] as RawDeal[])
+        .catch((error: unknown) => {
+          if (
+            error instanceof BrowserUnavailableError ||
+            isMissingExecutable(error)
+          ) {
+            browserDown =
+              error instanceof BrowserUnavailableError
+                ? error.message
+                : "Navigateur indisponible sur le serveur : Chromium absent";
+          }
+          return [] as RawDeal[];
+        })
     ).find((deal) => deal.externalId === link.externalId);
     let outcome: UpsertOutcome;
     let listedAt: string | undefined;
@@ -1056,6 +1073,15 @@ export class CollectionService {
       // Page blocked (AliExpress answers servers with a bot check): the
       // offer collection read on the shop's own listings, when recent.
       const listed = await this.listedDeal(link);
+      if (!listed && browserDown) {
+        await set("page", "failed", browserDown);
+        const verdict: LinkVerdict = {
+          status: "failed",
+          verdict: `${browserDown}. La fiche n'a pas pu être ouverte ; nouvel essai automatique à chaque passage.`,
+        };
+        await this.watchedLinks.record(link.id, verdict);
+        return finish(verdict);
+      }
       if (!listed) {
         await set(
           "page",

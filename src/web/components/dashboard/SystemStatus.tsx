@@ -27,6 +27,8 @@ export interface CollectionState {
   };
   /** Enabled sources whose last attempt failed after their last success. */
   failingSources: string[];
+  /** The server's Chromium: Amazon, Cdiscount, links and Dealabs need it. */
+  browser?: { state: string; detail?: string };
 }
 
 export interface SystemStatusProps {
@@ -160,24 +162,29 @@ const SystemStatus: FC<SystemStatusProps> = ({
     const last = collection.lastRun;
     const failed = last?.status === "failed" || last?.status === "error";
     const failing = collection.failingSources;
-    const tone: Tone = collection.running
-      ? "info"
-      : failed
-        ? "bad"
-        : failing.length > 0
-          ? "warn"
-          : last
-            ? "ok"
-            : "unknown";
-    const state = collection.running
-      ? "En cours"
-      : failed
-        ? "Échec"
-        : failing.length > 0
-          ? `${failing.length} source${failing.length > 1 ? "s" : ""} en erreur`
-          : last
-            ? "OK"
-            : "Aucune";
+    const browserDown = collection.browser?.state === "failed";
+    const tone: Tone = browserDown
+      ? "bad"
+      : collection.running
+        ? "info"
+        : failed
+          ? "bad"
+          : failing.length > 0
+            ? "warn"
+            : last
+              ? "ok"
+              : "unknown";
+    const state = browserDown
+      ? "Navigateur absent"
+      : collection.running
+        ? "En cours"
+        : failed
+          ? "Échec"
+          : failing.length > 0
+            ? `${failing.length} source${failing.length > 1 ? "s" : ""} en erreur`
+            : last
+              ? "OK"
+              : "Aucune";
     collectionCard = (
       <Card
         title="Collecte"
@@ -192,6 +199,11 @@ const SystemStatus: FC<SystemStatusProps> = ({
             ? null
             : `Prochaine à ${time(collection.nextRunAt)}`,
           failing.length > 0 ? `En erreur : ${failing.join(", ")}` : null,
+          browserDown
+            ? "Le navigateur du serveur ne démarre pas : Amazon, Cdiscount, les liens et Dealabs sont à l'arrêt."
+            : collection.browser?.state === "installing"
+              ? "Installation du navigateur du serveur en cours…"
+              : null,
         ]}
         href="/admin"
       />

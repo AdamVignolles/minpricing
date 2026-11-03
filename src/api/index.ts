@@ -23,6 +23,7 @@ import { AgentFilesService } from "./services/AgentFilesService.ts";
 import { AgentsService } from "./services/AgentsService.ts";
 import { AmazonWatchService } from "./services/AmazonWatchService.ts";
 import { AutoPublishService } from "./services/AutoPublishService.ts";
+import { BrowserInstallService } from "./services/BrowserInstallService.ts";
 import { CategorizationService } from "./services/CategorizationService.ts";
 import { CollectionProgressService } from "./services/CollectionProgressService.ts";
 import { CollectionService } from "./services/CollectionService.ts";
@@ -97,6 +98,7 @@ export const ApiModule = $module({
     DealPageCheckService,
     ItadService,
     SeedService,
+    BrowserInstallService,
     WatchedLinkService,
   ],
 });

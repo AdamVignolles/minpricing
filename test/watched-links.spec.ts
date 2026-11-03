@@ -16,6 +16,7 @@ import {
   vi,
 } from "vitest";
 
+import { BrowserUnavailableError } from "../src/api/collectors/browserInstall.ts";
 import type {
   DealSource,
   ProductRef,
@@ -331,6 +332,25 @@ describe("watched links", () => {
     amazon.discovered = [goodOffer("B0LISTED01")];
     await collection.runOne("amazon");
     expect((await links.get(link.id)).status).toBe("ok");
+  });
+
+  test("a browser that can't start is named, not the page", async () => {
+    const link = await add("https://www.amazon.fr/dp/B0CCXQJCT4");
+    amazon.collect = async () => {
+      throw new BrowserUnavailableError(
+        "Chromium absent et installation impossible (ENOSPC)",
+      );
+    };
+    const checked = await collection.checkLink(link.id);
+    expect(checked.status).toBe("failed");
+    expect(checked.verdict).toMatch(
+      /^Navigateur indisponible sur le serveur : Chromium absent .*nouvel essai automatique/,
+    );
+    expect(JSON.parse(checked.steps ?? "[]")[1]).toMatchObject({
+      id: "page",
+      status: "failed",
+      detail: expect.stringMatching(/^Navigateur indisponible/),
+    });
   });
 
   test("added by hand: the quality gate never refuses it, only reports", async () => {

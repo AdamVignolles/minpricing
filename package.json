@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "alepha dev",
-    "build": "alepha build",
+    "build": "alepha build && node scripts/pin-dist-deps.mjs",
     "test": "alepha test",
     "lint": "alepha lint",
     "typecheck": "alepha typecheck",
@@ -22,7 +22,8 @@
     "@mantine/notifications": "^9.6.3",
     "alepha": "^0.30.0",
     "cheerio": "^1.2.0",
-    "playwright": "^1.63.0",
+    "playwright": "1.63.0",
+    "playwright-core": "1.63.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "recharts": "^3.10.1"

@@ -4,6 +4,8 @@ import { join } from "node:path";
 
 import { $logger } from "alepha/logger";
 
+import { launchWithInstall } from "../collectors/browserInstall.ts";
+
 type Page = import("playwright").Page;
 type Browser = import("playwright").Browser;
 
@@ -33,17 +35,19 @@ export async function launchVisibleBrowser(): Promise<Browser> {
       ? process.env.HOME
       : join(tmpdir(), "dealradar-browser-home");
   mkdirSync(home, { recursive: true });
-  return chromium.launch({
-    headless: false,
-    env: { ...process.env, HOME: home },
-    // Keep cross-site frames in the page's process: the Bay app's task and
-    // memory caps on the VM can't afford one ~100 MB renderer per frame.
-    args: [
-      "--renderer-process-limit=2",
-      "--disable-site-isolation-trials",
-      "--disable-features=IsolateOrigins,site-per-process",
-    ],
-  });
+  return launchWithInstall(() =>
+    chromium.launch({
+      headless: false,
+      env: { ...process.env, HOME: home },
+      // Keep cross-site frames in the page's process: the Bay app's task and
+      // memory caps on the VM can't afford one ~100 MB renderer per frame.
+      args: [
+        "--renderer-process-limit=2",
+        "--disable-site-isolation-trials",
+        "--disable-features=IsolateOrigins,site-per-process",
+      ],
+    }),
+  );
 }
 
 /** Frames the Dealabs window may load: Dealabs, its robot check and logins. */

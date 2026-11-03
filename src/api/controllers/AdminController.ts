@@ -5,6 +5,7 @@ import { $logger } from "alepha/logger";
 import { $repository } from "alepha/orm";
 import { $action } from "alepha/server";
 
+import { browserState } from "../collectors/browserInstall.ts";
 import { dealEntity } from "../entities/Deal.ts";
 import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { priceHistoryEntity } from "../entities/PriceHistory.ts";
@@ -75,6 +76,12 @@ export class AdminController {
         visibleDeals: z.number(),
         nextRunAt: z.datetime(),
         running: z.boolean(),
+        /** The server's Chromium (see `browserInstall.ts`). */
+        browser: z.object({
+          state: z.enum(["unknown", "installing", "ready", "failed"]),
+          detail: z.text({ size: "rich" }).optional(),
+          checkedAt: z.text().optional(),
+        }),
         sources: z.array(
           z.object({
             id: z.text(),
@@ -147,6 +154,7 @@ export class AdminController {
         priceObservations,
         visibleDeals: counts.reduce((sum, [, visible]) => sum + visible, 0),
         nextRunAt: nextCollectionTime(new Date()).toISOString(),
+        browser: browserState(),
         running: await this.progress.isRunning(),
         sources: sources.map((source, index) => {
           const schedule = tuning.sources?.[source.id];

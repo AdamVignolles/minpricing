@@ -47,6 +47,20 @@ controllers → React console → Dealabs draft / auto-publish.
   `await import("playwright")` inside the non-Cloudflare branch (Workers
   rejects the bundle on any static import of it); keep `playwright` in
   `ssr.external` and never add `@cloudflare/puppeteer` there.
+  **Chromium on the server** (`collectors/browserInstall.ts`, epic 23):
+  the builds live outside the app (`PLAYWRIGHT_BROWSERS_PATH`, Bay's
+  `browsers/`) and went missing on the VM once (2026-11-02: every browser
+  source down). `BrowserInstallService` runs Playwright's own installer
+  (`chromium` + `chromium-headless-shell`) in the background at startup,
+  and `launchWithInstall` (used by `withBrowser` and
+  `launchVisibleBrowser`) installs once more on « Executable doesn't
+  exist », then retries; a browser that still can't start throws
+  `BrowserUnavailableError` (« Navigateur indisponible sur le serveur… »,
+  shown as such on a link check and the dashboard's Collecte card;
+  `browser` in `/admin/stats`). Playwright is pinned exactly in
+  package.json, and `npm run build` rewrites `dist/package.json`'s caret
+  ranges to the installed versions (`scripts/pin-dist-deps.mjs`): deploy
+  with `npm run build`, not `alepha build` alone.
 - **Scoring**: `ScoringService.evaluate()` returns a score /100 as six named,
   capped criteria (real price drop 30, competitive price 15, seller 20,
   product reviews 15, price history 10, data confidence 10), each with a French explanation,

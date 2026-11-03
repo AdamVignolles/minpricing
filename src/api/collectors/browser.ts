@@ -1,3 +1,4 @@
+import { launchWithInstall } from "./browserInstall.ts";
 import type { DiscoverContext, RawDeal } from "./DealSource.ts";
 
 const USER_AGENT =
@@ -78,7 +79,11 @@ export async function withBrowser<T>(
   // A dynamic `import()` is only resolved if actually awaited, so it never
   // trips that check on the `cloudflareBinding` path above.
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  // Installs a missing Chromium build once instead of failing every run
+  // (see browserInstall.ts).
+  const browser = await launchWithInstall(() =>
+    chromium.launch({ headless: true }),
+  );
   try {
     return await fn({ engine: "playwright", browser });
   } finally {
