@@ -185,6 +185,11 @@ export class AutoPublishService {
     deal: Deal,
     verdict: { reason: string; seenPrice?: number; statedPrice?: number },
     trigger: PublishTrigger,
+    /**
+     * The page already showed our price: this only confirms it with the
+     * shop's own reader. A shop that can't be read then changes nothing.
+     */
+    confirmOnly = false,
   ): Promise<
     | {
         go: true;
@@ -198,6 +203,13 @@ export class AutoPublishService {
       ? await this.refreshDeal(deal.id, verdict.statedPrice)
       : undefined;
     if (!refresh || refresh.read === "none" || !refresh.deal) {
+      if (confirmOnly) {
+        return {
+          go: true,
+          deal,
+          detail: "Page en ligne, produit disponible au bon prix",
+        };
+      }
       return {
         go: false,
         reason: `Pas publié : ${verdict.reason} ; deal non mis à jour (${refresh?.reason ?? "relecture indisponible"})`,
@@ -264,8 +276,14 @@ export class AutoPublishService {
     deal: Deal,
     verdict: { reason: string; seenPrice?: number; statedPrice?: number },
     trigger: PublishTrigger,
+    confirmOnly = false,
   ): Promise<Deal> {
-    const outcome = await this.recheckPrice(deal, verdict, trigger);
+    const outcome = await this.recheckPrice(
+      deal,
+      verdict,
+      trigger,
+      confirmOnly,
+    );
     if (!outcome.go) throw new DealNotAvailableError(outcome.reason);
     await this.progress.done(
       "merchant-check",
@@ -370,9 +388,14 @@ export class AutoPublishService {
           await this.markUnavailable(deal, verdict.problem);
           throw new DealNotAvailableError(`Pas publié : ${verdict.reason}`);
         } else {
-          await this.progress.done(
-            "merchant-check",
-            "Page en ligne, produit disponible au bon prix",
+          // Our price is somewhere on the page; the shop's own reader
+          // says whether it is the product's (Leclerc's page also shows
+          // the cheapest marketplace seller, 2026-11-03).
+          deal = await this.followPriceChange(
+            deal,
+            { reason: "la page affiche notre prix" },
+            trigger,
+            true,
           );
         }
       } else {

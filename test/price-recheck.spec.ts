@@ -275,6 +275,66 @@ describe("publishing a deal whose price moved", () => {
     expect(last?.error).toContain("49,00 € → 69,00 €");
   });
 
+  test("page shows our price but the shop's reader disagrees: the shop wins", async () => {
+    const deal = await makeDeal("Pokemon Battle Disc", 22.95);
+    vi.spyOn(
+      alepha.inject(DealabsHistoryService),
+      "findLiveDuplicate",
+    ).mockResolvedValue(undefined as any);
+    vi.spyOn(alepha.inject(DealPageCheckService), "check").mockResolvedValue({
+      ok: true,
+      matchedPrice: 22.95,
+    } as any);
+    vi.spyOn(
+      alepha.inject(CollectionService),
+      "refreshDeal",
+    ).mockImplementation(async (id, pagePrice) => {
+      expect(pagePrice).toBeUndefined();
+      await fx.deals.updateById(id, { currentPrice: 32.4, score: 30 });
+      return {
+        read: "shop" as const,
+        before: 22.95,
+        after: 32.4,
+        deal: await fx.deals.getById(id),
+        handPicked: false,
+      };
+    });
+    const publish = vi.spyOn(alepha.inject(DealabsPublisherService), "publish");
+    await expect(
+      alepha.inject(AutoPublishService).publishDeal(deal.id, "button"),
+    ).rejects.toThrow("22,95 € → 32,40 €");
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  test("page OK and no reader for the shop: published as before", async () => {
+    const deal = await makeDeal("Visseuse Ryobi", 59.99);
+    vi.spyOn(
+      alepha.inject(DealabsHistoryService),
+      "findLiveDuplicate",
+    ).mockResolvedValue(undefined as any);
+    vi.spyOn(alepha.inject(DealPageCheckService), "check").mockResolvedValue({
+      ok: true,
+    } as any);
+    vi.spyOn(
+      alepha.inject(PriceSeriesService),
+      "chartImageUrl",
+    ).mockResolvedValue(undefined as any);
+    vi.spyOn(
+      alepha.inject(DealabsPublisherService),
+      "publish",
+    ).mockResolvedValue({
+      dealabsUrl: "https://www.dealabs.com/bons-plans/y-2",
+    });
+    const posted = await alepha
+      .inject(AutoPublishService)
+      .publishDeal(deal.id, "button");
+    expect(posted.status).toBe("posted");
+    const trail = JSON.parse(posted.lastPublishSteps ?? "{}") as PublishRun;
+    expect(
+      trail.steps.find((step) => step.id === "merchant-check")?.detail,
+    ).toBe("Page en ligne, produit disponible au bon prix");
+  });
+
   test("unreadable shop: stops as before, saying the deal wasn't updated", async () => {
     const deal = await makeDeal("Scie Bosch PKS 55", 99);
     pagePrice(109);

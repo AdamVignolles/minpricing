@@ -528,8 +528,24 @@ export class PublishScheduleService {
           ? `essai à blanc : serait publié (${"reason" in verdict ? verdict.reason : "page du marchand OK"})`
           : `essai à blanc : page refusée — ${verdict.reason}`;
         // A moved price updates the deal even in a dry run (it is only a
-        // read of the shop), then says what a real publish would do.
-        if (
+        // read of the shop), then says what a real publish would do. A
+        // page that shows our price is confirmed with the shop too.
+        if (verdict.ok && this.pageCheck.enabled) {
+          const recheck = await this.publisher
+            .recheckPrice(
+              deal,
+              { reason: "la page affiche notre prix" },
+              "schedule",
+              true,
+            )
+            .catch((error: unknown) => ({
+              go: false as const,
+              reason: String(error).slice(0, 300),
+            }));
+          note = recheck.go
+            ? `essai à blanc : serait publié (${recheck.detail})`
+            : `essai à blanc : ${recheck.reason}`;
+        } else if (
           !verdict.ok &&
           "problem" in verdict &&
           verdict.problem === "price"
