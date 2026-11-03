@@ -408,6 +408,35 @@ describe("publishing plan", () => {
     recheck.mockRestore();
   });
 
+  test("a dry run never uses up a deal for the real slots", async () => {
+    const check = vi
+      .spyOn(alepha.inject(DealPageCheckService), "check")
+      .mockResolvedValue({ ok: true } as any);
+    await call("PUT", "/agent/schedule", {
+      ranked: ranked(),
+      now: true,
+      dryRun: true,
+      agent: "health-check",
+    });
+    setNow("2026-10-28T16:10:00.000Z");
+    const [dry] = await schedule.runDue();
+    expect(dry.dealId).toBe(dealIds[0]);
+
+    const publish = vi
+      .spyOn(publisher, "publishDeal")
+      .mockResolvedValue({ dealabsUrl: "https://www.dealabs.com/x-1" } as any);
+    await call("PUT", "/agent/schedule", {
+      ranked: ranked(),
+      now: true,
+      agent: "deals-select",
+    });
+    setNow("2026-10-28T16:20:00.000Z");
+    await schedule.runDue();
+    expect(publish.mock.calls[0]?.[0]).toBe(dealIds[0]);
+    publish.mockRestore();
+    check.mockRestore();
+  });
+
   test("cancel and move a planned entry", async () => {
     const plan = (await (
       await call("PUT", "/agent/schedule", {

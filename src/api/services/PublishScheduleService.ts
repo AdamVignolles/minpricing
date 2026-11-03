@@ -475,10 +475,23 @@ export class PublishScheduleService {
     const others = await this.entries.findMany({
       where: { date: { eq: entry.date } },
     });
+    // A dry run publishes nothing: it never uses up a deal for the real
+    // slots, and only the dry runs of its own plan count for it.
     const tried = new Set<string>([
-      ...todays.map((e) => e.dealId),
+      ...(entry.dryRun ? [] : todays.map((e) => e.dealId)),
       ...others
-        .filter((e) => e.id !== entry.id && e.dealId)
+        .filter(
+          (e) =>
+            e.id !== entry.id &&
+            e.dealId &&
+            !!e.dryRun === !!entry.dryRun &&
+            // Same plan: its entries are created together.
+            (!entry.dryRun ||
+              Math.abs(
+                new Date(e.createdAt).getTime() -
+                  new Date(entry.createdAt).getTime(),
+              ) < 60_000),
+        )
         .map((e) => e.dealId!),
     ]);
 
