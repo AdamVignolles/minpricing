@@ -9,6 +9,7 @@ import {
   parseLeclercProducts,
   parseLenovoProducts,
   parseNikeWall,
+  parseScrewfixListing,
 } from "./retailOffers.ts";
 import {
   type GamerPowerGiveaway,
@@ -310,6 +311,44 @@ export class GrosbillCollector implements DealSource {
             ),
           ),
         );
+      } catch {
+        break;
+      }
+    }
+    return uniqueById(deals);
+  }
+}
+
+/** Best-seller order, 48 a page: the first pages are the popular ones. */
+const SCREWFIX_PAGES = 4;
+
+/**
+ * Screwfix France's « déstockage » (~1 700 products, server-rendered):
+ * the first {@link SCREWFIX_PAGES} pages in Screwfix's own best-seller
+ * order, a few seconds apart. See `parseScrewfixListing`.
+ */
+export class ScrewfixCollector implements DealSource {
+  id = "screwfix";
+  name = "Screwfix (déstockage)";
+
+  constructor(
+    protected sleep: (ms: number) => Promise<void> = (ms) =>
+      new Promise((resolve) => setTimeout(resolve, ms)),
+  ) {}
+
+  async discover(context?: DiscoverContext): Promise<RawDeal[]> {
+    const deals: RawDeal[] = [];
+    for (let page = 1; page <= SCREWFIX_PAGES; page++) {
+      context?.progress?.("Déstockage", page, SCREWFIX_PAGES);
+      if (page > 1) await this.sleep(2_000 + Math.random() * 2_000);
+      try {
+        const found = parseScrewfixListing(
+          await fetchText(
+            `https://www.screwfix.fr/destockage?product_list_limit=48&p=${page}`,
+          ),
+        );
+        if (found.length === 0) break;
+        deals.push(...found);
       } catch {
         break;
       }

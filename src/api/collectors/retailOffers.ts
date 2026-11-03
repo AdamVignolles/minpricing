@@ -521,3 +521,64 @@ export function parseItJustGoodCards(html: string): RawDeal[] {
       ];
     });
 }
+
+// ---------------------------------------------------------------- Screwfix
+
+/**
+ * Screwfix France's « déstockage » listing (server-rendered Magento): one
+ * `product-item` card per product with its code (« Code: 603TR »), the TTC
+ * price (`data-price-amount`, the including-tax wrapper) and the
+ * « AU LIEU DE » struck price. Since 2022 a French struck price must be
+ * the lowest price of the 30 days before the reduction, so it is the
+ * merchant's legal reference: `regular`, and the 30-day low. Cards
+ * without « Ajouter au Panier » can't be bought online and are skipped
+ * (the « Stock indisponible à … » lines are per-store pickup stock).
+ */
+export function parseScrewfixListing(html: string): RawDeal[] {
+  return html
+    .split('class="item product product-item')
+    .slice(1)
+    .flatMap((card) => {
+      const link = card.match(
+        /class="product-item-link" href="([^"]+)">([^<]+)<\/a>/,
+      );
+      const code = card.match(/\(Code:\s*([A-Z0-9]+)\)/)?.[1];
+      const price = Number(
+        card.match(
+          /data-label="TTC" data-price-amount="([\d.]+)" data-price-type="finalPrice"/,
+        )?.[1],
+      );
+      const list = parseEuro(
+        card.match(
+          /AU LIEU DE\s*<span class="price-including-tax"><span class="price">([^<]+)</,
+        )?.[1],
+      );
+      if (!link || !code || !Number.isFinite(price) || price <= 0) return [];
+      if (!/action tocart/.test(card)) return [];
+      const image = card.match(
+        /class="product-image-photo"\s+src="([^"]+)"/,
+      )?.[1];
+      const struck = list !== undefined && list > price ? list : undefined;
+      return [
+        {
+          externalId: code,
+          title: decodeHtml(link[2]),
+          url: link[1],
+          imageUrl: image ? decodeHtml(image) : undefined,
+          price,
+          listPrice: struck,
+          currency: "EUR",
+          availability: "in_stock" as const,
+          merchantId: "screwfix",
+          categoryHint: "screwfix:destockage",
+          details: {
+            ...SELF_SOLD,
+            sellerName: "Screwfix",
+            ...(struck
+              ? { listPriceKind: "regular" as const, lowestRecentPrice: struck }
+              : {}),
+          },
+        },
+      ];
+    });
+}

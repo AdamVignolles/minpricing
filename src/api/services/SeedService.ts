@@ -106,6 +106,11 @@ export class SeedService {
         name: "Grosbill (prix barrés)",
         type: "scrape" as const,
       },
+      {
+        id: "screwfix",
+        name: "Screwfix (déstockage)",
+        type: "scrape" as const,
+      },
       { id: "nike", name: "Nike (promotions)", type: "api" as const },
       {
         id: "itjustgood",
@@ -266,6 +271,7 @@ export class SeedService {
       { id: "leclerc", name: "E.Leclerc", domain: "e.leclerc" },
       { id: "carrefour", name: "Carrefour", domain: "carrefour.fr" },
       { id: "grosbill", name: "Grosbill", domain: "grosbill.com" },
+      { id: "screwfix", name: "Screwfix", domain: "screwfix.fr" },
       { id: "nike", name: "Nike", domain: "nike.com" },
       { id: "lenovo", name: "Lenovo", domain: "lenovo.com" },
       { id: "itjustgood", name: "ITJustGood", domain: "itjustgood.com" },

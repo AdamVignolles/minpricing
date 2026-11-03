@@ -176,7 +176,10 @@ controllers → React console → Dealabs draft / auto-publish.
   limited-time offers, and (parsers in `collectors/retailOffers.ts`)
   E.Leclerc (universe pages' featured EANs → `products-details-by-skus`;
   Leclerc's own offer preferred over marketplace shops), Grosbill
-  "prix barrés", Nike product-wall API, Foot Locker sale pages, Castorama
+  "prix barrés", Screwfix « déstockage » (`ScrewfixCollector`, first 4
+  pages of 48 in its best-seller order, keyed by the product code; the
+  « AU LIEU DE » struck price is France's legal 30-day reference, so
+  `regular` + `lowestRecentPrice`; reviews are client-side, not read), Nike product-wall API, Foot Locker sale pages, Castorama
   "offre du moment" pages. `CarrefourCollector` reads Carrefour's non-food
   "bons plans high-tech & maison" page in the browser (403 to plain fetch;
   food promotions are loyalty-card/multi-buy mechanics, left out).

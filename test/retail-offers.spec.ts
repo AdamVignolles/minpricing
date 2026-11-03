@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, test } from "vitest";
 
 import { parseCarrefourPrices } from "../src/api/collectors/CarrefourCollector.ts";
@@ -9,6 +12,7 @@ import {
   parseItJustGoodCards,
   parseLeclercProducts,
   parseNikeWall,
+  parseScrewfixListing,
 } from "../src/api/collectors/retailOffers.ts";
 
 describe("Leclerc", () => {
@@ -170,5 +174,51 @@ describe("ITJustGood", () => {
       listPriceKind: "rrp",
     });
     expect(deal.description).toContain("- État : Très bon état");
+  });
+});
+
+describe("parseScrewfixListing (saved 2026-11 déstockage page)", () => {
+  const html = readFileSync(
+    join(import.meta.dirname, "fixtures/screwfix/destockage.html"),
+    "utf8",
+  );
+
+  test("reads the cards: code, TTC price, « AU LIEU DE » as the 30-day reference", () => {
+    const deals = parseScrewfixListing(html);
+    expect(deals).toHaveLength(46);
+    expect(deals.filter((deal) => deal.listPrice)).toHaveLength(44);
+    expect(deals[0]).toMatchObject({
+      externalId: "603TR",
+      title:
+        "Perceuse visseuse à percussion sans fil brushless DEWALT DCD706D2-QW Li-Ion XR 12V 2 x 2Ah",
+      url: "https://www.screwfix.fr/perceuse-visseuse-a-percussion-sans-fil-brushless-dewalt-dcd706d2-qw-li-ion-xr-12v-2-x-2ah.html",
+      imageUrl:
+        "https://media.screwfix.fr/is/image/ae235?src=ae235/603TR_P&$prodImageMedium$",
+      price: 169.99,
+      listPrice: 199.99,
+      merchantId: "screwfix",
+      details: {
+        soldByMerchant: true,
+        listPriceKind: "regular",
+        lowestRecentPrice: 199.99,
+      },
+    });
+  });
+
+  test("a card without a struck price has no reference", () => {
+    const deal = parseScrewfixListing(html).find(
+      (item) => item.externalId === "115CH",
+    );
+    expect(deal).toMatchObject({ price: 59.99, listPrice: undefined });
+    expect(deal?.details?.listPriceKind).toBeUndefined();
+  });
+
+  test("a card that can't be bought online is skipped", () => {
+    const card = (button: string) =>
+      `<li class="item product product-item"><a class="product-item-link" href="https://www.screwfix.fr/x.html">Scie</a><span class="product-sku"> (Code: 123AB)</span><span data-label="TTC" data-price-amount="9.99" data-price-type="finalPrice"></span>${button}</li>`;
+    expect(
+      parseScrewfixListing(card('<button class="action tocart primary">')),
+    ).toHaveLength(1);
+    expect(parseScrewfixListing(card(""))).toHaveLength(0);
   });
 });

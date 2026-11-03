@@ -114,6 +114,10 @@
       "enabled": true,
       "everyHours": 6
     },
+    "screwfix": {
+      "enabled": true,
+      "everyHours": 12
+    },
     "nike": {
       "enabled": true,
       "everyHours": 6
