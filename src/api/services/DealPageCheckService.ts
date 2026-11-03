@@ -131,7 +131,12 @@ export class DealPageCheckService {
             await pause(4_000);
             const readPage = () =>
               page.evaluate(() => {
-                const offers: { price?: number; availability?: string }[] = [];
+                const offers: {
+                  price?: number;
+                  availability?: string;
+                  /** The `price` of a schema.org Offer: the product's own. */
+                  offer?: boolean;
+                }[] = [];
                 const visit = (node: unknown): void => {
                   if (!node || typeof node !== "object") return;
                   if (Array.isArray(node)) {
@@ -150,9 +155,16 @@ export class DealPageCheckService {
                         ".",
                       ),
                     );
+                    const type = record["@type"];
                     offers.push({
                       price:
                         Number.isFinite(value) && value > 0 ? value : undefined,
+                      // Not AggregateOffer's low/high (every seller), not a
+                      // UnitPriceSpecification (the struck reference).
+                      offer:
+                        "price" in record &&
+                        (type === "Offer" ||
+                          (Array.isArray(type) && type.includes("Offer"))),
                       availability:
                         typeof record.availability === "string"
                           ? record.availability
@@ -198,6 +210,13 @@ export class DealPageCheckService {
                       .filter((price): price is number => price !== undefined),
                     ...metas,
                   ],
+                  offerPrices: [
+                    ...offers
+                      .filter((offer) => offer.offer)
+                      .map((offer) => offer.price)
+                      .filter((price): price is number => price !== undefined),
+                    ...metas,
+                  ],
                   availability,
                 };
               });
@@ -211,7 +230,7 @@ export class DealPageCheckService {
               title: read.title,
               text: read.text,
               prices: [...read.structuredPrices, ...euroAmounts(read.text)],
-              statedPrices: read.structuredPrices,
+              statedPrices: read.offerPrices,
               availability: read.availability,
             };
           }),
