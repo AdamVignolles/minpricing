@@ -27,6 +27,27 @@ export interface DealsPage {
 }
 
 /**
+ * Is the page a shop's robot check instead of the product? Amazon's
+ * captcha form, AliExpress' « punish » slider. Detection only: such a page
+ * is reported and left alone.
+ */
+export async function isRobotCheckPage(page: DealsPage): Promise<boolean> {
+  return page
+    .evaluate(() => {
+      const url = location.href;
+      const text = (document.body?.innerText ?? "").slice(0, 3000);
+      return (
+        !!document.querySelector('form[action*="validateCaptcha"]') ||
+        /\/punish|_____tmd_____|baxia/i.test(url) ||
+        /Saisissez les caractères|Type the characters|glissez vers la droite|slide to verify|unusual traffic/i.test(
+          text,
+        )
+      );
+    })
+    .catch(() => false);
+}
+
+/**
  * Opaque handle returned by {@link withBrowser}. Only ever passed back into
  * {@link withPage} — collectors never touch its internals.
  */

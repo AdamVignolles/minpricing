@@ -496,7 +496,12 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   page unreadable). A blocked product page (AliExpress answers servers
   with its bot check) falls back to the offer collection read on the
   shop's own listings in the last 48 h (`listedDeal`, same key, verdict
-  says so); never through the shop's internal APIs. Refused links stay watched; the watch ends after 14
+  says so); never through the shop's internal APIs. A robot check (Amazon's
+  captcha, AliExpress' slider — `isRobotCheckPage`, `isAmazonRobotCheck`) is
+  reported through `DiscoverContext.blocked` and named on the verdict, never
+  worked around; Amazon stops reading the remaining products at the first
+  one (no browser retry), and a link read before keeps being evaluated on
+  that last reading. Refused links stay watched; the watch ends after 14
   days or when the deal expires. Deals carry `addedByLink`; Admin ›
   « Liens ajoutés » lists them (Revérifier, Arrêter). Manual price entry
   (`ManualCollector`, `PATCH /products/:id/price`, the `manual` and

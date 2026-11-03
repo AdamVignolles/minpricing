@@ -151,14 +151,28 @@ export async function fetchAmazonProduct(
   url: string,
   timeoutMs = 20_000,
 ): Promise<AmazonProductRead | undefined> {
+  return (await fetchAmazonProductPage(url, timeoutMs)).product;
+}
+
+/** Amazon's « Saisissez les caractères » robot check, in a page's HTML. */
+export const isAmazonRobotCheck = (html: string): boolean =>
+  /validateCaptcha|Saisissez les caractères que vous voyez/i.test(html);
+
+/** {@link fetchAmazonProduct}, saying whether Amazon showed its robot check. */
+export async function fetchAmazonProductPage(
+  url: string,
+  timeoutMs = 20_000,
+): Promise<{ product?: AmazonProductRead; robotCheck: boolean }> {
   try {
     const response = await fetch(url, {
       headers: FETCH_HEADERS,
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!response.ok) return undefined;
-    return parseAmazonProductHtml(await response.text());
+    if (!response.ok) return { robotCheck: response.status === 503 };
+    const html = await response.text();
+    if (isAmazonRobotCheck(html)) return { robotCheck: true };
+    return { product: parseAmazonProductHtml(html), robotCheck: false };
   } catch {
-    return undefined;
+    return { robotCheck: false };
   }
 }

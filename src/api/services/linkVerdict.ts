@@ -39,6 +39,11 @@ export interface LinkCheck {
    * one of the shop's listings then: the verdict is about that offer.
    */
   listedAt?: string;
+  /**
+   * The page was the shop's robot check (« vérification anti-robot
+   * d'Amazon »), not read and never worked around.
+   */
+  blocked?: string;
 }
 
 const euros = (value: number) =>
@@ -63,16 +68,21 @@ export function linkVerdict(check: LinkCheck, now = new Date()): LinkVerdict {
   if (!check.read) {
     return {
       status: "failed",
-      verdict: `Fiche produit illisible (page bloquée, produit retiré ou mise en page changée), et produit pas encore vu dans les listes ${check.shop} lues par la collecte. Nouvel essai à chaque passage ${check.shop} : il sera évalué dès qu'il apparaît dans une liste.`,
+      verdict: check.blocked
+        ? `${check.shop} a répondu par sa ${check.blocked} au lieu de la fiche produit (elle n'est pas contournée), et ce produit n'a pas encore été lu. Nouvel essai à chaque passage ${check.shop}.`
+        : `Fiche produit illisible (page bloquée, produit retiré ou mise en page changée), et produit pas encore vu dans les listes ${check.shop} lues par la collecte. Nouvel essai à chaque passage ${check.shop} : il sera évalué dès qu'il apparaît dans une liste.`,
     };
   }
   const verdict = judge(check, now);
-  return check.listedAt
-    ? {
-        ...verdict,
-        verdict: `Fiche produit bloquée : évalué sur l'offre vue dans les listes ${check.shop} le ${parisDateTime(check.listedAt)} (sans les détails de la fiche). ${verdict.verdict}`,
-      }
-    : verdict;
+  if (!check.listedAt) return verdict;
+  // The deal as last read (on a listing, or this link's own earlier read).
+  const why = check.blocked
+    ? `${check.blocked} cette fois`
+    : "fiche illisible cette fois";
+  return {
+    ...verdict,
+    verdict: `Fiche produit non relue (${why}) : évalué sur la dernière lecture de ce produit, le ${parisDateTime(check.listedAt)}. Nouvel essai au prochain passage. ${verdict.verdict}`,
+  };
 }
 
 function judge(check: LinkCheck, now: Date): LinkVerdict {

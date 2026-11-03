@@ -7,6 +7,7 @@ import {
   interleave,
   mapWithConcurrency,
   parsePriceFr,
+  isRobotCheckPage,
   readProductPages,
   scrollAndCollect,
   withBrowser,
@@ -73,7 +74,12 @@ export class AliExpressCollector implements DealSource {
           page,
           url,
         );
-        if (price === undefined) return undefined;
+        if (price === undefined) {
+          if (await isRobotCheckPage(page)) {
+            context?.blocked?.(id, "vérification anti-robot d'AliExpress");
+          }
+          return undefined;
+        }
         const identity = await page.evaluate(() => ({
           title:
             (

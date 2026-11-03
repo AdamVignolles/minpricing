@@ -19,6 +19,7 @@ import {
 import { BrowserUnavailableError } from "../src/api/collectors/browserInstall.ts";
 import type {
   DealSource,
+  DiscoverContext,
   ProductRef,
   RawDeal,
 } from "../src/api/collectors/DealSource.ts";
@@ -83,9 +84,23 @@ class FakeAmazon implements DealSource {
   offers = new Map<string, RawDeal>();
   discovered: RawDeal[] = [];
   asked: ProductRef[] = [];
-  async collect(products: ProductRef[]): Promise<RawDeal[]> {
+  /** Products whose page answers with Amazon's robot check. */
+  robot = new Set<string>();
+  async collect(
+    products: ProductRef[],
+    context?: DiscoverContext,
+  ): Promise<RawDeal[]> {
     this.asked.push(...products);
+    for (const product of products) {
+      if (this.robot.has(product.externalId ?? "")) {
+        context?.blocked?.(
+          product.externalId ?? "",
+          "vérification anti-robot d'Amazon",
+        );
+      }
+    }
     return products
+      .filter((product) => !this.robot.has(product.externalId ?? ""))
       .map((product) => this.offers.get(product.externalId ?? ""))
       .filter((deal): deal is RawDeal => !!deal);
   }
@@ -307,12 +322,12 @@ describe("watched links", () => {
     expect(checked.dealId).toBe(listed.id);
     expect(checked.status).not.toBe("failed");
     expect(checked.verdict).toMatch(
-      /^Fiche produit bloquée : évalué sur l'offre vue dans les listes Amazon\.fr le .+ \(sans les détails de la fiche\)\. /,
+      /^Fiche produit non relue \(fiche illisible cette fois\) : évalué sur la dernière lecture de ce produit, le .+\. Nouvel essai au prochain passage\. /,
     );
     expect(JSON.parse(checked.steps ?? "[]")[1]).toMatchObject({
       id: "page",
       status: "done",
-      detail: expect.stringContaining("Fiche bloquée : offre des listes"),
+      detail: expect.stringContaining("Fiche non relue : dernière lecture"),
     });
     expect(await fx.deals.findMany({})).toHaveLength(1);
   });
@@ -332,6 +347,32 @@ describe("watched links", () => {
     amazon.discovered = [goodOffer("B0LISTED01")];
     await collection.runOne("amazon");
     expect((await links.get(link.id)).status).toBe("ok");
+  });
+
+  test("Amazon's robot check: named, and a link read before keeps its result", async () => {
+    // Read once, fine.
+    amazon.offers.set("B0ROBOT001", goodOffer("B0ROBOT001"));
+    const link = await add("https://www.amazon.fr/dp/B0ROBOT001");
+    expect((await collection.checkLink(link.id)).status).toBe("ok");
+
+    // Next run: Amazon answers with its robot check.
+    amazon.robot.add("B0ROBOT001");
+    await collection.runOne("amazon");
+    const kept = await links.get(link.id);
+    expect(kept.status).toBe("ok");
+    expect(kept.verdict).toMatch(
+      /^Fiche produit non relue \(vérification anti-robot d'Amazon cette fois\) : évalué sur la dernière lecture/,
+    );
+
+    // Never read and blocked: failed, saying why.
+    amazon.robot.add("B0ROBOT002");
+    const fresh = await add("https://www.amazon.fr/dp/B0ROBOT002");
+    const failed = await collection.checkLink(fresh.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.verdict).toMatch(
+      /^Amazon\.fr a répondu par sa vérification anti-robot d'Amazon au lieu de la fiche produit \(elle n'est pas contournée\)/,
+    );
+    amazon.robot.clear();
   });
 
   test("a browser that can't start is named, not the page", async () => {

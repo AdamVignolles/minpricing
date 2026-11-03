@@ -162,6 +162,12 @@ export interface DiscoverContext {
    * before spending a product-page load on it.
    */
   worthFetching?(title: string): boolean;
+  /**
+   * This product's page answered with the shop's robot check (Amazon's
+   * « Saisissez les caractères », AliExpress' slider): not read, never
+   * worked around. Says why on a pasted link's verdict.
+   */
+  blocked?(externalId: string, reason: string): void;
 }
 
 /**

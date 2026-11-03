@@ -1,10 +1,14 @@
-import { fetchAmazonProduct } from "./amazonProductHtml.ts";
+import {
+  fetchAmazonProduct,
+  fetchAmazonProductPage,
+} from "./amazonProductHtml.ts";
 import { type AmazonPageText, parseAmazonSignals } from "./amazonSignals.ts";
 import type { CloudflareBrowserBinding, DealsPage } from "./browser.ts";
 import {
   interleave,
   mapWithConcurrency,
   parsePriceFr,
+  isRobotCheckPage,
   readProductPages,
   scrollAndCollect,
   withBrowser,
@@ -134,17 +138,37 @@ export class AmazonCollector implements DealSource {
     const asins = products.filter((product) =>
       /^[A-Z0-9]{10}$/.test(product.externalId ?? ""),
     );
+    // Amazon's robot check, once seen, answers the next requests too:
+    // the remaining products wait for the next run (never retried around).
+    let robotCheck = false;
+    const ROBOT = "vérification anti-robot d'Amazon";
     return readProductPages(
       asins,
       async (page, product): Promise<RawDeal | undefined> => {
         const asin = product.externalId as string;
+        if (robotCheck) {
+          context?.blocked?.(asin, ROBOT);
+          return undefined;
+        }
         const url = `https://www.amazon.fr/dp/${asin}`;
         // Same order as a run: a plain request first, the browser after.
-        const priced =
-          (this.fetchFirst && !this.getCloudflareBinding?.()
-            ? await fetchAmazonProduct(url)
-            : undefined) ?? (await this.fetchPrice(page, url));
-        if (!priced) return undefined;
+        const fetched =
+          this.fetchFirst && !this.getCloudflareBinding?.()
+            ? await fetchAmazonProductPage(url)
+            : { robotCheck: false };
+        if (fetched.robotCheck) {
+          robotCheck = true;
+          context?.blocked?.(asin, ROBOT);
+          return undefined;
+        }
+        const priced = fetched.product ?? (await this.fetchPrice(page, url));
+        if (!priced) {
+          if (await isRobotCheckPage(page)) {
+            robotCheck = true;
+            context?.blocked?.(asin, ROBOT);
+          }
+          return undefined;
+        }
         return {
           externalId: asin,
           productId: product.id,

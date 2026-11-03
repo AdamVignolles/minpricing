@@ -155,6 +155,53 @@ describe("collect(products) reads one product by id", () => {
     });
   }, 60_000);
 
+  it("Amazon's robot check: reported, and the next products wait", async () => {
+    const captcha =
+      '<html><form action="/errors/validateCaptcha"><p>Saisissez les caractères que vous voyez</p></form></html>';
+    const fetchSpy = vi.fn<() => Promise<Response>>(
+      async () => new Response(captcha),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    const blocked: string[] = [];
+    const deals = await new AmazonCollector([]).collect(
+      [
+        {
+          id: "l1",
+          url: "https://www.amazon.fr/dp/B0AAAAAAA1",
+          externalId: "B0AAAAAAA1",
+        },
+        {
+          id: "l2",
+          url: "https://www.amazon.fr/dp/B0AAAAAAA2",
+          externalId: "B0AAAAAAA2",
+        },
+        {
+          id: "l3",
+          url: "https://www.amazon.fr/dp/B0AAAAAAA3",
+          externalId: "B0AAAAAAA3",
+        },
+        {
+          id: "l4",
+          url: "https://www.amazon.fr/dp/B0AAAAAAA4",
+          externalId: "B0AAAAAAA4",
+        },
+      ],
+      {
+        needsDetails: () => true,
+        isUnchanged: () => false,
+        blocked: (id: string, reason: string) =>
+          blocked.push(`${id}:${reason}`),
+      } as any,
+    );
+    expect(deals).toEqual([]);
+    expect(blocked).toHaveLength(4);
+    expect(blocked[0]).toContain("vérification anti-robot d'Amazon");
+    // Pages read 3 at a time: at most the first batch asked Amazon.
+    expect(fetchSpy.mock.calls.length).toBeLessThanOrEqual(3);
+    // No browser retry around the check.
+    expect(visited).toEqual([]);
+  }, 60_000);
+
   it("a page that fails is skipped, not thrown", async () => {
     const deals = await new AmazonCollector([]).collect([
       {

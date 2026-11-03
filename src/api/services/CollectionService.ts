@@ -716,7 +716,8 @@ export class CollectionService {
     try {
       // Lines a collector wants kept (amazon-watch's run stats).
       const notes: string[] = [];
-      const context = await this.discoverContext(source.id, notes);
+      const blocked = new Map<string, string>();
+      const context = await this.discoverContext(source.id, notes, blocked);
       const step = (label: string, done?: number, total?: number) =>
         this.progress.step(source.id, label, done, total);
       const found: RawDeal[] = [];
@@ -820,6 +821,8 @@ export class CollectionService {
           link,
           outcomes.get(link.externalId),
           source.type,
+          undefined,
+          blocked.get(link.externalId),
         ).catch((error: unknown) =>
           this.log.warn(`Could not record link ${link.id}`, { error }),
         );
@@ -902,6 +905,8 @@ export class CollectionService {
   protected async discoverContext(
     sourceId: string,
     notes?: string[],
+    /** Products whose page was a robot check this run, and whose. */
+    blocked?: Map<string, string>,
   ): Promise<DiscoverContext> {
     const rows = await this.deals.findMany({
       where: { sourceId: { eq: sourceId } },
@@ -933,6 +938,9 @@ export class CollectionService {
       note: (message) => {
         notes?.push(message);
         this.progress.note(message, sourceId);
+      },
+      blocked: (externalId, reason) => {
+        blocked?.set(externalId, reason);
       },
     };
   }
@@ -1140,7 +1148,8 @@ export class CollectionService {
     }
 
     await set("page", "running");
-    const context = await this.discoverContext(source.id);
+    const blocked = new Map<string, string>();
+    const context = await this.discoverContext(source.id, undefined, blocked);
     // A browser that can't start is not the page's fault: say so.
     let browserDown: string | undefined;
     const raw = (
@@ -1190,14 +1199,20 @@ export class CollectionService {
           "Page bloquée, produit retiré ou mise en page changée, et produit absent des listes lues récemment.",
         );
         return finish(
-          await this.recordLinkVerdict(link, undefined, source.type),
+          await this.recordLinkVerdict(
+            link,
+            undefined,
+            source.type,
+            undefined,
+            blocked.get(link.externalId),
+          ),
         );
       }
       listedAt = String(listed.lastSeenAt);
       await set(
         "page",
         "done",
-        `Fiche bloquée : offre des listes ${listed.title.slice(0, 100)} : ${listed.currentPrice.toLocaleString("fr-FR")} €`,
+        `Fiche non relue${blocked.get(link.externalId) ? ` (${blocked.get(link.externalId)})` : ""} : dernière lecture ${listed.title.slice(0, 100)} : ${listed.currentPrice.toLocaleString("fr-FR")} €`,
       );
       outcome = { result: "updated", dealId: listed.id };
     }
@@ -1274,6 +1289,8 @@ export class CollectionService {
     outcome: UpsertOutcome | undefined,
     sourceType: SourceReliability,
     listedAt?: string,
+    /** The page was the shop's robot check (« vérification anti-robot… »). */
+    blocked?: string,
   ): Promise<LinkVerdict> {
     const shop =
       SUPPORTED_SHOPS.find((entry) => entry.sourceId === link.sourceId)
@@ -1286,9 +1303,10 @@ export class CollectionService {
           { result: "updated", dealId: listed.id },
           sourceType,
           String(listed.lastSeenAt),
+          blocked,
         );
       }
-      const verdict = linkVerdict({ read: false, shop });
+      const verdict = linkVerdict({ read: false, shop, blocked });
       // A failed read keeps the previous verdict's deal; only the status
       // and text change.
       await this.watchedLinks.record(link.id, verdict);
@@ -1338,6 +1356,7 @@ export class CollectionService {
       warnings: evaluation.warnings,
       shop,
       listedAt,
+      blocked,
     });
     await this.watchedLinks.record(link.id, verdict, deal.id);
     return verdict;
