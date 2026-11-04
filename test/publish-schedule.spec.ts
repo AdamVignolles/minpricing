@@ -232,6 +232,30 @@ describe("publishing plan", () => {
     expect(plan.ranked).toBe(others.length);
   });
 
+  test("a link pasted after the queue was set: the slot skips that deal", async () => {
+    const publish = vi
+      .spyOn(publisher, "publishDeal")
+      .mockResolvedValue({ dealabsUrl: "https://www.dealabs.com/x" } as any);
+    await call("PUT", "/agent/schedule", {
+      ranked: ranked(),
+      times: ["17:40"],
+      agent: "deals-select",
+    });
+    // Added by hand to follow its price, after the agents' queue.
+    const spy = vi
+      .spyOn(alepha.inject(WatchedLinkService), "handPickedDealIds")
+      .mockResolvedValue([dealIds[0]]);
+    try {
+      setNow("2026-10-28T16:41:00.000Z"); // 17:41
+      const [entry] = await schedule.runDue();
+      expect(publish).not.toHaveBeenCalledWith(dealIds[0], expect.anything());
+      expect(entry.dealId).not.toBe(dealIds[0]);
+    } finally {
+      spy.mockRestore();
+      publish.mockRestore();
+    }
+  });
+
   test("explicit times outside the window or on a weekend are refused", async () => {
     expect(
       (
