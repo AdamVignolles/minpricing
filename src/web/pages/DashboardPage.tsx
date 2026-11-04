@@ -131,6 +131,14 @@ const DashboardPage: FC<DashboardPageProps> = ({
           </Button>
           <Button
             component={Link}
+            href="/ajouts"
+            variant="default"
+            leftSection={<Icon name="link" size={16} />}
+          >
+            Mes ajouts
+          </Button>
+          <Button
+            component={Link}
             href="/agents"
             variant="default"
             leftSection={<Icon name="clock" size={16} />}

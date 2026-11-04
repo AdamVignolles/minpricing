@@ -44,6 +44,7 @@ const NAV: Array<{
 }> = [
   { href: "/", label: "Tableau de bord", icon: "dashboard", exact: true },
   { href: "/deals", label: "Bons plans", icon: "tag" },
+  { href: "/ajouts", label: "Mes ajouts", icon: "link" },
   { href: "/stats", label: "Statistiques", icon: "chart" },
   { href: "/agents", label: "Agents", icon: "bolt" },
   { href: "/admin", label: "Administration", icon: "settings" },

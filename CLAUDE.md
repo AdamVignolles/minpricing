@@ -234,17 +234,26 @@ controllers → React console → Dealabs draft / auto-publish.
   when a link's `dealId` points at it — `WatchedLinkService.handPickedDealIds`):
   the owner's picks. `upsertDeal(..., { handPicked: true })` skips every
   quality-gate rejection (the reason is only reported on the link's
-  verdict) and drafts them under the score-40 bar; lists show them under
-  the bar too, and `/deals?addedByHand=true` (switch « Ajoutés à la main »
-  in Bons plans) lists only them. `/admin/agent-report` always offers them
-  first, flagged `handPicked`, and `dealradar.mjs shortlist` keeps them
-  outside every rule (except already tried today). Each run's
+  verdict) and drafts them under the score-40 bar. They have their own
+  tab, « Mes ajouts » (`/ajouts`, `HandAddedPage`: add field, their cards
+  — shown under the bar —, every link's checks with Revérifier / Arrêter /
+  Retirer; Admin › « Liens ajoutés » points there). « Bons plans » leaves
+  them out (`GET /deals?hideHandAdded=true`; the old
+  `/deals?addedByHand=true` redirects to `/ajouts`); without either flag
+  (dashboard, MCP `search_deals`) they are mixed in, under the bar too, and
+  `addedByHand=true` lists only them. **Not part of the evening
+  selection** (epic 26): `/admin/agent-report` leaves them out,
+  `dealradar.mjs shortlist` drops any flagged `handPicked`, and
+  `PUT /agent/schedule` drops them from a ranking; they are published from
+  their page, and end-of-run `publishBestDeals` treats them like any other
+  deal. Each run's
   `checkLinksNotRun` re-reads the active links whose shop did not run
   (spaced out or switched off), so every link is checked hourly.
   « Retirer des ajouts à la main » (card ✕ and detail page,
   `DELETE /deals/:id/hand-added` → `removeByDeal`) sets the deal's links to
   `removed`: no longer read, not hand-picked, so the normal rules apply
-  again (the deal is not deleted; the next run may archive it). A queued
+  again and it is back in « Bons plans » (the deal is not deleted; the
+  next run may archive it). A queued
   check, « Arrêter » or an expired deal never undo it; pasting the link
   again does.
 - **Quality gate & visibility**: `services/qualityGate.ts` rejects offers at

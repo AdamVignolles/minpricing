@@ -466,6 +466,27 @@ describe("watched links", () => {
       query: { status: "active", addedByHand: true },
     });
     expect(mine.data.content.map((d) => d.id)).toEqual([deal.id]);
+
+    // « Bons plans » lists collected deals only: hand-added ones have
+    // their own tab (« Mes ajouts »).
+    amazon.discovered = [goodOffer("B0GOODDEAL")];
+    await collection.runOne("amazon");
+    const bonsPlans = await api.list.fetch({
+      headers,
+      query: { status: "active", hideHandAdded: true },
+    });
+    expect(bonsPlans.data.content.map((d) => d.externalId)).toEqual([
+      "B0GOODDEAL",
+    ]);
+    // Without the flag (dashboard, MCP) they are still mixed in.
+    const mixed = await api.list.fetch({
+      headers,
+      query: { status: "active" },
+    });
+    expect(mixed.data.content.map((d) => d.externalId).sort()).toEqual([
+      "B0BXYCS74H",
+      "B0GOODDEAL",
+    ]);
   });
 
   test("filter « ajoutés à la main » with no link yet: empty", async () => {
@@ -494,7 +515,7 @@ describe("watched links", () => {
     expect((await links.get(link.id)).status).toBe("ok");
   });
 
-  test("agent report: hand-added deals always offered first, flagged", async () => {
+  test("agent report: hand-added deals are left out of the evening selection", async () => {
     const link = await add("https://www.amazon.fr/dp/B0BXYCS74H");
     amazon.offers.set(
       "B0BXYCS74H",
@@ -521,11 +542,17 @@ describe("watched links", () => {
       headers: { authorization: `Bearer ${TOKEN}` },
       query: { days: 0, perCategory: 1, limit: 1 },
     });
-    expect(report.data.candidates.map((c) => [c.id, c.handPicked])).toEqual([
-      [hand, true],
-      [expect.any(String), undefined],
-    ]);
-    expect(report.data.candidates[0].score).toBeLessThan(40);
+    const ids = report.data.candidates.map((c) => c.id);
+    expect(ids).toHaveLength(1);
+    expect(ids).not.toContain(hand);
+
+    // Even when it is visible on its own merits.
+    await fx.deals.updateById(hand, { score: 90 });
+    const again = await alepha.inject(AdminController).agentReport.fetch({
+      headers: { authorization: `Bearer ${TOKEN}` },
+      query: { days: 0 },
+    });
+    expect(again.data.candidates.map((c) => c.id)).not.toContain(hand);
   });
 
   const adminCookie = async () => {

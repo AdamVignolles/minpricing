@@ -147,8 +147,14 @@ export class DealsController {
         merchantId: z.text().optional(),
         sourceId: z.text().optional(),
         search: z.text().optional(),
-        /** Only deals added by hand (pasted link). */
+        /** Only deals added by hand (pasted link) — the « Mes ajouts » tab. */
         addedByHand: z.boolean().optional(),
+        /**
+         * Leave out the deals added by hand: « Bons plans » lists collected
+         * deals only, hand-added ones have their own tab. Without it (the
+         * dashboard, MCP), they are mixed in as before.
+         */
+        hideHandAdded: z.boolean().optional(),
         sortBy: z
           .enum([
             "relevance",
@@ -178,6 +184,7 @@ export class DealsController {
         sourceId,
         search,
         addedByHand,
+        hideHandAdded,
       } = query;
 
       const conditions: Record<string, unknown>[] = [];
@@ -197,6 +204,11 @@ export class DealsController {
         );
         if (minScore !== undefined) {
           conditions.push({ score: { gte: minScore } });
+        }
+      } else if (hideHandAdded) {
+        conditions.push(scoreFloor);
+        if (handPicked.length > 0) {
+          conditions.push({ id: { notInArray: handPicked } });
         }
       } else if (handPicked.length > 0 && !minScore) {
         conditions.push({ or: [scoreFloor, { id: { inArray: handPicked } }] });
