@@ -37,6 +37,7 @@ import {
 } from "../src/api/services/publishPlan.ts";
 import { PublishCancelledError } from "../src/api/services/PublishProgressService.ts";
 import { PublishScheduleService } from "../src/api/services/PublishScheduleService.ts";
+import { WatchedLinkService } from "../src/api/services/WatchedLinkService.ts";
 
 const TOKEN = "c".repeat(64);
 /** Wednesday 28 Oct 2026, 17:00 in Paris (winter time, UTC+1). */
@@ -213,6 +214,22 @@ describe("publishing plan", () => {
     expect(
       list.entries.filter((e: any) => e.status === "cancelled"),
     ).toHaveLength(plan.entries.length);
+  });
+
+  test("a deal added by hand is not taken by the evening schedule", async () => {
+    const [hand, ...others] = dealIds;
+    vi.spyOn(
+      alepha.inject(WatchedLinkService),
+      "handPickedDealIds",
+    ).mockResolvedValueOnce([hand]);
+    const res = await call("PUT", "/agent/schedule", {
+      ranked: ranked(),
+      agent: "deals-select",
+    });
+    expect(res.status).toBe(200);
+    const plan = (await res.json()) as any;
+    expect(plan.dropped).toEqual([hand]);
+    expect(plan.ranked).toBe(others.length);
   });
 
   test("explicit times outside the window or on a weekend are refused", async () => {

@@ -30,6 +30,7 @@ import {
   randomTimes,
 } from "./publishPlan.ts";
 import { PublishCancelledError } from "./PublishProgressService.ts";
+import { WatchedLinkService } from "./WatchedLinkService.ts";
 
 export type ScheduleEntry = Infer<typeof publishScheduleEntity.schema>;
 
@@ -101,6 +102,7 @@ export class PublishScheduleService {
   protected drafts = $inject(DealabsDraftService);
   protected session = $inject(DealabsSessionService);
   protected pageCheck = $inject(DealPageCheckService);
+  protected watchedLinks = $inject(WatchedLinkService);
   protected env = $env(
     z.object({
       AUTO_PUBLISH_MAX_PER_DAY: z.number().default(6),
@@ -194,11 +196,14 @@ export class PublishScheduleService {
     // Our own data wins over what the agent copied (title, price…).
     const ranked: QueueCandidate[] = [];
     const dropped: string[] = [];
+    // Deals added by hand are not part of the evening selection: they are
+    // published from their own page (« Mes ajouts »).
+    const handPicked = new Set(await this.watchedLinks.handPickedDealIds());
     for (const candidate of input.ranked) {
       const deal = await this.deals
         .findById(candidate.dealId)
         .catch(() => null);
-      if (!deal || deal.status !== "active") {
+      if (!deal || deal.status !== "active" || handPicked.has(deal.id)) {
         dropped.push(candidate.dealId);
         continue;
       }
@@ -334,7 +339,7 @@ export class PublishScheduleService {
       reason: input.reason,
       summary: [
         `${times.length} publication(s) : ${times.map(parisTime).join(", ") || "aucune"}`,
-        `${ranked.length} deal(s) classés${dropped.length ? `, ${dropped.length} écarté(s) (inactifs)` : ""}`,
+        `${ranked.length} deal(s) classés${dropped.length ? `, ${dropped.length} écarté(s) (inactifs ou ajoutés à la main)` : ""}`,
         input.dryRun ? "essai à blanc (aucune publication)" : "",
       ]
         .filter(Boolean)

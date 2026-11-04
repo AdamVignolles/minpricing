@@ -14,7 +14,6 @@ import {
   ScrollArea,
   Select,
   Stack,
-  Switch,
   Text,
   TextInput,
   Title,
@@ -24,7 +23,6 @@ import { useRouter } from "alepha/react/router";
 import { type FC, useEffect, useMemo, useState } from "react";
 
 import DealGrid from "../components/deals/DealGrid.tsx";
-import AddLinkField from "../components/links/AddLinkField.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
 import { EmptyState } from "../components/ui/States.tsx";
@@ -40,7 +38,6 @@ export interface DealsQuery {
   minDiscount?: number;
   minPrice?: number;
   maxPrice?: number;
-  addedByHand?: boolean;
 }
 
 export interface DealsPageProps {
@@ -134,12 +131,6 @@ const DealsListPage: FC<DealsPageProps> = ({
 
   const activeChips = useMemo(() => {
     const chips: Array<{ label: string; clear: Partial<DealsQuery> }> = [];
-    if (query.addedByHand) {
-      chips.push({
-        label: "Ajoutés à la main",
-        clear: { addedByHand: undefined },
-      });
-    }
     if (query.search) {
       chips.push({
         label: `« ${query.search} »`,
@@ -193,15 +184,6 @@ const DealsListPage: FC<DealsPageProps> = ({
 
   const filters = (
     <Stack gap="lg">
-      <Switch
-        label="Ajoutés à la main"
-        description="Les produits dont vous avez collé le lien, même mal notés"
-        checked={!!query.addedByHand}
-        onChange={(event) =>
-          apply({ addedByHand: event.currentTarget.checked || undefined })
-        }
-      />
-
       <Stack gap="xs">
         <Text fw={600} fz="sm">
           Réduction minimale
@@ -319,8 +301,6 @@ const DealsListPage: FC<DealsPageProps> = ({
           </Text>
         </Stack>
       </Group>
-
-      <AddLinkField />
 
       <Group gap="sm" wrap="nowrap">
         <TextInput

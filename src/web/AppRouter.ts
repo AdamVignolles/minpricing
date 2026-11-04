@@ -27,7 +27,15 @@ const dealListQuerySchema = z.object({
   minDiscount: z.number().min(0).max(100).optional(),
   minPrice: z.number().min(0).optional(),
   maxPrice: z.number().min(0).optional(),
+  /** Old « Ajoutés à la main » filter: redirects to « Mes ajouts ». */
   addedByHand: z.boolean().optional(),
+  page: z.number().optional(),
+});
+
+const handAddedQuerySchema = z.object({
+  sortBy: z
+    .enum(["relevance", "hot", "discount", "price-asc", "price-desc", "newest"])
+    .optional(),
   page: z.number().optional(),
 });
 
@@ -83,6 +91,7 @@ export class AppRouter {
     children: () => [
       this.home,
       this.dealsList,
+      this.handAdded,
       this.dealDetail,
       this.statsPage,
       this.agentsPage,
@@ -186,13 +195,44 @@ export class AppRouter {
     schema: { query: dealListQuerySchema },
     lazy: () => import("./pages/DealsListPage.tsx"),
     loader: async ({ query }) => {
+      // Hand-added deals have their own tab now; old bookmarks land there.
+      const { addedByHand, ...rest } = query;
+      if (addedByHand) throw new Redirection("/ajouts");
       const [dealsPage, categories, merchants, sources] = await Promise.all([
-        this.deals.list({ query: { size: 24, status: "active", ...query } }),
+        this.deals.list({
+          query: { size: 24, status: "active", hideHandAdded: true, ...rest },
+        }),
         this.catalog.listCategories({}),
         this.catalog.listMerchants({}),
         this.sources.listSources({}),
       ]);
-      return { dealsPage, categories, merchants, sources, query };
+      return { dealsPage, categories, merchants, sources, query: rest };
+    },
+  });
+
+  /**
+   * « Mes ajouts »: the deals added by hand (pasted links), out of
+   * « Bons plans ». Same cards, plus the links' checks and actions.
+   */
+  handAdded = $page({
+    path: "/ajouts",
+    name: "hand-added",
+    schema: { query: handAddedQuerySchema },
+    lazy: () => import("./pages/HandAddedPage.tsx"),
+    loader: async ({ query }) => {
+      const [dealsPage, merchants] = await Promise.all([
+        this.deals.list({
+          query: {
+            size: 24,
+            status: "active",
+            addedByHand: true,
+            sortBy: query.sortBy ?? "newest",
+            page: query.page,
+          },
+        }),
+        this.catalog.listMerchants({}),
+      ]);
+      return { dealsPage, merchants, query };
     },
   });
 

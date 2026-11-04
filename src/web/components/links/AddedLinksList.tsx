@@ -16,6 +16,7 @@ import type {
   LinkView,
   LinksController,
 } from "../../../api/controllers/LinksController.ts";
+import RemoveHandAdded from "../deals/RemoveHandAdded.tsx";
 import * as f from "../ui/format.ts";
 import { EmptyState } from "../ui/States.tsx";
 import { useNow } from "../ui/useNow.ts";
@@ -92,7 +93,7 @@ const AddedLinksList: FC = () => {
       <EmptyState
         icon="inbox"
         title="Aucun lien ajouté"
-        description="Collez le lien d'une fiche produit dans le champ « Ajouter un lien » du tableau de bord ou des bons plans."
+        description="Collez le lien d'une fiche produit dans le champ « Ajouter un lien » ci-dessus ou du tableau de bord."
       />
     );
   }
@@ -206,6 +207,13 @@ const AddedLinksList: FC = () => {
                       >
                         Arrêter
                       </Button>
+                    ) : null}
+                    {isWatched(link) && link.deal ? (
+                      <RemoveHandAdded
+                        dealId={link.deal.id}
+                        title={link.deal.title}
+                        onRemoved={() => setVersion((v) => v + 1)}
+                      />
                     ) : null}
                   </Group>
                 </Table.Td>

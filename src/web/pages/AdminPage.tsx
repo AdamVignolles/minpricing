@@ -22,6 +22,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useClient } from "alepha/react";
+import { Link } from "alepha/react/router";
 import { type FC, type ReactNode, useEffect, useState } from "react";
 
 import type { AdminController } from "../../api/controllers/AdminController.ts";
@@ -30,7 +31,6 @@ import {
   COLLECTION_FINISHED_EVENT,
   COLLECTION_STARTED_EVENT,
 } from "../components/layout/CollectionProgressAside.tsx";
-import AddedLinksList from "../components/links/AddedLinksList.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon, { type IconName } from "../components/ui/Icon.tsx";
 import Section from "../components/ui/Section.tsx";
@@ -421,7 +421,14 @@ const AdminPage: FC<AdminPageProps> = ({
             setProducts={setProducts}
             client={productsClient}
           />
-          <AddedLinksList />
+          <Text fz="sm" c="dimmed">
+            Les liens collés, leurs vérifications et leurs bons plans sont dans
+            l'onglet{" "}
+            <Anchor component={Link} href="/ajouts" fz="sm" fw={600}>
+              Mes ajouts
+            </Anchor>
+            .
+          </Text>
         </Tabs.Panel>
 
         <Tabs.Panel value="logs">

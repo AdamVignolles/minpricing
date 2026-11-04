@@ -13,6 +13,8 @@ export interface RemoveHandAddedProps {
   title: string;
   /** `icon` on cards, a labelled button on the detail page. */
   variant?: "icon" | "button";
+  /** Called once removed, after the page's data is reloaded. */
+  onRemoved?: () => void;
 }
 
 /**
@@ -24,6 +26,7 @@ const RemoveHandAdded: FC<RemoveHandAddedProps> = ({
   dealId,
   title,
   variant = "icon",
+  onRemoved,
 }) => {
   const client = useClient<DealsController>();
   const router = useRouter();
@@ -48,6 +51,7 @@ const RemoveHandAdded: FC<RemoveHandAddedProps> = ({
         message: "Son lien n'est plus surveillé.",
       });
       await router.invalidate();
+      onRemoved?.();
     } catch (error) {
       notifications.show({
         color: "red",
