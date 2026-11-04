@@ -244,7 +244,8 @@ controllers → React console → Dealabs draft / auto-publish.
   `addedByHand=true` lists only them. **Not part of the evening
   selection** (epic 26): `/admin/agent-report` leaves them out,
   `dealradar.mjs shortlist` drops any flagged `handPicked`, and
-  `PUT /agent/schedule` drops them from a ranking; they are published from
+  `PUT /agent/schedule` drops them from a ranking, and each slot checks
+  again before publishing (a link pasted after the queue was set); they are published from
   their page, and end-of-run `publishBestDeals` treats them like any other
   deal. Each run's
   `checkLinksNotRun` re-reads the active links whose shop did not run
@@ -482,7 +483,7 @@ deals and, separately, the visible ones (`createdVisible`).
   Settings → Connectors → custom connector `https://<host>/mcp`, then log in
   with the admin credentials on the DealRadar page. `test/mcp.spec.ts`.
 - **Add by link** (epic 16): a product page link pasted in the console
-  (« Ajouter un lien », dashboard and deals page) or sent by an agent
+  (« Ajouter un lien », dashboard and « Mes ajouts ») or sent by an agent
   (`POST /agent/links`, audited, 20/24 h; `dealradar.mjs add-link <url>
 [agent] [reason] [--wait]`). `services/linkResolver.ts` (pure, tested)
   follows short links (amzn.to, s.click.aliexpress… 5 hops, never a
@@ -511,8 +512,8 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   worked around; Amazon stops reading the remaining products at the first
   one (no browser retry), and a link read before keeps being evaluated on
   that last reading. Refused links stay watched; the watch ends after 14
-  days or when the deal expires. Deals carry `addedByLink`; Admin ›
-  « Liens ajoutés » lists them (Revérifier, Arrêter). Manual price entry
+  days or when the deal expires. Deals carry `addedByLink`; « Mes ajouts »
+  lists the links (Revérifier, Arrêter, Retirer). Manual price entry
   (`ManualCollector`, `PATCH /products/:id/price`, the `manual` and
   `manual-link` sources) is gone: at startup `SeedService` turns tracked
   products in a supported shop into watched links and lists the others
