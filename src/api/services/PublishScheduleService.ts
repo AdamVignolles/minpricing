@@ -503,9 +503,13 @@ export class PublishScheduleService {
     const outcomes: string[] = [];
     let attempts = 0;
     let anyFailed = false;
+    // Checked again at publish time: a link pasted after the queue was set
+    // (to follow its price) must not be published by a slot either.
+    const handPicked = new Set(await this.watchedLinks.handPickedDealIds());
     for (const candidate of this.readQueue(entry.date)) {
       if (attempts >= MAX_TRIES_PER_SLOT) break;
       if (tried.has(candidate.dealId)) continue;
+      if (handPicked.has(candidate.dealId)) continue;
       const cap =
         r.categoryCaps?.[candidate.categoryId ?? ""] ?? r.maxPerCategoryPerDay;
       const sameCategory = success().filter(
