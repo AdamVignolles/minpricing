@@ -1,5 +1,6 @@
 import type { DealFacts, WarningKind } from "./dealFacts.ts";
 import { COUNTRIES, PHRASES } from "./descriptionPhrases.ts";
+import { priceContextLines } from "./priceContext.ts";
 
 /**
  * Renders a Dealabs description from a deal's facts (epic 27): sections in
@@ -7,8 +8,9 @@ import { COUNTRIES, PHRASES } from "./descriptionPhrases.ts";
  * the phrase bank. Pure and deterministic.
  *
  * It only prints what {@link DealFacts} holds — so never DealRadar, a
- * score, a chance to heat or an opinion — and no product price yet: the
- * « pourquoi c'est un bon prix » section comes with #129.
+ * score, a chance to heat or an opinion. Prices only in « Repères de
+ * prix » (`priceContextLines`, #129): trusted, dated, fresh figures that
+ * are a real argument, and only when the caller gives `now`.
  *
  * Two outputs: plain text (what the publisher types in Dealabs' editor
  * today) and HTML (bold labels, lists), for the rich editor of #131.
@@ -19,6 +21,7 @@ export type DealType = "product" | "game" | "free-game" | "plan";
 export type SectionKey =
   | "intro"
   | "howTo"
+  | "price"
   | "highlights"
   | "game"
   | "plan"
@@ -387,9 +390,20 @@ function toHtml(sections: DescriptionSection[]): string {
     .join("");
 }
 
+function priceSection(
+  facts: DealFacts,
+  now: string | undefined,
+): DescriptionSection | undefined {
+  const lines = now ? priceContextLines(facts, now) : [];
+  return lines.length
+    ? { key: "price", title: PHRASES.sections.price, lines }
+    : undefined;
+}
+
 function build(
   facts: DealFacts,
   limits: { bullets: number; paragraphs: number; specs: number },
+  now: string | undefined,
 ): { type: DealType; sections: DescriptionSection[] } {
   const type = dealType(facts);
   const seed = facts.product.url.value;
@@ -398,6 +412,7 @@ function build(
   const sections = [
     introSection(facts, type, seed),
     howToSection(facts),
+    priceSection(facts, now),
     highlights,
     type === "game" || type === "free-game"
       ? gameSection(facts, type, highlights?.lines ?? [])
@@ -416,19 +431,27 @@ function build(
  */
 export function renderDescription(
   facts: DealFacts,
+  options: {
+    /** Render time; without it, no « Repères de prix » section. */
+    now?: string;
+  } = {},
 ): RenderedDescription | undefined {
-  let built = build(facts, {
-    bullets: LIMITS.bullets,
-    paragraphs: LIMITS.paragraphs,
-    specs: LIMITS.specs,
-  });
+  let built = build(
+    facts,
+    {
+      bullets: LIMITS.bullets,
+      paragraphs: LIMITS.paragraphs,
+      specs: LIMITS.specs,
+    },
+    options.now,
+  );
   // Too long: fewer bullets, one paragraph, the 6 first specs.
   if (toText(built.sections).length > LIMITS.totalChars) {
-    built = build(facts, {
-      bullets: 3,
-      paragraphs: 1,
-      specs: LIMITS.specsWhenLong,
-    });
+    built = build(
+      facts,
+      { bullets: 3, paragraphs: 1, specs: LIMITS.specsWhenLong },
+      options.now,
+    );
   }
   if (!built.sections.some((section) => section.key !== "intro"))
     return undefined;

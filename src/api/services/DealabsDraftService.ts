@@ -79,8 +79,9 @@ export class DealabsDraftService {
    * The post text, built from the deal's facts (`buildDealFacts` →
    * `renderDescription`, epic 27): intro, how to get the price, the
    * merchant's points, specs, the game or plan block, seller and delivery,
-   * and what a buyer must know. Only what was read from a source; no
-   * product price yet (#129), never DealRadar or a score.
+   * and what a buyer must know. Only what was read from a source; prices
+   * only in « Repères de prix » (#129: trusted, dated, fresh), never
+   * DealRadar or a score.
    */
   protected render(
     deal: Deal,
@@ -94,7 +95,9 @@ export class DealabsDraftService {
     // an intro (product page not read yet), the merchant's text or, last,
     // the title itself: merchant titles list the specs
     // ("… - Moteur 900 W - Batterie 48 V - …").
-    const rendered = renderDescription(buildDealFacts(deal, { merchantName }));
+    const rendered = renderDescription(buildDealFacts(deal, { merchantName }), {
+      now: this.dateTime.nowISOString(),
+    });
     const description =
       rendered?.text ||
       deal.description?.trim() ||

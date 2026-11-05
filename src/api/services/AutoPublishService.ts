@@ -405,18 +405,15 @@ export class AutoPublishService {
         );
       }
 
-      // A draft generated while the deal had no description has an empty
-      // one: rebuild it from the deal now (never empty, see render()).
-      if (!draft.description?.trim()) {
-        await this.progress.begin("draft", "Description vide : régénération");
-        await this.draftService.maybeGenerateDraft(deal);
-        draft =
-          (await this.drafts.findOne({ where: { dealId: { eq: dealId } } })) ??
-          draft;
-        await this.progress.done("draft", "Description régénérée");
-      } else {
-        await this.progress.done("draft", "Prêt");
-      }
+      // Rebuilt from the deal as checked just above: the « Repères de
+      // prix » figures (#129) are dated today and match the price the page
+      // shows; references gone stale since the draft drop out.
+      await this.progress.begin("draft", "Description mise à jour");
+      await this.draftService.maybeGenerateDraft(deal);
+      draft =
+        (await this.drafts.findOne({ where: { dealId: { eq: dealId } } })) ??
+        draft;
+      await this.progress.done("draft", "Prêt");
 
       attempt = {
         publishAttempts: (draft.publishAttempts ?? 0) + 1,

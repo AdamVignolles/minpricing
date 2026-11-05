@@ -270,3 +270,155 @@ describe("renderDescription guardrails", () => {
     expect(dealType(facts({ sourceId: "cdiscount" }))).toBe("product");
   });
 });
+
+describe("Repères de prix (#129)", () => {
+  const NOW = "2026-11-05T10:00:00.000Z";
+  const priceLines = (
+    deal: Partial<DealFactsInput>,
+    context: { merchantName?: string } = {},
+  ) =>
+    renderDescription(buildDealFacts(base(deal), context), {
+      now: NOW,
+    })?.sections.find((section) => section.key === "price")?.lines;
+
+  test("drop vs the shop's 30-day low, dated", () => {
+    expect(
+      priceLines(
+        {
+          currentPrice: 39.99,
+          lowestRecentPrice: 59.99,
+          detailsCheckedAt: "2026-11-05T07:00:00.000Z",
+          description: "- Un point",
+        },
+        { merchantName: "Amazon" },
+      ),
+    ).toEqual([
+      "Prix le plus bas des 30 derniers jours affiché par Amazon au 05/11 : 59,99 €, soit -33 %",
+    ]);
+  });
+
+  test("the 30-day low wins: a bigger struck price is not used", () => {
+    expect(
+      priceLines({
+        currentPrice: 50,
+        lowestRecentPrice: 55,
+        listPrice: 100,
+        listPriceKind: "regular",
+        detailsCheckedAt: "2026-11-05T07:00:00.000Z",
+        description: "- Un point",
+      }),
+    ).toBeUndefined();
+  });
+
+  test("Steam's regular price; never a « prix conseillé », never our measure", () => {
+    const steam = {
+      sourceId: "steam",
+      currentPrice: 9.99,
+      listPrice: 24.5,
+      listPriceKind: "regular" as const,
+      description: "- Un point",
+    };
+    expect(priceLines(steam, { merchantName: "Steam" })).toEqual([
+      "Prix habituel affiché par Steam au 04/11 : 24,50 €, soit -59 %",
+    ]);
+    expect(priceLines({ ...steam, listPriceKind: "rrp" })).toBeUndefined();
+    expect(priceLines({ ...steam, listPriceKind: undefined })).toBeUndefined();
+    expect(priceLines({ ...steam, sourceId: "amazon-watch" })).toBeUndefined();
+  });
+
+  test("a drop under 20 % is no argument", () => {
+    expect(
+      priceLines({
+        sourceId: "steam",
+        currentPrice: 20,
+        listPrice: 24,
+        listPriceKind: "regular",
+        description: "- Un point",
+      }),
+    ).toBeUndefined();
+  });
+
+  test("other shops: ≥ 10 % cheaper and read in the last 24 h", () => {
+    const deal = {
+      sourceId: "cdiscount",
+      currentPrice: 234.99,
+      marketComparisons: JSON.stringify([
+        { merchant: "Fnac", price: 329 },
+        { merchant: "Amazon", price: 309 },
+      ]),
+      marketCheckedAt: "2026-11-05T06:00:00.000Z",
+      description: "- Un point",
+    };
+    expect(priceLines(deal)).toEqual([
+      "Ailleurs au 05/11 : Amazon 309 €, Fnac 329 €",
+    ]);
+    expect(
+      priceLines({ ...deal, marketCheckedAt: "2026-11-03T06:00:00.000Z" }),
+    ).toBeUndefined();
+    expect(priceLines({ ...deal, currentPrice: 290 })).toBeUndefined();
+  });
+
+  test("lower than ever posted on Dealabs; historical low", () => {
+    expect(
+      priceLines({
+        sourceId: "nintendo",
+        currentPrice: 29.99,
+        dealabsLowestPrice: 34.99,
+        dealabsLowestAt: "2025-12-06T17:36:03.000Z",
+        dealabsDealsCount: 3,
+        dealabsCheckedAt: "2026-11-05T01:00:00.000Z",
+        historicalLowPrice: 29.99,
+        historicalLowAt: "2025-03-01T00:00:00.000Z",
+        historicalLowSource: "DekuDeals",
+        itadCheckedAt: "2026-11-05T02:00:00.000Z",
+        description: "- Un point",
+      }),
+    ).toEqual([
+      "Plus bas prix déjà partagé sur Dealabs : 34,99 € (le 06/12/2025)",
+      "Égal au plus bas historique relevé par DekuDeals (29,99 € le 01/03/2025)",
+    ]);
+  });
+
+  test("stale or missing dates: nothing printed", () => {
+    expect(
+      priceLines({
+        currentPrice: 39.99,
+        lowestRecentPrice: 59.99,
+        detailsCheckedAt: "2026-11-01T07:00:00.000Z",
+        dealabsLowestPrice: 50,
+        dealabsDealsCount: 2,
+        description: "- Un point",
+      }),
+    ).toBeUndefined();
+  });
+
+  test("monthly plans say « /mois »", () => {
+    expect(
+      priceLines({
+        sourceId: "free",
+        currentPrice: 9.99,
+        billingPeriod: "month",
+        marketPrice: 15.99,
+        marketPriceSource: "Orange",
+        marketCheckedAt: "2026-11-05T06:00:00.000Z",
+        extraFacts: JSON.stringify({ planTerms: ["100 Go"] }),
+      }),
+    ).toEqual(["Ailleurs au 05/11 : Orange 15,99 €/mois"]);
+  });
+
+  test("without a render time, no price section at all", () => {
+    expect(
+      renderDescription(
+        buildDealFacts(
+          base({
+            sourceId: "steam",
+            currentPrice: 9.99,
+            listPrice: 24.5,
+            listPriceKind: "regular",
+            description: "- Un point",
+          }),
+        ),
+      )?.text,
+    ).not.toMatch(/€/);
+  });
+});

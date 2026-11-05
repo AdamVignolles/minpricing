@@ -18,6 +18,7 @@ export const PHRASES = {
   },
   sections: {
     howTo: "Pour obtenir le prix :",
+    price: "Repères de prix :",
     highlights: ["Points forts :", "En bref :"],
     specs: "Caractéristiques :",
     game: "Le jeu :",
@@ -28,6 +29,21 @@ export const PHRASES = {
   howTo: {
     coupon: "Activer le coupon de {coupon} sur la page du produit",
     code: "Code promo à saisir : {code}",
+  },
+  /** Only through `priceContextLines` (#129): trusted, dated figures. */
+  price: {
+    lowest30d:
+      "Prix le plus bas des 30 derniers jours affiché par {merchant} au {day} : {reference}, soit -{percent} %",
+    regular:
+      "Prix habituel affiché par {merchant} au {day} : {reference}, soit -{percent} %",
+    otherShops: "Ailleurs au {day} : {shops}",
+    dealabs: "Plus bas prix déjà partagé sur Dealabs : {reference}",
+    dealabsDated:
+      "Plus bas prix déjà partagé sur Dealabs : {reference} (le {date})",
+    historicalLowEqual:
+      "Égal au plus bas historique relevé par {source} ({reference}{date})",
+    historicalLowBelow:
+      "Sous le plus bas historique relevé par {source} ({reference}{date})",
   },
   seller: {
     self: "Vendu et expédié par {seller}",

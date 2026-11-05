@@ -106,7 +106,8 @@ controllers → React console → Dealabs draft / auto-publish.
   are picked by a hash of the URL (same deal, same text); no intro for a
   plain product (the seller line names the shop); Amazon's shouted bullet
   headings in sentence case; capped at 2 200 characters (fewer bullets
-  and specs past it). Never a price, a score, a heat chance or DealRadar.
+  and specs past it). Never a score, a heat chance or DealRadar; prices
+  only in « Repères de prix » (`priceContextLines`, given `now`).
   `DealabsDraftService` uses it, falling back to the merchant text, then
   the title's specs. `test/deal-description.spec.ts`.
   **Product facts read by collectors** (`DealDetails.facts` →
@@ -156,8 +157,15 @@ controllers → React console → Dealabs draft / auto-publish.
   `data/agents`) live under `appDir()` (Bay's `APP_FILES_DIR`). Auto-publish attempts are
   recorded on the draft (`publishAttempts`, `lastPublishResult`,
   `lastPublishError`); a "Vérifier" that doesn't confirm puts the draft back
-  to `draft`. Draft texts never contain prices — except, for Amazon deals,
-  Keepa's 90-day price chart (`services/keepa.ts`: the public
+  to `draft`. Draft texts contain prices only in the « Repères de prix »
+  section (`services/priceContext.ts`, #129: the score's own price
+  arguments from trusted references — shop's 30-day low or stated regular
+  price ≥ 20 % above, other shops read < 24 h ago ≥ 10 % dearer, under the
+  lowest price others posted on Dealabs, at a price-history low; each
+  dated, older than 48 h dropped; never a « prix conseillé », an
+  unlabelled struck price or our own measured price; the draft is rebuilt
+  just before each publication, after the page check), plus, for Amazon
+  deals, Keepa's 90-day price chart (`services/keepa.ts`: the public
   `graph.keepa.com/pricehistory.png` image, no API key), which the
   publisher inserts at the top of the description through the editor's
   « Image » → « Image depuis une URL » dialog (Dealabs re-hosts it). Best-
