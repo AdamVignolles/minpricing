@@ -30,6 +30,7 @@ import type { DraftsController } from "../../api/controllers/DraftsController.ts
 import type { PublishRun } from "../../api/services/publishSteps.ts";
 import { StopPublishButton } from "../components/agents/PublishControls.tsx";
 import DealabsConnection from "../components/deals/DealabsConnection.tsx";
+import DealabsTitleDialog from "../components/deals/DealabsTitleDialog.tsx";
 import DealAnalysis from "../components/deals/DealAnalysis.tsx";
 import DealImage from "../components/deals/DealImage.tsx";
 import DescriptionEditor from "../components/deals/DescriptionEditor.tsx";
@@ -419,6 +420,43 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
    * serverless deployment rejects it with a clear error, since there's no
    * real browser session to reuse there.
    */
+  // Rename once (epic 28): a cut title nobody approved is rewritten in
+  // « Titre Dealabs » first; validating approves it, then publishes.
+  const [titleDialog, setTitleDialog] = useState(false);
+  const [titleSaving, setTitleSaving] = useState(false);
+  const [titleError, setTitleError] = useState<string>();
+  const titleNeedsRewrite =
+    !!current &&
+    current.status !== "posted" &&
+    current.titleTrimmed === true &&
+    !current.titleApprovedAt &&
+    current.editedBy !== "owner";
+  const startAutoPublish = () => {
+    if (titleNeedsRewrite) {
+      setTitleError(undefined);
+      setTitleDialog(true);
+      return;
+    }
+    void autoPublish();
+  };
+  const validateTitle = async (title: string) => {
+    setTitleSaving(true);
+    setTitleError(undefined);
+    try {
+      const updated = await drafts.approveTitle({
+        params: { id: deal.id },
+        body: { title },
+      });
+      setCurrent(updated as Draft);
+      setTitleDialog(false);
+      void autoPublish();
+    } catch (error) {
+      setTitleError(error instanceof Error ? error.message : "Titre refusé.");
+    } finally {
+      setTitleSaving(false);
+    }
+  };
+
   const autoPublish = async () => {
     if (!current) return;
     // The client batches calls made within 10 ms into one request: the
@@ -572,8 +610,15 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
             </Group>
 
             <Title order={1} fz={{ base: "1.4rem", sm: "1.75rem" }} lh={1.2}>
-              {deal.title}
+              {deal.titleTrimmed && deal.shortTitle
+                ? deal.shortTitle
+                : deal.title}
             </Title>
+            {deal.titleTrimmed && deal.shortTitle ? (
+              <Text size="sm" c="dimmed">
+                Nom complet : {deal.title}
+              </Text>
+            ) : null}
 
             <Paper p="md" bg="var(--app-surface-muted)">
               <Group gap="md" align="baseline" wrap="wrap">
@@ -1065,11 +1110,21 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                       loading={publishRunning}
                       disabled={current.status === "posted"}
                       rightSection={<Icon name="bolt" size={16} />}
-                      onClick={() => void autoPublish()}
+                      onClick={startAutoPublish}
                     >
                       Publication automatique
                     </Button>
                   </Tooltip>
+                  <DealabsTitleDialog
+                    key={titleDialog ? "open" : "closed"}
+                    opened={titleDialog}
+                    initial={current.title}
+                    fullTitle={deal.title}
+                    saving={titleSaving}
+                    error={titleError}
+                    onCancel={() => setTitleDialog(false)}
+                    onValidate={(title) => void validateTitle(title)}
+                  />
                 </Group>
 
                 {publishAttemptNotice && !publishRunning ? (

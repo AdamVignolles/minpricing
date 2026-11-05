@@ -202,7 +202,8 @@ export class AgentFilesService {
       | "data"
       | "schedule"
       | "link"
-      | "description";
+      | "description"
+      | "title";
     target: string;
     reason?: string;
     summary?: string;

@@ -664,13 +664,13 @@ export class DealsController {
       response: z.object({
         dealabs: z.array(
           z.object({
-            title: z.text(),
+            title: z.text({ maxLength: 1000 }),
             price: z.number(),
             publishedAt: z.text(),
             temperature: z.number(),
             isHot: z.boolean(),
             merchant: z.text().optional(),
-            url: z.text(),
+            url: z.text({ maxLength: 2000 }),
           }),
         ),
         steam: z.array(

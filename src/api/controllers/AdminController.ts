@@ -23,6 +23,7 @@ import {
   loadCollectionTuning,
   SOURCE_EVERY_HOURS_BOUNDS,
 } from "../services/collectionTuning.ts";
+import { draftNeedsTitleNow } from "../services/DealabsDraftService.ts";
 import type { StoredDealabsDeal } from "../services/DealabsHistoryService.ts";
 import {
   type DealabsThread,
@@ -333,7 +334,7 @@ export class AdminController {
                   .array(
                     z.object({
                       label: z.text({ size: "rich" }),
-                      url: z.text(),
+                      url: z.text({ maxLength: 2000 }),
                     }),
                   )
                   .optional(),
@@ -403,6 +404,14 @@ export class AdminController {
             dealabsBestTemperature: z.number().optional(),
             dealabsLowestPrice: z.number().optional(),
             freshAt: z.text().optional(),
+            /** The draft's Dealabs title as it stands. */
+            dealabsTitle: richText().optional(),
+            /**
+             * Rename once (epic 28): the Dealabs title was cut to 140
+             * characters and nobody approved it — the selector writes
+             * `dealabsTitle` in the queue, or the slot skips the deal.
+             */
+            needsTitle: z.boolean().optional(),
           }),
         ),
         posted: z.array(
@@ -533,6 +542,8 @@ export class AdminController {
           dealabsBestTemperature: deal.dealabsBestTemperature,
           dealabsLowestPrice: deal.dealabsLowestPrice,
           freshAt: deal.freshAt,
+          dealabsTitle: draftOf.get(deal.id)?.title,
+          needsTitle: draftNeedsTitleNow(draftOf.get(deal.id), deal),
         }));
 
       const report = {

@@ -155,7 +155,7 @@ const DealCard: FC<DealCardProps> = ({
             title={deal.title}
             style={{ flex: 1, minWidth: 0 }}
           >
-            {deal.title}
+            {deal.shortTitle ?? deal.title}
           </Text>
           {deal.addedByLink ? (
             <RemoveHandAdded dealId={deal.id} title={deal.title} />

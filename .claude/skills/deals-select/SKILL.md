@@ -65,5 +65,20 @@ seller, sold` (sold by the merchant), `dlBest` (best Dealabs
      incluse, clavier QWERTY, retrait en magasin…).
      A draft the owner edited is never replaced. The plan's answer lists
      each description as accepted or refused, with the reason.
+     **Required for a cut title: `dealabsTitle`.** A shortlist row with
+     `needsTitle: true` has a Dealabs title the app had to cut to fit 140
+     characters (its current text is `dealabsTitle`). Such a deal is never
+     posted as cut: if you keep it, add `"dealabsTitle": "…"` to its queue
+     item — that approves it on your behalf (owner's decision, 2026-11-04);
+     without one, the slot skips the deal (« titre à réécrire »). Leave the
+     item's `title` as the deal's name: only `dealabsTitle` is the Dealabs
+     title. Write it Dealabs-style, like the draft's: product type first,
+     brand, model, the specs that matter (« Écran PC gamer incurvé Z-Edge
+     24" FHD 200 Hz »), platform for games, « (Vendeur tiers) » or
+     « Reconditionné : » kept when the draft has them. Rules, checked by
+     the app: 10 to 140 characters, one line, no price or euro amount, no
+     score, never « DealRadar », no HTML. A title that already fits needs
+     nothing; the owner's own title is never replaced. The plan's answer
+     lists each title (`titles`) as accepted or refused.
 6. Update the Notion row of step 1: "Dernière exécution" = now,
    "Dernier statut" = "✅ OK". Reply in one line: kept / vetoed counts.

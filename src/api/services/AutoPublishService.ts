@@ -61,6 +61,9 @@ export class PublishRefusedError extends Error {
   }
 }
 
+/** Pre-flight refusal of a cut, unapproved title (epic 28). */
+export const TITLE_REWRITE_REASON = "Titre à réécrire";
+
 /** A deal read again from its shop during a publish (epic 25). */
 export interface DealRefresh {
   /** Read through the shop's collector, from the page's stated price, or not. */
@@ -343,6 +346,15 @@ export class AutoPublishService {
         409,
       );
     }
+    // Rename once (epic 28): a title cut to fit Dealabs' 140 characters
+    // is never posted as the machine cut it — written and approved by
+    // the agent or the owner first. Titles that fit need nothing.
+    if (await this.draftService.titleNeedsRewrite(dealId)) {
+      throw new PublishRefusedError(
+        `${TITLE_REWRITE_REASON} : le nom a dû être coupé pour tenir en 140 caractères, écrivez le titre Dealabs avant de publier.`,
+        409,
+      );
+    }
 
     this.busy = true;
     // Set once the attempt counts (something may be sent to Dealabs):
@@ -604,7 +616,12 @@ export class AutoPublishService {
       const key = sameListingKey(deal);
       if (takenKeys.has(key) || sourcesTaken.has(deal.sourceId)) continue;
       const draft = await this.draftService.ensureDraftForDeal(deal.id);
-      if (draft?.status === "draft" && !draft.publishAttempts) {
+      if (
+        draft?.status === "draft" &&
+        !draft.publishAttempts &&
+        // A cut title waits for its rewrite (epic 28): not this batch.
+        !(await this.draftService.titleNeedsRewrite(deal.id))
+      ) {
         candidates.push(deal);
         takenKeys.add(key);
         sourcesTaken.add(deal.sourceId);

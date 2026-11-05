@@ -10,10 +10,23 @@ export const dealEntity = $entity({
   schema: z.object({
     id: db.primaryKey(),
     sourceId: z.text(),
-    externalId: z.text(),
-    title: z.text({ minLength: 1, maxLength: 300 }),
-    url: z.text(),
-    imageUrl: z.text().optional(),
+    /**
+     * Shop's id for the offer. Cdiscount's is the product page URL, which
+     * can run past 255 characters (epic 28): stored whole, so the dedup
+     * key never changes. Caps: `FIELD_CAPS` in `services/fieldCaps.ts`.
+     */
+    externalId: z.text({ maxLength: 2000 }),
+    /** The merchant's full name for the product, never cut for Dealabs. */
+    title: z.text({ minLength: 1, maxLength: 1000 }),
+    /**
+     * `title` fitted into Dealabs' 140 characters (`dealabsTitle()`, cut
+     * at a segment boundary): what cards and lists show.
+     */
+    shortTitle: z.text({ maxLength: 140 }).optional(),
+    /** True when `shortTitle` had to drop part of `title`. */
+    titleTrimmed: z.boolean().optional(),
+    url: z.text({ maxLength: 2000 }),
+    imageUrl: z.text({ maxLength: 2000 }).optional(),
     /**
      * Short factual product description/feature summary scraped from the
      * merchant page (see {@link RawDeal.description} in DealSource.ts) —
@@ -46,7 +59,7 @@ export const dealEntity = $entity({
      * on demand without a reverse lookup from `Deal` to `TrackedProduct`
      * (a link that otherwise doesn't exist — see `RawDeal.productId`).
      */
-    idealoUrl: z.text().optional(),
+    idealoUrl: z.text({ maxLength: 2000 }).optional(),
     /**
      * Seller & product signals read from the offer page — see
      * {@link DealDetails} in DealSource.ts for what each one means. All
@@ -79,7 +92,7 @@ export const dealEntity = $entity({
      */
     marketPrice: z.number().min(0).optional(),
     marketPriceSource: z.text().optional(),
-    marketPriceUrl: z.text().optional(),
+    marketPriceUrl: z.text({ maxLength: 2000 }).optional(),
     marketCheckedAt: z.datetime().optional(),
     /** Last time {@link DealDetails} were actually fetched for this deal. */
     detailsCheckedAt: z.datetime().optional(),

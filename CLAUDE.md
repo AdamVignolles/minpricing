@@ -628,6 +628,32 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
 
 - Dedup key is `(sourceId, externalId)` (unique index on `deals`), with
   canonical URL as fallback — no fuzzy matching.
+- **Field caps, cut-not-drop** (epic 28): a length limit never costs an
+  offer. `externalId`, `url`, `imageUrl`, `marketPriceUrl`, `idealoUrl`
+  (and `watched_links`' URLs/ids) take 2 000 characters, `title` 1 000
+  (the merchant's full name); SQLite `TEXT` has no length, so raising a
+  cap needs no migration. Before `upsertDeal` saves, `fitFields`
+  (`services/fieldCaps.ts`, caps read from the entity schema) cuts any
+  string still over its column's cap and the run log says so (« Offre
+  gardée, champ … raccourci »). `shortTitle` (≤ 140, `dealabsTitle()`)
+  is what cards show; `titleTrimmed` says the cut dropped something.
+- **Rename once** (epic 28, owner's decisions 2026-11-04): a draft whose
+  generated Dealabs title had to be cut (`dealabs_drafts.titleTrimmed`)
+  is never published as cut. `AutoPublishService.publishDeal` refuses
+  it before any browser (« Titre à réécrire », 409) until a title is
+  approved (`titleApprovedAt`, `titleApprovedBy` = `admin` or the
+  agent): the selection agent sends `dealabsTitle` per ranked deal in
+  `PUT /agent/schedule` (not `title`, which is the deal's name copied
+  from the shortlist; checked by `checkDealabsTitle`: 10–140 chars, no
+  price, score, DealRadar or HTML; audited `agent_writes` kind `title`;
+  answered in `titles`), and that approves it; the deal page's
+  « Publication automatique » opens « Titre Dealabs » first
+  (`POST /deals/:id/draft/title`); an owner-edited draft counts as
+  approved. Slots skip such a deal without counting a try, the end-of-
+  run batch leaves it out, `/admin/agent-report` and `shortlist` flag it
+  (`needsTitle`). An approved title survives every regeneration but
+  « Régénérer ». Titles that fit in 140 characters skip all of this.
+  `test/title-rename.spec.ts`.
 - `PriceHistory` gets a row only when the price changes (plus an occasional
   heartbeat), never unconditionally on each run.
 - Source reliability order API > manual > scrape is reflected in scoring

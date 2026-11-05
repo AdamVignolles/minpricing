@@ -71,7 +71,9 @@ import {
 } from "./collectionTuning.ts";
 import { DealabsDraftService } from "./DealabsDraftService.ts";
 import { DealabsHistoryService } from "./DealabsHistoryService.ts";
+import { dealabsTitle } from "./dealTitle.ts";
 import { DEFAULT_MERCHANT_BY_SOURCE, type Deal } from "./DealTypes.ts";
+import { describeCuts, type FieldCut, fitFields } from "./fieldCaps.ts";
 import { freshnessOnUpdate } from "./freshness.ts";
 import { predictDealHeat } from "./heatPrediction.ts";
 import { HotWatchlistService } from "./HotWatchlistService.ts";
@@ -114,7 +116,7 @@ const TOP_LIVE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const EXPIRE_AFTER_MS = 48 * 60 * 60 * 1000;
 
 /** `Deal.title` limit (see the entity). */
-const TITLE_MAX = 300;
+const TITLE_MAX = 1000;
 
 /**
  * Some merchants (AliExpress especially) write titles of 400+ characters
@@ -138,6 +140,8 @@ export type UpsertOutcome =
       dealId: string;
       /** Hand-added offer the quality gate would have refused: why. */
       qualityNote?: string;
+      /** Fields over their cap, cut instead of losing the offer (epic 28). */
+      cuts?: FieldCut[];
     }
   | { result: "rejected"; reason: string };
 
@@ -767,6 +771,11 @@ export class CollectionService {
             { handPicked: linkedIds.has(rawDeal.externalId) },
           );
           outcomes.set(rawDeal.externalId, outcome);
+          if (outcome.result !== "rejected" && outcome.cuts?.length) {
+            const message = `Offre gardée, ${describeCuts(outcome.cuts)} : ${rawDeal.title.slice(0, 60)}…`;
+            this.log.warn(`${source.id}: ${message}`);
+            this.progress.note(message, source.id, "warn");
+          }
           if (outcome.result === "rejected") {
             rejected++;
             // Group by kind of reason ("vendeur mal noté", not the rating).
@@ -1460,6 +1469,16 @@ export class CollectionService {
   ): Promise<UpsertOutcome> {
     const now = this.dateTime.nowISOString();
     rawDeal = { ...rawDeal, title: fitTitle(rawDeal.title) };
+    // Epic 28: the full name is kept; lists show it fitted to Dealabs'.
+    const shortTitle = dealabsTitle(rawDeal.title);
+    const titleTrimmed = shortTitle !== rawDeal.title;
+    // Anything still over its column's cap is cut, never a lost offer.
+    const cutFields = new Map<string, FieldCut>();
+    const fit = <T extends Record<string, unknown>>(values: T): T => {
+      const { values: fitted, cuts } = fitFields(values);
+      for (const cut of cuts) cutFields.set(cut.field, cut);
+      return fitted;
+    };
 
     const existing = await this.deals.findOne({
       where: {
@@ -1576,63 +1595,72 @@ export class CollectionService {
     const dealId = existing
       ? existing.id
       : (
-          await this.deals.create({
-            sourceId,
-            externalId: rawDeal.externalId,
-            title: rawDeal.title,
-            url: rawDeal.url,
-            imageUrl: rawDeal.imageUrl,
-            description: rawDeal.description,
-            merchantId,
-            categoryId,
-            currentPrice: rawDeal.price,
-            listPrice,
-            discountPercentage,
-            currency: rawDeal.currency,
-            availability: rawDeal.availability ?? "unknown",
-            billingPeriod: rawDeal.billingPeriod,
-            firstSeenAt: now,
-            lastSeenAt: now,
-            freshAt: sibling?.freshAt ?? sibling?.firstSeenAt ?? now,
-            freshReason: sibling?.freshReason ?? "new",
-            droppedFrom: sibling?.droppedFrom,
-            status: "active",
-            ...details,
-          })
+          await this.deals.create(
+            fit({
+              sourceId,
+              externalId: rawDeal.externalId,
+              title: rawDeal.title,
+              shortTitle,
+              titleTrimmed,
+              url: rawDeal.url,
+              imageUrl: rawDeal.imageUrl,
+              description: rawDeal.description,
+              merchantId,
+              categoryId,
+              currentPrice: rawDeal.price,
+              listPrice,
+              discountPercentage,
+              currency: rawDeal.currency,
+              availability: rawDeal.availability ?? "unknown",
+              billingPeriod: rawDeal.billingPeriod,
+              firstSeenAt: now,
+              lastSeenAt: now,
+              freshAt: sibling?.freshAt ?? sibling?.firstSeenAt ?? now,
+              freshReason: sibling?.freshReason ?? "new",
+              droppedFrom: sibling?.droppedFrom,
+              status: "active",
+              ...details,
+            }),
+          )
         ).id;
 
     if (existing) {
-      await this.deals.updateById(existing.id, {
-        title: rawDeal.title,
-        url: rawDeal.url,
-        imageUrl: rawDeal.imageUrl,
-        // Keep the last description we managed to scrape rather than
-        // blanking it out on a run that couldn't get one (e.g. the
-        // product page briefly failed to load).
-        description: rawDeal.description ?? existing.description,
-        merchantId,
-        categoryId,
-        currentPrice: rawDeal.price,
-        listPrice,
-        oldPrice: existing.currentPrice,
-        currency: rawDeal.currency,
-        discountPercentage,
-        availability: rawDeal.availability ?? "unknown",
-        billingPeriod: rawDeal.billingPeriod,
-        lastSeenAt: now,
-        status: "active",
-        // "New" again only on a real price drop (see freshness.ts); a deal
-        // from before `freshAt` existed gets its first-seen date.
-        ...(existing.freshAt
-          ? {}
-          : { freshAt: existing.firstSeenAt, freshReason: "new" as const }),
-        ...freshnessOnUpdate(existing.currentPrice, rawDeal.price, now, {
-          freshReason: existing.freshReason,
-          droppedFrom: existing.droppedFrom,
-          firstSeenAt: existing.firstSeenAt,
+      await this.deals.updateById(
+        existing.id,
+        fit({
+          title: rawDeal.title,
+          shortTitle,
+          titleTrimmed,
+          url: rawDeal.url,
+          imageUrl: rawDeal.imageUrl,
+          // Keep the last description we managed to scrape rather than
+          // blanking it out on a run that couldn't get one (e.g. the
+          // product page briefly failed to load).
+          description: rawDeal.description ?? existing.description,
+          merchantId,
+          categoryId,
+          currentPrice: rawDeal.price,
+          listPrice,
+          oldPrice: existing.currentPrice,
+          currency: rawDeal.currency,
+          discountPercentage,
+          availability: rawDeal.availability ?? "unknown",
+          billingPeriod: rawDeal.billingPeriod,
+          lastSeenAt: now,
+          status: "active",
+          // "New" again only on a real price drop (see freshness.ts); a deal
+          // from before `freshAt` existed gets its first-seen date.
+          ...(existing.freshAt
+            ? {}
+            : { freshAt: existing.firstSeenAt, freshReason: "new" as const }),
+          ...freshnessOnUpdate(existing.currentPrice, rawDeal.price, now, {
+            freshReason: existing.freshReason,
+            droppedFrom: existing.droppedFrom,
+            firstSeenAt: existing.firstSeenAt,
+          }),
+          ...details,
         }),
-        ...details,
-      });
+      );
     }
 
     await this.pricing.recordObservation(
@@ -1658,6 +1686,7 @@ export class CollectionService {
       result: existing ? "updated" : "created",
       dealId,
       ...(reason ? { qualityNote: reason } : {}),
+      ...(cutFields.size ? { cuts: [...cutFields.values()] } : {}),
     };
   }
 }

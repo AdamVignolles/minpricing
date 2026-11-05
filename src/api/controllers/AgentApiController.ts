@@ -311,7 +311,7 @@ export class AgentApiController {
         posts: z.array(
           z.object({
             dealId: z.text(),
-            title: z.text({ maxLength: 300 }),
+            title: z.text({ maxLength: 1000 }),
             postedAt: z.text().optional(),
             dealabsUrl: z.text({ maxLength: 500 }),
             templateVersion: z.text().optional(),

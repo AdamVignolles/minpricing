@@ -8,7 +8,7 @@ import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { merchantEntity } from "../entities/Merchant.ts";
 import { DESCRIPTION_TEMPLATE, renderDescription } from "./dealDescription.ts";
 import { buildDealFacts } from "./dealFacts.ts";
-import { buildDealTitle } from "./dealTitle.ts";
+import { buildDealTitle, DEALABS_TITLE_MAX } from "./dealTitle.ts";
 import type { Deal } from "./DealTypes.ts";
 import { PHRASES } from "./descriptionPhrases.ts";
 import { MIN_VISIBLE_SCORE } from "./ScoringService.ts";
@@ -107,6 +107,8 @@ export class DealabsDraftService {
       : undefined;
     const rendered = this.render(deal, merchant?.name);
     const now = this.dateTime.nowISOString();
+    // An approved title (rename once, epic 28) is kept on every pass.
+    const title = existing?.titleApprovedAt ? existing.title : rendered.title;
 
     if (existing?.editedAt && existing.editedBy?.startsWith("agent:")) {
       const description = withPriceSection(
@@ -114,16 +116,18 @@ export class DealabsDraftService {
         rendered.priceLines,
       );
       await this.drafts.updateById(existing.id, {
-        title: rendered.title,
+        title,
+        titleTrimmed: rendered.titleTrimmed,
         description,
-        body: postBody(deal, description),
+        body: postBody({ title, url: deal.url }, description),
       });
       return "agent-edit";
     }
 
     const fields = {
-      title: rendered.title,
-      body: rendered.body,
+      title,
+      titleTrimmed: rendered.titleTrimmed,
+      body: postBody({ title, url: deal.url }, rendered.description),
       description: rendered.description,
       templateVersion: rendered.templateVersion,
       generatedAt: now,
@@ -148,13 +152,70 @@ export class DealabsDraftService {
     if (!draft) throw new Error(`No draft for deal ${dealId}`);
     const deal = await this.deals.getById(dealId);
     const description = edit.description?.trim() ?? draft.description ?? "";
+    const title = edit.title?.replace(/\s+/g, " ").trim();
+    const now = this.dateTime.nowISOString();
     return this.drafts.updateById(draft.id, {
-      ...(edit.title?.trim() ? { title: edit.title.trim() } : {}),
+      // The owner's own title is the approved one (rename once, epic 28).
+      ...(title
+        ? { title, titleApprovedAt: now, titleApprovedBy: "admin" }
+        : {}),
       description,
-      body: postBody(deal, description),
-      editedAt: this.dateTime.nowISOString(),
+      body: postBody(
+        { title: title || draft.title, url: deal.url },
+        description,
+      ),
+      editedAt: now,
       editedBy: "owner",
     });
+  }
+
+  /**
+   * Rename once (epic 28): the Dealabs title of a deal whose generated
+   * title had to be cut, written by the owner (« Titre Dealabs » dialog,
+   * `by: "admin"`) or the selection agent (`PUT /agent/schedule`, its
+   * name), and approved by that very write. Kept for every later attempt.
+   * Returns why it was refused.
+   */
+  async approveTitle(
+    dealId: string,
+    text: string,
+    by: string,
+  ): Promise<
+    { ok: true; before?: string; after: string } | { ok: false; reason: string }
+  > {
+    const title = text.replace(/\s+/g, " ").trim();
+    const problem = checkDealabsTitle(title);
+    if (problem) return { ok: false, reason: problem };
+    const draft = await this.ensureDraftForDeal(dealId);
+    if (!draft) return { ok: false, reason: "pas de brouillon" };
+    if (draft.status === "posted") return { ok: false, reason: "déjà publié" };
+    if (
+      by !== "admin" &&
+      (draft.titleApprovedBy === "admin" || draft.editedBy === "owner")
+    ) {
+      return { ok: false, reason: "titre déjà validé par le propriétaire" };
+    }
+    const deal = await this.deals.getById(dealId);
+    await this.drafts.updateById(draft.id, {
+      title,
+      body: postBody({ title, url: deal.url }, draft.description ?? ""),
+      titleApprovedAt: this.dateTime.nowISOString(),
+      titleApprovedBy: by.slice(0, 120),
+    });
+    return { ok: true, before: draft.title, after: title };
+  }
+
+  /**
+   * True when the deal's Dealabs title is a machine cut nobody approved
+   * yet: such a deal is not published (« titre à réécrire »). A title
+   * that fits in 140 characters never needs it.
+   */
+  async titleNeedsRewrite(dealId: string): Promise<boolean> {
+    const draft = await this.ensureDraftForDeal(dealId);
+    if (!draft || draft.status === "posted") return false;
+    return draftNeedsTitle(draft, () =>
+      this.deals.getById(dealId).then((deal) => this.render(deal).titleTrimmed),
+    );
   }
 
   /**
@@ -186,7 +247,7 @@ export class DealabsDraftService {
     const description = withPriceSection(text.trim(), rendered.priceLines);
     await this.drafts.updateById(draft.id, {
       description,
-      body: postBody(deal, description),
+      body: postBody({ title: draft.title, url: deal.url }, description),
       editedAt: this.dateTime.nowISOString(),
       editedBy: `agent:${agent}`.slice(0, 120),
     });
@@ -201,6 +262,9 @@ export class DealabsDraftService {
     await this.drafts.updateById(draft.id, {
       editedAt: null,
       editedBy: null,
+      // Back to the generated title too: a cut one asks again.
+      titleApprovedAt: null,
+      titleApprovedBy: null,
     });
     await this.maybeGenerateDraft(await this.deals.getById(dealId));
     return this.drafts.findOne({ where: { dealId: { eq: dealId } } });
@@ -239,6 +303,8 @@ export class DealabsDraftService {
     merchantName?: string,
   ): {
     title: string;
+    /** The title had to be cut to fit Dealabs' 140 characters. */
+    titleTrimmed: boolean;
     body: string;
     description: string;
     templateVersion: string;
@@ -257,10 +323,15 @@ export class DealabsDraftService {
       rendered?.text ||
       deal.description?.trim() ||
       describeFromTitle(deal.title);
+    // Dealabs-style (#130): type first, platform, « (Vendeur tiers) »…
+    const title = buildDealTitle(facts);
     return {
-      // Dealabs-style (#130): type first, platform, « (Vendeur tiers) »…
-      title: buildDealTitle(facts),
-      body: postBody(deal, description),
+      title,
+      // Built without the 140 cap: longer means the cut dropped something.
+      titleTrimmed:
+        buildDealTitle(facts, Number.MAX_SAFE_INTEGER).length >
+        DEALABS_TITLE_MAX,
+      body: postBody({ title, url: deal.url }, description),
       description,
       templateVersion: rendered?.text ? DESCRIPTION_TEMPLATE : "legacy",
       priceLines:
@@ -312,6 +383,74 @@ export function checkAgentDescription(text: string): string | undefined {
   }
   if (/<\/?[a-z][^>]*>/i.test(clean)) return "contient du HTML";
   return undefined;
+}
+
+/** Shortest title an agent or the owner may approve. */
+export const TITLE_MIN = 10;
+
+/**
+ * Why a rewritten Dealabs title is refused, or undefined: 10–140
+ * characters on one line, no DealRadar, no score, no price, no HTML.
+ */
+export function checkDealabsTitle(text: string): string | undefined {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length < TITLE_MIN) {
+    return `titre trop court (${clean.length} caractères, ${TITLE_MIN} au moins)`;
+  }
+  if (clean.length > DEALABS_TITLE_MAX) {
+    return `titre trop long (${clean.length} caractères, ${DEALABS_TITLE_MAX} au plus)`;
+  }
+  if (/deal\s*radar/i.test(clean)) return "mentionne DealRadar";
+  if (/\b(score|\d+\s*\/\s*100|hot ?chance)\b/i.test(clean)) {
+    return "mentionne une note";
+  }
+  if (/\d\s*(€|euros?\b)|€\s*\d/i.test(clean)) {
+    return "contient un prix (le prix a son propre champ sur Dealabs)";
+  }
+  if (/<\/?[a-z][^>]*>/i.test(clean)) return "contient du HTML";
+  return undefined;
+}
+
+/**
+ * Pure rule behind `titleNeedsRewrite`: a cut title (`titleTrimmed`, or
+ * `cutNow()` for a draft written before the flag existed) that neither
+ * the owner nor an agent approved. The owner's edited drafts count as
+ * approved: they saw the title in the editor.
+ */
+export async function draftNeedsTitle(
+  draft: {
+    titleTrimmed?: boolean | null;
+    titleApprovedAt?: string | null;
+    editedBy?: string | null;
+  },
+  cutNow: () => Promise<boolean> | boolean,
+): Promise<boolean> {
+  if (draft.titleApprovedAt) return false;
+  if (draft.editedBy === "owner") return false;
+  if (typeof draft.titleTrimmed === "boolean") return draft.titleTrimmed;
+  return cutNow();
+}
+
+/**
+ * Same rule without a render, for listings (agent report): a draft from
+ * before the flag falls back to whether the deal's own name was cut.
+ */
+export function draftNeedsTitleNow(
+  draft:
+    | {
+        status?: string;
+        titleTrimmed?: boolean | null;
+        titleApprovedAt?: string | null;
+        editedBy?: string | null;
+      }
+    | undefined,
+  deal?: { titleTrimmed?: boolean | null },
+): boolean {
+  if (!draft || draft.status === "posted") return false;
+  if (draft.titleApprovedAt || draft.editedBy === "owner") return false;
+  return typeof draft.titleTrimmed === "boolean"
+    ? draft.titleTrimmed
+    : deal?.titleTrimmed === true;
 }
 
 /** Drops a leading « Repères de prix : » block. */
