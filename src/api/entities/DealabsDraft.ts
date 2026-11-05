@@ -10,7 +10,17 @@ export const dealabsDraftEntity = $entity({
   schema: z.object({
     id: db.primaryKey(),
     dealId: z.text(),
-    title: z.text({ minLength: 1, maxLength: 300 }),
+    title: z.text({ minLength: 1, maxLength: 1000 }),
+    /**
+     * The generated title had to be cut to fit Dealabs' 140 characters
+     * (epic 28). Such a title is never published as is: it is rewritten
+     * once — by the selection agent or the owner — and approved.
+     */
+    titleTrimmed: z.boolean().optional(),
+    /** When the current title was approved for Dealabs (rename once). */
+    titleApprovedAt: z.datetime().optional(),
+    /** `admin`, or the agent's name. */
+    titleApprovedBy: z.text({ maxLength: 120 }).optional(),
     // Multi-line post body — well past z.text()'s 255-char default cap.
     body: z.text({ size: "rich" }),
     /**
@@ -24,7 +34,7 @@ export const dealabsDraftEntity = $entity({
       "draft",
     ),
     /** Dealabs URL the user pasted back after posting manually. */
-    dealabsUrl: z.text({ maxLength: 500 }).optional(),
+    dealabsUrl: z.text({ maxLength: 2000 }).optional(),
     /** Set once {@link dealabsUrl} has been confirmed to be a live post. */
     verifiedAt: z.datetime().optional(),
     /**

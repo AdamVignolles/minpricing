@@ -75,10 +75,10 @@ export class StatsController {
         bestPosts: z.array(
           z.object({
             id: z.text(),
-            title: z.text(),
+            title: z.text({ maxLength: 1000 }),
             temperature: z.number(),
             merchant: z.text().optional(),
-            url: z.text(),
+            url: z.text({ maxLength: 2000 }),
             publishedAt: z.text(),
           }),
         ),

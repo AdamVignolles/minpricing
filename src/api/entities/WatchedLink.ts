@@ -16,10 +16,10 @@ export const watchedLinkEntity = $entity({
   schema: z.object({
     id: db.primaryKey(),
     /** The link as pasted. */
-    url: z.text({ maxLength: 1000 }),
-    canonicalUrl: z.text({ maxLength: 1000 }),
+    url: z.text({ maxLength: 2000 }),
+    canonicalUrl: z.text({ maxLength: 2000 }),
     sourceId: z.text({ maxLength: 40 }),
-    externalId: z.text({ maxLength: 500 }),
+    externalId: z.text({ maxLength: 2000 }),
     /** "admin", or the agent that added it. */
     addedBy: z.text({ maxLength: 80 }),
     status: db.default(

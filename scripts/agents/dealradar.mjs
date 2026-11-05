@@ -379,6 +379,11 @@ async function shortlist() {
       sold: c.soldByMerchant,
       dlBest: c.dealabsBestTemperature,
       dlLow: c.dealabsLowestPrice,
+      // Rename once (epic 28): the Dealabs title was cut to 140 characters;
+      // write `dealabsTitle` in the queue item or the slot skips the deal.
+      ...(c.needsTitle
+        ? { needsTitle: true, dealabsTitle: c.dealabsTitle }
+        : {}),
     }));
   const result = {
     date: today(),
@@ -1897,6 +1902,9 @@ try {
         description: d.description,
         editedBy: d.editedBy ?? null,
         templateVersion: d.templateVersion ?? null,
+        // Rename once (epic 28): a cut title waits for a `dealabsTitle`.
+        titleTrimmed: d.titleTrimmed ?? null,
+        titleApprovedBy: d.titleApprovedBy ?? null,
         status: d.status,
       });
       break;

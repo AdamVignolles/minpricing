@@ -304,10 +304,12 @@ describe("collection schedule (Paris time)", () => {
 });
 
 describe("long merchant titles", () => {
-  test("cut to 300 characters at a word boundary", () => {
+  test("kept whole up to 1 000 characters, then cut at a word boundary (epic 28)", () => {
     const long = `Smartphone POCO X7 Pro ${"écran AMOLED charge rapide ".repeat(20)}fin`;
-    const title = fitTitle(long);
-    expect(title.length).toBeLessThanOrEqual(300);
+    expect(fitTitle(long)).toBe(long.trim());
+    const huge = `Smartphone POCO X7 Pro ${"écran AMOLED charge rapide ".repeat(40)}fin`;
+    const title = fitTitle(huge);
+    expect(title.length).toBeLessThanOrEqual(1000);
     expect(title.endsWith("…")).toBe(true);
     expect(title).not.toMatch(/\s…$/);
     expect(fitTitle("POCO X7 Pro")).toBe("POCO X7 Pro");

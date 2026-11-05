@@ -28,11 +28,11 @@ const stepSchema = z.object({
 
 const linkSchema = z.object({
   id: z.text(),
-  url: z.text({ maxLength: 1000 }),
-  canonicalUrl: z.text({ maxLength: 1000 }),
+  url: z.text({ maxLength: 2000 }),
+  canonicalUrl: z.text({ maxLength: 2000 }),
   sourceId: z.text(),
   shop: z.text(),
-  externalId: z.text({ maxLength: 500 }),
+  externalId: z.text({ maxLength: 2000 }),
   addedBy: z.text(),
   status: z.enum(["pending", "ok", "refused", "failed", "ended", "removed"]),
   verdict: z.text({ size: "rich" }).optional(),

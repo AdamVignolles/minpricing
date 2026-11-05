@@ -10,7 +10,10 @@ import {
   DealNotAvailableError,
   PublishRefusedError,
 } from "../services/AutoPublishService.ts";
-import { DealabsDraftService } from "../services/DealabsDraftService.ts";
+import {
+  checkDealabsTitle,
+  DealabsDraftService,
+} from "../services/DealabsDraftService.ts";
 import { DealabsDuplicateError } from "../services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../services/DealabsSessionService.ts";
 import { DealPageCheckService } from "../services/DealPageCheckService.ts";
@@ -314,8 +317,56 @@ export class DraftsController {
       response: draftResponseSchema.nullable(),
     },
     handler: async ({ params }) => {
-      const draft = await this.draftService.ensureDraftForDeal(params.id);
+      let draft = await this.draftService.ensureDraftForDeal(params.id);
+      // Written before epic 28: rebuilt once, so the page knows whether
+      // the title had to be cut (« Titre Dealabs » before publishing).
+      if (
+        draft &&
+        draft.status !== "posted" &&
+        typeof draft.titleTrimmed !== "boolean" &&
+        draft.editedBy !== "owner"
+      ) {
+        await this.draftService.maybeGenerateDraft(
+          await this.deals.getById(params.id),
+        );
+        draft = await this.drafts.findOne({
+          where: { dealId: { eq: params.id } },
+        });
+      }
       return draft ?? null;
+    },
+  });
+
+  /**
+   * Rename once (epic 28): the owner's Dealabs title for a deal whose
+   * generated title had to be cut — the deal page's « Titre Dealabs »
+   * dialog, before publishing. Validating approves it.
+   */
+  approveTitle = $action({
+    method: "POST",
+    path: "/deals/:id/draft/title",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ id: z.text() }),
+      body: z.object({ title: z.text({ maxLength: 1000 }) }),
+      response: draftResponseSchema,
+    },
+    handler: async ({ params, body }) => {
+      const outcome = await this.draftService.approveTitle(
+        params.id,
+        body.title,
+        "admin",
+      );
+      if (!outcome.ok) {
+        throw new HttpError({ status: 422, message: outcome.reason });
+      }
+      const draft = await this.drafts.findOne({
+        where: { dealId: { eq: params.id } },
+      });
+      if (!draft) {
+        throw new HttpError({ status: 404, message: "Pas de brouillon." });
+      }
+      return draft;
     },
   });
 
@@ -345,6 +396,10 @@ export class DraftsController {
         });
       }
       const { title, description, ...rest } = body;
+      const titleProblem = title?.trim() ? checkDealabsTitle(title) : undefined;
+      if (titleProblem) {
+        throw new HttpError({ status: 422, message: titleProblem });
+      }
       // The owner's own text (#131): kept from now on, never regenerated.
       if (title !== undefined || description !== undefined) {
         await this.draftService.editByOwner(params.id, { title, description });

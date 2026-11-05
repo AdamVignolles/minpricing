@@ -11,7 +11,12 @@ export interface Deal {
   id: string;
   sourceId: string;
   externalId: string;
+  /** The merchant's full name. */
   title: string;
+  /** `title` fitted into 140 characters, for cards and lists (epic 28). */
+  shortTitle?: string;
+  /** True when `shortTitle` had to drop part of `title`. */
+  titleTrimmed?: boolean;
   url: string;
   imageUrl?: string;
   description?: string;
@@ -281,6 +286,11 @@ export interface Draft {
   editedBy?: string;
   /** Description template, `legacy` for the fallback. */
   templateVersion?: string;
+  /** The generated title had to be cut to 140 characters (epic 28). */
+  titleTrimmed?: boolean;
+  /** Rename once: when and by whom (`admin` or the agent) it was approved. */
+  titleApprovedAt?: string;
+  titleApprovedBy?: string;
   generatedAt?: string;
 }
 

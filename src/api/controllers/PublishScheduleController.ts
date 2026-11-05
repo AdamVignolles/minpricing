@@ -66,6 +66,14 @@ export class PublishScheduleController {
             reason: z.text().optional(),
           }),
         ),
+        /** Each agent Dealabs title: approved, or why not (epic 28). */
+        titles: z.array(
+          z.object({
+            dealId: z.text(),
+            accepted: z.boolean(),
+            reason: z.text().optional(),
+          }),
+        ),
       }),
     },
     handler: async ({ body }) => {

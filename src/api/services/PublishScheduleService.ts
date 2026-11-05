@@ -15,9 +15,11 @@ import {
   AutoPublishService,
   DealNotAvailableError,
   PublishRefusedError,
+  TITLE_REWRITE_REASON,
 } from "./AutoPublishService.ts";
 import {
   checkAgentDescription,
+  checkDealabsTitle,
   DealabsDraftService,
 } from "./DealabsDraftService.ts";
 import { DealabsDuplicateError } from "./DealabsPublisherService.ts";
@@ -203,6 +205,7 @@ export class PublishScheduleService {
     // published from their own page (« Mes ajouts »).
     const handPicked = new Set(await this.watchedLinks.handPickedDealIds());
     const wanted: Array<{ dealId: string; text: string }> = [];
+    const wantedTitles: Array<{ dealId: string; text: string }> = [];
     for (const candidate of input.ranked) {
       const deal = await this.deals
         .findById(candidate.dealId)
@@ -213,9 +216,15 @@ export class PublishScheduleService {
       }
       if (ranked.some((c) => c.dealId === deal.id)) continue;
       // The agent's own description travels separately (#131).
-      const { description, ...rest } = candidate;
+      // So does its Dealabs title (rename once, epic 28): `dealabsTitle`,
+      // not `title` — that one is the deal's name copied from the
+      // shortlist, replaced by ours just below.
+      const { description, dealabsTitle: agentTitle, ...rest } = candidate;
       if (typeof description === "string" && description.trim()) {
         wanted.push({ dealId: deal.id, text: description });
+      }
+      if (typeof agentTitle === "string" && agentTitle.trim()) {
+        wantedTitles.push({ dealId: deal.id, text: agentTitle });
       }
       ranked.push({
         ...rest,
@@ -359,13 +368,65 @@ export class PublishScheduleService {
       input.agent,
       input.dryRun ?? false,
     );
+    const titles = await this.applyTitles(
+      wantedTitles,
+      input.agent,
+      input.dryRun ?? false,
+    );
     return {
       date: day,
       entries: created,
       ranked: ranked.length,
       dropped,
       descriptions,
+      titles,
     };
+  }
+
+  /**
+   * Rename once (epic 28): the agent's Dealabs title for a ranked deal,
+   * checked (`checkDealabsTitle`: ≤ 140 characters…) and approved by the
+   * agent on its own (owner's decision, 2026-11-04), audited in
+   * `agent_writes`. Never over the owner's own title. A dry run only
+   * checks. A title that already fitted is accepted all the same.
+   */
+  protected async applyTitles(
+    wanted: Array<{ dealId: string; text: string }>,
+    agent: string,
+    dryRun: boolean,
+  ): Promise<Array<{ dealId: string; accepted: boolean; reason?: string }>> {
+    const results: Array<{
+      dealId: string;
+      accepted: boolean;
+      reason?: string;
+    }> = [];
+    for (const { dealId, text } of wanted) {
+      if (dryRun) {
+        const reason = checkDealabsTitle(text);
+        results.push({ dealId, accepted: !reason, reason });
+        continue;
+      }
+      const outcome = await this.drafts
+        .approveTitle(dealId, text, agent)
+        .catch((error: unknown) => ({
+          ok: false as const,
+          reason: error instanceof Error ? error.message : String(error),
+        }));
+      if (outcome.ok) {
+        await this.files.audit({
+          agent,
+          kind: "title",
+          target: `draft-${dealId}`,
+          summary: "titre Dealabs écrit et validé par l'agent",
+          before: outcome.before,
+          after: outcome.after,
+        });
+        results.push({ dealId, accepted: true });
+      } else {
+        results.push({ dealId, accepted: false, reason: outcome.reason });
+      }
+    }
+    return results;
   }
 
   /**
@@ -586,6 +647,15 @@ export class PublishScheduleService {
         .catch(() => null);
       if (!deal || deal.status !== "active") {
         tried.add(candidate.dealId);
+        continue;
+      }
+      // Rename once (epic 28): a cut title nobody rewrote is skipped,
+      // never posted as the machine cut it — and isn't a try.
+      if (await this.drafts.titleNeedsRewrite(deal.id).catch(() => false)) {
+        tried.add(deal.id);
+        outcomes.push(
+          `${TITLE_REWRITE_REASON.toLowerCase()} : ${deal.title.slice(0, 80)}`,
+        );
         continue;
       }
       attempts++;

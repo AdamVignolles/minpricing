@@ -256,6 +256,31 @@ describe("publishing plan", () => {
     }
   });
 
+  test("a cut title nobody rewrote: the slot skips that deal (epic 28)", async () => {
+    const publish = vi
+      .spyOn(publisher, "publishDeal")
+      .mockResolvedValue({ dealabsUrl: "https://www.dealabs.com/x" } as any);
+    await call("PUT", "/agent/schedule", {
+      ranked: ranked(),
+      times: ["17:40"],
+      agent: "deals-select",
+    });
+    const spy = vi
+      .spyOn(alepha.inject(DealabsDraftService), "titleNeedsRewrite")
+      .mockImplementation(async (id) => id === dealIds[0]);
+    try {
+      setNow("2026-10-28T16:41:00.000Z"); // 17:41
+      const [entry] = await schedule.runDue();
+      expect(publish).not.toHaveBeenCalledWith(dealIds[0], expect.anything());
+      expect(entry.status).toBe("done");
+      expect(entry.dealId).toBe(dealIds[1]);
+      expect(entry.note).toMatch(/titre à réécrire/);
+    } finally {
+      spy.mockRestore();
+      publish.mockRestore();
+    }
+  });
+
   test("explicit times outside the window or on a weekend are refused", async () => {
     expect(
       (

@@ -22,6 +22,7 @@ export const agentWriteEntity = $entity({
         "schedule",
         "link",
         "description",
+        "title",
       ])
       .meta({ mode: "text" }),
     /** The file or plan written (`publish-rules`, `reports/weekly-…`). */
