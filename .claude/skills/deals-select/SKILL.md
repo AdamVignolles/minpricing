@@ -48,5 +48,22 @@ seller, sold` (sold by the merchant), `dlBest` (best Dealabs
    The script draws how many (2–5) and when (17:30–21:30); the first ones
    in the list go first, the others replace failures. It also publishes
    at most 1 video game a day, whatever the order.
+   **Optional: a better description.** The app writes each deal's
+   description from its facts (`node scripts/agents/dealradar.mjs draft
+<dealId>` shows it). When you judge you can do clearly better for a
+   deal you keep, add `"description": "…"` to its queue item; it replaces
+   the generated one (the owner decided so, 2026-11-04). Rules, checked
+   by the app — a refused text is skipped and the generated one stays:
+   - **facts only**, from the shortlist, the draft and the deal's page
+     data: no opinion, no superlative, nothing you did not read;
+   - **no price, no euro amount** (the app puts its own checked
+     « Repères de prix » on top), no score, no heat chance, never
+     « DealRadar »;
+   - 80 to 2 200 characters, plain text: a short line ending with « : »
+     followed by « - » items makes a bold label and a list; no HTML;
+   - keep every warning of the draft (vendeur tiers, batterie non
+     incluse, clavier QWERTY, retrait en magasin…).
+     A draft the owner edited is never replaced. The plan's answer lists
+     each description as accepted or refused, with the reason.
 6. Update the Notion row of step 1: "Dernière exécution" = now,
    "Dernier statut" = "✅ OK". Reply in one line: kept / vetoed counts.

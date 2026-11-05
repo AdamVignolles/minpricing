@@ -6,6 +6,7 @@ import { $repository } from "alepha/orm";
 import { $action, HttpError } from "alepha/server";
 
 import { dealEntity } from "../entities/Deal.ts";
+import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { sourceEntity } from "../entities/Source.ts";
 import { $agentAuth } from "../services/AdminAuth.ts";
 import { isAgentConfigName } from "../services/agentConfig.ts";
@@ -15,6 +16,7 @@ import {
   DealabsCommentsService,
   isDealabsThreadUrl,
 } from "../services/DealabsCommentsService.ts";
+import { MyDealabsPostsService } from "../services/MyDealabsPostsService.ts";
 
 const rich = () => z.text({ size: "rich" });
 /** File contents: up to the 2 MB cap enforced by `AgentFilesService`. */
@@ -41,6 +43,8 @@ export class AgentApiController {
   protected comments = $inject(DealabsCommentsService);
   protected deals = $repository(dealEntity);
   protected sources = $repository(sourceEntity);
+  protected drafts = $repository(dealabsDraftEntity);
+  protected myPosts = $inject(MyDealabsPostsService);
 
   protected caller(agent: string): string {
     const request = this.alepha.store.get("alepha.http.request");
@@ -288,6 +292,70 @@ export class AgentApiController {
         throw new HttpError({ status: 503, message: "pas de navigateur ici" });
       }
       return { comments: await this.comments.read(urls) };
+    },
+  });
+
+  /**
+   * Our posted drafts with who wrote their text and the template, joined
+   * with their current temperature on our Dealabs profile (#132): what
+   * `dealradar.mjs descriptions-review` groups for the evening debrief to
+   * compare old and new descriptions. Read-only.
+   */
+  agentDescriptions = $action({
+    method: "GET",
+    path: "/agent/descriptions",
+    use: [$agentAuth()],
+    schema: {
+      query: z.object({ days: z.number().optional() }),
+      response: z.object({
+        posts: z.array(
+          z.object({
+            dealId: z.text(),
+            title: z.text({ maxLength: 300 }),
+            postedAt: z.text().optional(),
+            dealabsUrl: z.text({ maxLength: 500 }),
+            templateVersion: z.text().optional(),
+            editedBy: z.text().optional(),
+            temperature: z.number().optional(),
+            isHot: z.boolean().optional(),
+            isExpired: z.boolean().optional(),
+          }),
+        ),
+      }),
+    },
+    handler: async ({ query }) => {
+      const days = Math.min(Math.max(query.days ?? 30, 1), 120);
+      const since = Date.now() - days * 86_400_000;
+      const threadId = (url: string) => url.match(/-(\d+)(?:[/?#]|$)/)?.[1];
+      const threads = new Map(
+        (await this.myPosts.postsNow().catch(() => [])).map((t) => [
+          threadId(t.url) ?? t.id,
+          t,
+        ]),
+      );
+      const posts = (
+        await this.drafts.findMany({
+          where: { status: { eq: "posted" } },
+        })
+      )
+        .filter((d) => d.dealabsUrl)
+        .map((d) => {
+          const at = d.verifiedAt ?? d.lastPublishAttemptAt ?? d.updatedAt;
+          const thread = threads.get(threadId(d.dealabsUrl!) ?? "");
+          return {
+            dealId: d.dealId,
+            title: d.title,
+            postedAt: at ? new Date(at).toISOString() : undefined,
+            dealabsUrl: d.dealabsUrl!,
+            templateVersion: d.templateVersion ?? undefined,
+            editedBy: d.editedBy ?? undefined,
+            temperature: thread?.temperature,
+            isHot: thread?.isHot,
+            isExpired: thread?.isExpired,
+          };
+        })
+        .filter((p) => !p.postedAt || Date.parse(p.postedAt) >= since);
+      return { posts };
     },
   });
 }

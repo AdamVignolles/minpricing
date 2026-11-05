@@ -344,8 +344,28 @@ export class DraftsController {
           message: `No draft for deal ${params.id}`,
         });
       }
-      return this.drafts.updateById(existing.id, body);
+      const { title, description, ...rest } = body;
+      // The owner's own text (#131): kept from now on, never regenerated.
+      if (title !== undefined || description !== undefined) {
+        await this.draftService.editByOwner(params.id, { title, description });
+      }
+      return Object.keys(rest).length
+        ? this.drafts.updateById(existing.id, rest)
+        : this.drafts.getById(existing.id);
     },
+  });
+
+  /** « Régénérer »: drops the owner's or the agent's text (#131). */
+  regenerate = $action({
+    method: "POST",
+    path: "/deals/:id/draft/regenerate",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ id: z.text() }),
+      response: draftResponseSchema.nullable(),
+    },
+    handler: async ({ params }) =>
+      (await this.draftService.regenerate(params.id)) ?? null,
   });
 
   /**

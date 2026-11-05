@@ -45,6 +45,21 @@ export const dealabsDraftEntity = $entity({
      * morning: which phase, when, and why.
      */
     lastPublishSteps: z.text({ size: "rich" }).optional(),
+    /**
+     * Set when the text stops being generated (#131): the owner saved
+     * their own title or description, or the selection agent replaced
+     * the description. An edited draft is never regenerated; « Régénérer »
+     * clears these.
+     */
+    editedAt: z.datetime().optional(),
+    /** `owner`, or `agent:<name>` (the owner's edit always wins). */
+    editedBy: z.text({ maxLength: 120 }).optional(),
+    /**
+     * Which description template wrote the text (`DESCRIPTION_TEMPLATE`
+     * in `dealDescription.ts`), or `legacy` for the merchant text / title
+     * fallback — so the debrief can compare posts by template.
+     */
+    templateVersion: z.text({ maxLength: 40 }).optional(),
     generatedAt: z.datetime(),
     createdAt: db.createdAt(),
     updatedAt: db.updatedAt(),

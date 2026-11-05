@@ -408,12 +408,21 @@ export class AutoPublishService {
       // Rebuilt from the deal as checked just above: the « Repères de
       // prix » figures (#129) are dated today and match the price the page
       // shows; references gone stale since the draft drop out.
+      // A text the owner wrote is kept as is; an agent's text keeps its
+      // words and gets today's price lines (#131).
       await this.progress.begin("draft", "Description mise à jour");
-      await this.draftService.maybeGenerateDraft(deal);
+      const outcome = await this.draftService.maybeGenerateDraft(deal);
       draft =
         (await this.drafts.findOne({ where: { dealId: { eq: dealId } } })) ??
         draft;
-      await this.progress.done("draft", "Prêt");
+      await this.progress.done(
+        "draft",
+        outcome === "owner-edit"
+          ? "Votre description, gardée telle quelle"
+          : outcome === "agent-edit"
+            ? `Description de l'agent (${draft.editedBy?.replace(/^agent:/, "")}), repères de prix du jour`
+            : "Prêt",
+      );
 
       attempt = {
         publishAttempts: (draft.publishAttempts ?? 0) + 1,

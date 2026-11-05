@@ -32,6 +32,7 @@ import { StopPublishButton } from "../components/agents/PublishControls.tsx";
 import DealabsConnection from "../components/deals/DealabsConnection.tsx";
 import DealAnalysis from "../components/deals/DealAnalysis.tsx";
 import DealImage from "../components/deals/DealImage.tsx";
+import DescriptionEditor from "../components/deals/DescriptionEditor.tsx";
 import KeepaChart from "../components/deals/KeepaChart.tsx";
 import PriceHistoryPanel from "../components/deals/PriceHistoryPanel.tsx";
 import PublishSteps, {
@@ -323,6 +324,26 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const [regenerating, setRegenerating] = useState(false);
+  const regenerate = async () => {
+    if (!current) return;
+    setRegenerating(true);
+    try {
+      const updated = await drafts.regenerate({ params: { id: deal.id } });
+      if (updated) setCurrent(updated as Draft);
+      notifications.show({ message: "Brouillon régénéré" });
+    } catch {
+      notifications.show({
+        title: "Échec de la régénération",
+        message: "Le brouillon n'a pas pu être régénéré.",
+        color: "red",
+        icon: <Icon name="alert" size={16} />,
+      });
+    } finally {
+      setRegenerating(false);
     }
   };
 
@@ -878,8 +899,8 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                   Brouillon Dealabs
                 </Title>
                 <Text fz="sm" c="dimmed">
-                  Généré automatiquement. Rien n'est publié : la publication
-                  reste entièrement manuelle.
+                  Généré à partir des faits du deal. Un titre ou une description
+                  que vous enregistrez est gardé tel quel jusqu'à « Régénérer ».
                 </Text>
               </Stack>
               <Select
@@ -988,14 +1009,10 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                     setCurrent({ ...current, title: event.currentTarget.value })
                   }
                 />
-                <Textarea
-                  label="Corps du message"
-                  autosize
-                  minRows={6}
-                  maxRows={18}
-                  value={current.body}
-                  onChange={(event) =>
-                    setCurrent({ ...current, body: event.currentTarget.value })
+                <DescriptionEditor
+                  draft={current}
+                  onChange={(description) =>
+                    setCurrent({ ...current, description })
                   }
                 />
                 <DealabsConnection />
@@ -1004,11 +1021,28 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                   <Button
                     loading={saving}
                     onClick={() =>
-                      void save({ title: current.title, body: current.body })
+                      void save({
+                        title: current.title,
+                        description: current.description ?? "",
+                      })
                     }
                   >
                     Enregistrer
                   </Button>
+                  <Tooltip
+                    label="Revient au titre et à la description générés à partir des faits du deal. Votre texte (ou celui de l'agent) est perdu."
+                    multiline
+                    w={260}
+                  >
+                    <Button
+                      variant="default"
+                      loading={regenerating}
+                      disabled={current.status === "posted"}
+                      onClick={() => void regenerate()}
+                    >
+                      Régénérer
+                    </Button>
+                  </Tooltip>
                   <Button variant="default" onClick={() => void copy()}>
                     Copier
                   </Button>

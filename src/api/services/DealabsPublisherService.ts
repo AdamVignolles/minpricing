@@ -11,6 +11,8 @@ import { appDir } from "./appDir.ts";
 import { dealabsTitle } from "./DealabsDraftService.ts";
 import { isSameProduct } from "./dealabsSearch.ts";
 import type { Deal } from "./DealTypes.ts";
+import { descriptionHtml, descriptionVisibleText } from "./descriptionHtml.ts";
+import { pasteHtml } from "./editorPaste.ts";
 import { keepaChartForDeal } from "./keepa.ts";
 import {
   PublishCancelledError,
@@ -608,6 +610,7 @@ export class DealabsPublisherService {
     // with `contenteditable="true"` and `role="textbox"`. Playwright's
     // `.fill()` supports contenteditable elements directly.
     await this.progress.begin("form-description");
+    const text = draft.description?.trim() || draft.body;
     await this.fillFirstMatch(
       page,
       [
@@ -616,7 +619,7 @@ export class DealabsPublisherService {
         'textarea[name="description"]',
         "textarea",
       ],
-      draft.description?.trim() || draft.body,
+      text,
       {
         clearFirst: true,
         byLabel: /description/i,
@@ -624,6 +627,10 @@ export class DealabsPublisherService {
         fieldName: "Description",
       },
     );
+    // Then the same text with its bold labels and lists (#131), pasted
+    // over the plain one. If the editor doesn't take it, the plain text
+    // is typed again: a publish never fails over formatting.
+    const formatted = await this.formatDescription(page, text);
     // Price-history chart at the top of the text: Keepa for Amazon,
     // the eShop history (QuickChart) for Nintendo — see `publish()`.
     if (chart) {
@@ -632,7 +639,12 @@ export class DealabsPublisherService {
     await this.clickNavNext(page);
     await this.progress.done(
       "form-description",
-      chart ? "Description et graphique de prix" : "Description",
+      [
+        formatted ? "Description mise en forme" : "Description (texte simple)",
+        chart ? "graphique de prix" : "",
+      ]
+        .filter(Boolean)
+        .join(", "),
     );
 
     // Step: Derniers détails — native `type="date"` inputs named
@@ -701,6 +713,31 @@ export class DealabsPublisherService {
    * the click's own timeout error propagate turns that into a clear
    * failure instead of a silent no-op.
    */
+  /**
+   * Pastes the HTML version of the description over the plain text
+   * already typed (`pasteHtml`), or types the plain text again when the
+   * editor didn't take it. `true` when the formatting is in.
+   */
+  protected async formatDescription(
+    page: import("playwright").Page,
+    text: string,
+  ): Promise<boolean> {
+    const selector = '[role="textbox"][contenteditable="true"]';
+    const html = descriptionHtml(text);
+    if (!/<(strong|li)>/.test(html)) return false;
+    if (await pasteHtml(page, selector, html, descriptionVisibleText(text))) {
+      return true;
+    }
+    this.log.warn("Description formatting not taken, plain text kept");
+    const editor = page.locator(selector).first();
+    if (!(await this.fillAndVerify(editor, text, true))) {
+      throw new Error(
+        "La description mise en forme n'a pas pris et le texte simple n'a pas pu être remis.",
+      );
+    }
+    return false;
+  }
+
   /**
    * Puts an image (by URL) at the top of the description editor, centred:
    * the editor's « Image » button opens « Insérer une image » with an

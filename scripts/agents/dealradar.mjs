@@ -9,6 +9,8 @@
  *   report [hours] [days]       save today's report (candidates + our posts)
  *   shortlist                   eligible deals ranked by the rules (for deals-select)
  *   publish-queue <queue.json>  random plan (count + times), then publish
+ *   draft <dealId>              the deal's Dealabs draft (title, description, who wrote it)
+ *   descriptions-review [days]  our posts' temperatures by description template / author
  *   notion-log <plan|final>     the Notion rows/journal to write (for deals-log)
  *   stats [days]                aggregates for the weekly review (deals-weekly)
  *   posted                      one line per published deal with its result
@@ -444,6 +446,63 @@ async function publish(dealId) {
     error: res.ok
       ? undefined
       : String(res.body?.message ?? res.body).slice(0, 300),
+  };
+}
+
+/**
+ * Our posts of the last `days` grouped by who wrote the description and
+ * with which template (#132): old texts (no template), the facts
+ * template, the owner's or the agent's own text. Count, median and mean
+ * temperature, share at 100°+. For the evening debrief, over two weeks.
+ */
+async function descriptionsReview(days = 14) {
+  const res = await api("GET", `/agent/descriptions?days=${days}`);
+  if (!res.ok) throw new Error(`descriptions: ${res.status}`);
+  const groups = new Map();
+  for (const post of res.body.posts ?? []) {
+    const key =
+      post.editedBy === "owner"
+        ? "texte du propriétaire"
+        : post.editedBy?.startsWith("agent:")
+          ? "texte de l'agent"
+          : (post.templateVersion ?? "ancien texte (avant modèles)");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(post);
+  }
+  const median = (values) => {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2
+      ? sorted[mid]
+      : (sorted[mid - 1] + sorted[mid]) / 2;
+  };
+  return {
+    days,
+    groups: [...groups.entries()].map(([group, posts]) => {
+      const temps = posts
+        .map((p) => p.temperature)
+        .filter((t) => typeof t === "number");
+      return {
+        group,
+        posts: posts.length,
+        withTemperature: temps.length,
+        medianTemperature: median(temps),
+        meanTemperature: temps.length
+          ? Math.round(temps.reduce((a, b) => a + b, 0) / temps.length)
+          : null,
+        hot100: temps.length
+          ? Math.round(
+              (temps.filter((t) => t >= 100).length / temps.length) * 100,
+            )
+          : null,
+        examples: posts.slice(0, 5).map((p) => ({
+          title: p.title,
+          temperature: p.temperature ?? null,
+          url: p.dealabsUrl,
+        })),
+      };
+    }),
   };
 }
 
@@ -1819,6 +1878,29 @@ try {
     case "shortlist":
       print(await shortlist());
       break;
+    case "descriptions-review":
+      print(await descriptionsReview(Number(args[0] ?? 14)));
+      break;
+    case "draft": {
+      // The Dealabs draft as it stands (#131): read it before writing a
+      // better `description` for the queue.
+      if (!args[0]) throw new Error("usage: draft <dealId>");
+      const res = await api(
+        "GET",
+        `/deals/${encodeURIComponent(args[0])}/draft`,
+      );
+      if (!res.ok) throw new Error(`draft ${args[0]}: ${res.status}`);
+      const d = res.body ?? {};
+      print({
+        dealId: args[0],
+        title: d.title,
+        description: d.description,
+        editedBy: d.editedBy ?? null,
+        templateVersion: d.templateVersion ?? null,
+        status: d.status,
+      });
+      break;
+    }
     case "publish-queue":
       if (!args[0]) throw new Error("usage: publish-queue <queue.json>");
       print(await publishQueue(args[0], args.includes("--now")));
@@ -1913,7 +1995,7 @@ try {
     }
     default:
       throw new Error(
-        "commands: add-link <url> | ensure-server | report | shortlist | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days] | sources-review [days] | probe <url> | pull [--force] | push-config <name> | push-proposal <file>",
+        "commands: add-link <url> | ensure-server | report | shortlist | draft <dealId> | descriptions-review [days] | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days] | sources-review [days] | probe <url> | pull [--force] | push-config <name> | push-proposal <file>",
       );
   }
   if (

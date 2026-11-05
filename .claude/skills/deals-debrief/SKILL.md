@@ -20,6 +20,15 @@ justified steps. Everything you write is French. `<today>` = `YYYY-MM-DD`.
   `limits`.
 - Read `config/publish-rules.json`, `config/selection-lessons.md`, and
   the top entry of `docs/desirability-changelog.md`.
+- `node scripts/agents/dealradar.mjs descriptions-review 14` → our posts
+  grouped by who wrote the description: `ancien texte (avant modèles)`,
+  the facts template (`facts-2026.11`…), `texte de l'agent`, `texte du
+propriétaire` — count, median/mean temperature, share at 100°+.
+  **Until 2026-11-20**, compare the new descriptions with the old ones
+  in « Ce que j'en pense » (one line, with the counts; say so when a
+  group has fewer than 5 posts: too few to conclude). Comments about the
+  text itself (« description complète », « pas d'infos », wrong spec)
+  count more than temperatures here.
 
 ## 2. Understand
 

@@ -16,7 +16,10 @@ import {
   DealNotAvailableError,
   PublishRefusedError,
 } from "./AutoPublishService.ts";
-import { DealabsDraftService } from "./DealabsDraftService.ts";
+import {
+  checkAgentDescription,
+  DealabsDraftService,
+} from "./DealabsDraftService.ts";
 import { DealabsDuplicateError } from "./DealabsPublisherService.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
 import { DealPageCheckService } from "./DealPageCheckService.ts";
@@ -199,6 +202,7 @@ export class PublishScheduleService {
     // Deals added by hand are not part of the evening selection: they are
     // published from their own page (« Mes ajouts »).
     const handPicked = new Set(await this.watchedLinks.handPickedDealIds());
+    const wanted: Array<{ dealId: string; text: string }> = [];
     for (const candidate of input.ranked) {
       const deal = await this.deals
         .findById(candidate.dealId)
@@ -208,8 +212,13 @@ export class PublishScheduleService {
         continue;
       }
       if (ranked.some((c) => c.dealId === deal.id)) continue;
+      // The agent's own description travels separately (#131).
+      const { description, ...rest } = candidate;
+      if (typeof description === "string" && description.trim()) {
+        wanted.push({ dealId: deal.id, text: description });
+      }
       ranked.push({
-        ...candidate,
+        ...rest,
         dealId: deal.id,
         title: deal.title,
         sourceId: deal.sourceId,
@@ -345,7 +354,63 @@ export class PublishScheduleService {
         .filter(Boolean)
         .join("\n"),
     });
-    return { date: day, entries: created, ranked: ranked.length, dropped };
+    const descriptions = await this.applyDescriptions(
+      wanted,
+      input.agent,
+      input.dryRun ?? false,
+    );
+    return {
+      date: day,
+      entries: created,
+      ranked: ranked.length,
+      dropped,
+      descriptions,
+    };
+  }
+
+  /**
+   * The selection agent may replace a deal's generated description with
+   * its own (owner's decision, 2026-11-04): checked by
+   * `checkAgentDescription`, refused when the owner edited the draft,
+   * audited in `agent_writes`. A dry run only checks.
+   */
+  protected async applyDescriptions(
+    wanted: Array<{ dealId: string; text: string }>,
+    agent: string,
+    dryRun: boolean,
+  ): Promise<Array<{ dealId: string; accepted: boolean; reason?: string }>> {
+    const results: Array<{
+      dealId: string;
+      accepted: boolean;
+      reason?: string;
+    }> = [];
+    for (const { dealId, text } of wanted) {
+      if (dryRun) {
+        const reason = checkAgentDescription(text);
+        results.push({ dealId, accepted: !reason, reason });
+        continue;
+      }
+      const outcome = await this.drafts
+        .editByAgent(dealId, text, agent)
+        .catch((error: unknown) => ({
+          ok: false as const,
+          reason: error instanceof Error ? error.message : String(error),
+        }));
+      if (outcome.ok) {
+        await this.files.audit({
+          agent,
+          kind: "description",
+          target: `draft-${dealId}`,
+          summary: "description du brouillon remplacée par l'agent",
+          before: outcome.before,
+          after: outcome.after,
+        });
+        results.push({ dealId, accepted: true });
+      } else {
+        results.push({ dealId, accepted: false, reason: outcome.reason });
+      }
+    }
+    return results;
   }
 
   async cancel(id: string, by: string) {

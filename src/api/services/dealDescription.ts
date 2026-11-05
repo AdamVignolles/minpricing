@@ -1,4 +1,5 @@
 import type { DealFacts, WarningKind } from "./dealFacts.ts";
+import { descriptionHtml } from "./descriptionHtml.ts";
 import { COUNTRIES, PHRASES } from "./descriptionPhrases.ts";
 import { priceContextLines } from "./priceContext.ts";
 
@@ -15,6 +16,13 @@ import { priceContextLines } from "./priceContext.ts";
  * Two outputs: plain text (what the publisher types in Dealabs' editor
  * today) and HTML (bold labels, lists), for the rich editor of #131.
  */
+
+/**
+ * Stored on each generated draft (`templateVersion`) so the debrief can
+ * compare posts by template. Bump it when the wording or the sections
+ * change in a way worth measuring.
+ */
+export const DESCRIPTION_TEMPLATE = "facts-2026.11";
 
 export type DealType = "product" | "game" | "free-game" | "plan";
 
@@ -375,21 +383,6 @@ function toText(sections: DescriptionSection[]): string {
     .join("\n\n");
 }
 
-const escape = (text: string) =>
-  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-function toHtml(sections: DescriptionSection[]): string {
-  return sections
-    .map((section) =>
-      section.title
-        ? `<p><strong>${escape(section.title)}</strong></p><ul>${section.lines
-            .map((line) => `<li>${escape(line)}</li>`)
-            .join("")}</ul>`
-        : `<p>${escape(section.lines.join(" "))}</p>`,
-    )
-    .join("");
-}
-
 function priceSection(
   facts: DealFacts,
   now: string | undefined,
@@ -459,6 +452,7 @@ export function renderDescription(
     type: built.type,
     sections: built.sections,
     text: toText(built.sections),
-    html: toHtml(built.sections),
+    // One converter for the editor and the preview (#131).
+    html: descriptionHtml(toText(built.sections)),
   };
 }

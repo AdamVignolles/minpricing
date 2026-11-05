@@ -110,6 +110,37 @@ controllers → React console → Dealabs draft / auto-publish.
   only in « Repères de prix » (`priceContextLines`, given `now`).
   `DealabsDraftService` uses it, falling back to the merchant text, then
   the title's specs. `test/deal-description.spec.ts`.
+  **Formatting, edits, agent text** (#131): one converter,
+  `descriptionHtml(text)` (`services/descriptionHtml.ts`: « Label : »
+  before « - » items → bold label + list, escaped, only p/strong/ul/li/br),
+  feeds both the deal page's preview (`DescriptionEditor.tsx`, « Aperçu
+  tel que sur Dealabs ») and the publisher, which types the plain text,
+  then pastes the HTML over it (`pasteHtml` in `services/editorPaste.ts`:
+  select-all + a `paste` event with `text/html`, checked against the
+  visible text and the bold/list count — verified on a real Tiptap
+  StarterKit editor) and types the plain text again if it didn't take
+  (step detail « Description mise en forme » / « texte simple »). A draft
+  records who wrote it (`editedAt`, `editedBy`: `owner` |
+  `agent:<name>`, migration `20261105140000_add_draft_edits`): the owner's
+  title/description (`PATCH /deals/:id/draft`) is never regenerated, an
+  agent's description keeps its words and gets today's « Repères de
+  prix » on top at every pass, « Régénérer » (`POST
+/deals/:id/draft/regenerate`) goes back to the generated text. The
+  selection agent may send `description` per ranked deal in `PUT
+/agent/schedule` (owner's decision 2026-11-04): `checkAgentDescription`
+  refuses < 80 or > 2 200 characters, DealRadar, a score or heat chance,
+  any euro amount (prices only come from our checked lines) and HTML; an
+  owner-edited or posted draft is never replaced; accepted texts are
+  audited (`agent_writes`, kind `description`); the answer lists each one
+  accepted or refused; a dry run only checks. `dealradar.mjs draft <id>`
+  shows a draft. **Roll-out** (#132): drafts carry `templateVersion`
+  (`DESCRIPTION_TEMPLATE`, `legacy` for the fallback); at startup, in the
+  background, unedited drafts of active visible deals written by another
+  template are regenerated (`rollOutTemplate`) — bump the constant to roll
+  out a new wording. `GET /agent/descriptions` (our posted drafts by
+  template/author, joined with their temperature on our profile) feeds
+  `dealradar.mjs descriptions-review [days]`, which the evening debrief
+  reads until 2026-11-20. `test/draft-edits.spec.ts`.
   **Titles** (`services/dealTitle.ts`, #130, rules from the moderators'
   rewrites in folio F17 §3): `buildDealTitle(facts)` writes the draft
   title Dealabs-style — the product type first (moved from the merchant
