@@ -97,6 +97,18 @@ controllers → React console → Dealabs draft / auto-publish.
   a fact the row doesn't hold is absent, never guessed. Computed at
   render time (pure). The description renderer may only write what is in
   here. `test/deal-facts.spec.ts`.
+  **Description renderer** (`services/dealDescription.ts`, wording in
+  `services/descriptionPhrases.ts`): `renderDescription(facts)` picks a
+  template by deal type (`dealType`: product / game / free-game / plan)
+  and writes plain-text sections (« Pour obtenir le prix : », « En bref :
+  », « Le jeu : », « L'offre : », « Caractéristiques : », « Vendeur et
+  livraison : », « À savoir : ») plus the same in HTML. Phrase variants
+  are picked by a hash of the URL (same deal, same text); no intro for a
+  plain product (the seller line names the shop); Amazon's shouted bullet
+  headings in sentence case; capped at 2 200 characters (fewer bullets
+  and specs past it). Never a price, a score, a heat chance or DealRadar.
+  `DealabsDraftService` uses it, falling back to the merchant text, then
+  the title's specs. `test/deal-description.spec.ts`.
   **Product facts read by collectors** (`DealDetails.facts` →
   `Deal.extraFacts` JSON, `StoredFacts` in `DealSource.ts`, migration
   `20261105090000_add_deal_extra_facts`; written only when a run read them,

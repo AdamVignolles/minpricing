@@ -23,7 +23,7 @@ const flat = (text: string | undefined | null) =>
  * rankings, review summaries, packaging counts, logistics.
  */
 const NOISE =
-  /^(asin|ean|upc|ucp|gtin|isbn|numéro (du |de )?(modèle|référence)|référence (fabricant|du fabricant)|date de mise en ligne|date de première disponibilité|classement des meilleures ventes|moyenne des commentaires|commentaires (client|des clients)|nombre d[’']articles|nombre d[’']emballages|unité de comptage|pays d[’']origine|fabri?quant|fabricant|marque|nom (du |de )?modèle|garantie( fabricant| constructeur)?|poids du colis|dimensions du colis|code produit|code article( international)?|sku|évaluation|avis)\b/i;
+  /^(asin|ean|upc|ucp|gtin|isbn|numéro (du |de )?(modèle|référence)|référence (fabricant|du fabricant)|date de mise en ligne|date de première disponibilité|classement des meilleures ventes|moyenne des commentaires|commentaires (client|des clients)|nombre d[’']articles|nombre d[’']emballages|unité de comptage|pays d[’']origine|fabri?quant|fabricant|marque|nom (du |de )?modèle|garantie( fabricant| constructeur)?|poids du colis|dimensions du colis|code produit|code article( international)?|code ean|ean ?\/ ?gtin|fabriqué en france|sku|évaluation|avis)\b/i;
 
 /** Splits a spec table into specs and the facts we store on their own. */
 export function tidySpecs(
@@ -41,7 +41,8 @@ export function tidySpecs(
   // Amazon's key-attributes block and its technical table say the same
   // thing under different labels (« Technologie de mémoire RAM : DDR5 » /
   // « Technologie de mémoire vive : DDR5 »): a value already listed is
-  // not repeated (short values like « 36 » or « 2 » may legitimately recur).
+  // not repeated (« 36 » under two latency labels); one-character values
+  // (« 2 », « 1 ») may legitimately recur.
   const values = new Set<string>();
   let brand: string | undefined;
   let model: string | undefined;
@@ -68,7 +69,7 @@ export function tidySpecs(
     // late in a table.
     if (specs.length >= max) continue;
     if (NOISE.test(label) || seen.has(key)) continue;
-    if (valueKey.length >= 3 && values.has(valueKey)) continue;
+    if (valueKey.length >= 2 && values.has(valueKey)) continue;
     seen.add(key);
     values.add(valueKey);
     // « appareils compatibles » → « Appareils compatibles ».

@@ -73,6 +73,9 @@ export type WarningKind =
   | "store-pickup-only";
 
 export interface DealFacts {
+  /** Raw ids, for choosing a template (not facts to print). */
+  sourceId: string;
+  categoryId?: string;
   product: {
     title: Fact<string>;
     url: Fact<string>;
@@ -310,6 +313,8 @@ export function buildDealFacts(
   const split = text ? splitMerchantText(text) : undefined;
 
   const facts: DealFacts = {
+    sourceId: deal.sourceId,
+    categoryId: deal.categoryId ?? undefined,
     product: {
       title: {
         value: deal.title,
@@ -406,11 +411,11 @@ export function buildDealFacts(
     if (stored.specs?.length) {
       // The page's spec table first; the merchant text's own « Libellé :
       // valeur » lines only add what it doesn't say.
-      const labels = new Set(
-        stored.specs.map((spec) => spec.label.toLowerCase()),
-      );
+      // « Genre » (store API) and « Genres » (Steam's text) are one line.
+      const labelKey = (label: string) => label.toLowerCase().replace(/s$/, "");
+      const labels = new Set(stored.specs.map((spec) => labelKey(spec.label)));
       const fromText = (facts.specs?.value ?? []).filter(
-        (spec) => !labels.has(spec.label.toLowerCase()),
+        (spec) => !labels.has(labelKey(spec.label)),
       );
       facts.specs = fromText.length
         ? {
