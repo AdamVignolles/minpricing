@@ -22,7 +22,7 @@ justified steps. Everything you write is French. `<today>` = `YYYY-MM-DD`.
   the top entry of `docs/desirability-changelog.md`.
 - `node scripts/agents/dealradar.mjs descriptions-review 14` → our posts
   grouped by who wrote the description: `ancien texte (avant modèles)`,
-  the facts template (`facts-2026.11`…), `texte de l'agent`, `texte du
+  the facts templates (`facts-2026.11`, `facts-2026.11b`…), `texte de l'agent`, `texte du
 propriétaire` — count, median/mean temperature, share at 100°+.
   **Until 2026-11-20**, compare the new descriptions with the old ones
   in « Ce que j'en pense » (one line, with the counts; say so when a

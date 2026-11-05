@@ -34,6 +34,29 @@ const MEASURED_REGULAR = new Set(["amazon-watch", "relances"]);
 
 const HOUR = 3_600_000;
 
+/**
+ * Shop names for comparisons stored by id (telecom plans compare with
+ * other operators' stored plans: « free », « bouygues »).
+ */
+const SHOP_NAMES: Record<string, string> = {
+  free: "Free",
+  bouygues: "Bouygues Telecom",
+  sfr: "RED by SFR",
+  orange: "Orange",
+  sosh: "Sosh",
+  amazon: "Amazon",
+  cdiscount: "Cdiscount",
+  aliexpress: "AliExpress",
+};
+
+export function shopName(merchant: string): string {
+  const known = SHOP_NAMES[merchant.trim().toLowerCase()];
+  if (known) return known;
+  return /^[a-z]/.test(merchant)
+    ? merchant[0].toUpperCase() + merchant.slice(1)
+    : merchant;
+}
+
 function ageHours(iso: string | undefined, now: number): number | undefined {
   if (!iso) return undefined;
   const at = Date.parse(iso);
@@ -137,7 +160,10 @@ export function priceContextLines(facts: DealFacts, nowIso: string): string[] {
         day: day(shops.from.asOf!),
         shops: shops.value
           .slice(0, 3)
-          .map((shop) => `${shop.merchant} ${euros(shop.price, perMonth)}`)
+          .map(
+            (shop) =>
+              `${shopName(shop.merchant)} ${euros(shop.price, perMonth)}`,
+          )
           .join(", "),
       }),
     );

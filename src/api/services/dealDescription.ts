@@ -22,7 +22,7 @@ import { priceContextLines } from "./priceContext.ts";
  * compare posts by template. Bump it when the wording or the sections
  * change in a way worth measuring.
  */
-export const DESCRIPTION_TEMPLATE = "facts-2026.11";
+export const DESCRIPTION_TEMPLATE = "facts-2026.11b";
 
 export type DealType = "product" | "game" | "free-game" | "plan";
 
