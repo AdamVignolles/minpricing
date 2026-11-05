@@ -1,0 +1,1 @@
+ALTER TABLE `deals` ADD `extra_facts` text;

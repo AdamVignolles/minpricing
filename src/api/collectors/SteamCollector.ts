@@ -4,7 +4,9 @@ import type {
   DiscoverContext,
   ProductRef,
   RawDeal,
+  StoredFacts,
 } from "./DealSource.ts";
+import { compactFacts } from "./productFacts.ts";
 
 /**
  * Steam's store API rejects requests whose headers look non-browser-like
@@ -174,7 +176,12 @@ const STEAM_DETAILS: DealDetails = {
 
 interface SteamReviewSummaryResponse {
   success?: number;
-  query_summary?: { total_positive?: number; total_reviews?: number };
+  query_summary?: {
+    total_positive?: number;
+    total_reviews?: number;
+    /** Steam's own label: « Très positives », « Plutôt positives »… */
+    review_score_desc?: string;
+  };
 }
 
 /**
@@ -182,9 +189,11 @@ interface SteamReviewSummaryResponse {
  * endpoint the store page itself uses). The positive ratio is mapped onto
  * a 0-5 scale so it can be scored like any merchant's star rating.
  */
-async function fetchReviewSummary(
-  appId: string,
-): Promise<Pick<DealDetails, "productRating" | "productReviewCount">> {
+async function fetchReviewSummary(appId: string): Promise<
+  Pick<DealDetails, "productRating" | "productReviewCount"> & {
+    label?: string;
+  }
+> {
   try {
     const response = await fetch(
       `https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`,
@@ -202,6 +211,7 @@ async function fetchReviewSummary(
     return {
       productRating: Math.round((positive / total) * 50) / 10,
       productReviewCount: total,
+      label: json.query_summary?.review_score_desc || undefined,
     };
   } catch {
     return {};
@@ -229,13 +239,82 @@ async function mapLimit<T, R>(
   return results;
 }
 
-interface SteamStoreFacts {
+export interface SteamStoreFacts {
   summary?: string;
   genres: string[];
   developers: string[];
   publishers: string[];
   releaseDate?: string;
   metacritic?: number;
+  platforms?: { windows?: boolean; mac?: boolean; linux?: boolean };
+  /** HTML list; « Français<strong>*</strong> » = French voices too. */
+  supportedLanguages?: string;
+  categories?: string[];
+}
+
+/** Store features a buyer cares about (Steam's « catégories »). */
+const STEAM_FEATURES =
+  /^(solo|multijoueur|coop|coopération|jcj|succès steam|steam cloud|compat\. contrôleurs|compatible avec les manettes|remote play|steam deck|vérifié|partage familial)/i;
+
+/**
+ * The game's facts for the Dealabs description (epic 27), from the store
+ * API answer already fetched for the description: systems, store
+ * features, French texts/voices, genre, developer, publisher, release,
+ * Metacritic, and Steam's own review label. Pure.
+ */
+export function steamStoreFactsToStored(
+  facts: SteamStoreFacts,
+  reviews: {
+    productRating?: number;
+    productReviewCount?: number;
+    label?: string;
+  },
+): StoredFacts | undefined {
+  const platforms = [
+    facts.platforms?.windows ? "Windows" : "",
+    facts.platforms?.mac ? "macOS" : "",
+    facts.platforms?.linux ? "Linux / Steam Deck" : "",
+  ].filter(Boolean);
+  const langs = facts.supportedLanguages ?? "";
+  const languages = /français/i.test(langs)
+    ? [
+        "Textes en français",
+        ...(/français\s*<strong>\*<\/strong>/i.test(langs)
+          ? ["Voix en français"]
+          : []),
+      ]
+    : [];
+  const features = (facts.categories ?? []).filter((c) =>
+    STEAM_FEATURES.test(c),
+  );
+  const ratio =
+    reviews.productRating !== undefined
+      ? Math.round(reviews.productRating * 20)
+      : undefined;
+  const specs = [
+    facts.genres.length
+      ? { label: "Genre", value: facts.genres.slice(0, 3).join(", ") }
+      : undefined,
+    facts.developers.length
+      ? { label: "Développeur", value: facts.developers.join(", ") }
+      : undefined,
+    facts.publishers.length
+      ? { label: "Éditeur", value: facts.publishers[0] }
+      : undefined,
+    facts.releaseDate
+      ? { label: "Sortie", value: facts.releaseDate }
+      : undefined,
+    reviews.label && reviews.productReviewCount
+      ? {
+          label: "Avis Steam",
+          value: `${reviews.label}${ratio !== undefined ? ` (${ratio} % sur ${reviews.productReviewCount.toLocaleString("fr-FR").replace(/[\u202f\u00a0]/g, " ")} avis)` : ""}`,
+        }
+      : undefined,
+    facts.metacritic
+      ? { label: "Metacritic", value: `${facts.metacritic}/100` }
+      : undefined,
+  ].filter((spec): spec is { label: string; value: string } => !!spec);
+  return compactFacts({ specs, platforms, features, languages });
 }
 
 /**
@@ -264,6 +343,9 @@ async function fetchStoreFacts(
           publishers?: string[];
           release_date?: { date?: string; coming_soon?: boolean };
           metacritic?: { score?: number };
+          platforms?: { windows?: boolean; mac?: boolean; linux?: boolean };
+          supported_languages?: string;
+          categories?: Array<{ description: string }>;
         };
       }
     >;
@@ -282,6 +364,9 @@ async function fetchStoreFacts(
         .map((name) => name.replace(/\s*\([^)]*\)\s*$/, "")),
       releaseDate: data.release_date?.date || undefined,
       metacritic: data.metacritic?.score,
+      platforms: data.platforms,
+      supportedLanguages: data.supported_languages,
+      categories: (data.categories ?? []).map((c) => c.description),
     };
   } catch {
     return undefined;
@@ -378,15 +463,23 @@ async function withSteamDetails(
     if (!facts.has(deal.externalId)) {
       return deal;
     }
-    const gameReviews = reviews.get(deal.externalId) ?? {};
+    const { label, ...gameReviews } = reviews.get(deal.externalId) ?? {};
     const gameFacts = facts.get(deal.externalId);
+    const stored = gameFacts
+      ? steamStoreFactsToStored(gameFacts, { ...gameReviews, label })
+      : undefined;
     return {
       ...deal,
       description:
         (gameFacts && buildSteamDescription(gameFacts, gameReviews)) ??
         deal.description,
       // Keeps the search row's review counts if the summary request failed.
-      details: { ...STEAM_DETAILS, ...deal.details, ...gameReviews },
+      details: {
+        ...STEAM_DETAILS,
+        ...deal.details,
+        ...gameReviews,
+        ...(stored ? { facts: stored } : {}),
+      },
     };
   });
 }

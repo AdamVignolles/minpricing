@@ -928,8 +928,12 @@ export class CollectionService {
         )
         .map((deal) => deal.externalId),
     );
+    const withFacts = new Set(
+      rows.filter((deal) => !!deal.extraFacts).map((deal) => deal.externalId),
+    );
     return {
       needsDetails: (externalId) => !fresh.has(externalId),
+      needsFacts: (externalId) => !withFacts.has(externalId),
       isUnchanged: (externalId, price) =>
         fresh.has(externalId) && priceById.get(externalId) === price,
       progress: (step, done, total) =>
@@ -1548,6 +1552,11 @@ export class CollectionService {
           lowestRecentPrice: rawDeal.details.lowestRecentPrice,
           listPriceKind: rawDeal.details.listPriceKind,
           shipsFrom: rawDeal.details.shipsFrom,
+          // Replaced as a whole when this run read them; a details read
+          // without facts (listing-only signals) keeps the stored ones.
+          ...(rawDeal.details.facts
+            ? { extraFacts: JSON.stringify(rawDeal.details.facts) }
+            : {}),
           ...(rawDeal.details.historicalLowPrice
             ? {
                 historicalLowPrice: rawDeal.details.historicalLowPrice,

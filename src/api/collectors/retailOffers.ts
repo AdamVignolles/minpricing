@@ -1,5 +1,8 @@
+import { load } from "cheerio";
+
 import { parsePcSpecs } from "../services/pcSpecs.ts";
-import type { RawDeal } from "./DealSource.ts";
+import type { RawDeal, StoredFacts } from "./DealSource.ts";
+import { compactFacts, tidySpecs } from "./productFacts.ts";
 import { parseEuro } from "./storeOffers.ts";
 
 /**
@@ -595,4 +598,35 @@ export function parseScrewfixListing(html: string): RawDeal[] {
         },
       ];
     });
+}
+
+/**
+ * A Screwfix product page (epic 27): its specification table
+ * (`table.additional-attributes`), the maker's warranty, and whether the
+ * product is sold for store pickup only (`#stock-state`:
+ * `data-only-cc="1"` with `data-only-hd="0"` — « Click & Collect »
+ * only). The per-store stock lines depend on the visitor's store, so they
+ * are not kept.
+ */
+export function parseScrewfixProduct(html: string): StoredFacts | undefined {
+  const $ = load(html);
+  const rows = $("table.additional-attributes tr")
+    .toArray()
+    .map((tr) => ({
+      label: $(tr).find("th").text(),
+      value: $(tr).find("td").text(),
+    }));
+  const table = tidySpecs(rows, 10);
+  const stock = $("#stock-state").first();
+  const storePickupOnly =
+    stock.attr("data-only-cc") === "1" && stock.attr("data-only-hd") === "0"
+      ? true
+      : undefined;
+  return compactFacts({
+    specs: table.specs,
+    brand: table.brand,
+    model: table.model,
+    warranty: table.warranty,
+    storePickupOnly,
+  });
 }

@@ -106,6 +106,13 @@ export const dealEntity = $entity({
     /** Country the item ships from ("FR", "CN"), when known. */
     shipsFrom: z.text().optional(),
     /**
+     * JSON of `StoredFacts` (DealSource.ts): what the product page or store
+     * API says beyond the fields above — spec table, warranty, returns,
+     * stock line, coupon, platforms… Read with the details, for the
+     * Dealabs description (epic 27, `services/dealFacts.ts`).
+     */
+    extraFacts: z.text({ size: "rich" }).optional(),
+    /**
      * JSON array of the same product found at other merchants by
      * cross-search ({ merchant, title, price, url }) — the comparison
      * table on the deal page. `marketPrice` is the cheapest of them.

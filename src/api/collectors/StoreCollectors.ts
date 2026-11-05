@@ -3,8 +3,10 @@ import type {
   DiscoverContext,
   ProductRef,
   RawDeal,
+  StoredFacts,
 } from "./DealSource.ts";
 import { parseJoybuyOffers } from "./joybuyOffers.ts";
+import { readFactsOnce } from "./productFacts.ts";
 import {
   leclercFeaturedEans,
   parseCastoramaTiles,
@@ -15,6 +17,7 @@ import {
   parseLenovoProducts,
   parseNikeWall,
   parseScrewfixListing,
+  parseScrewfixProduct,
 } from "./retailOffers.ts";
 import {
   type GamerPowerGiveaway,
@@ -22,13 +25,19 @@ import {
   parseEpicFreeGames,
   selectGiveaways,
   parseGogCatalog,
+  parseGogProduct,
   parseIkeaOffers,
   parseLidlSearch,
   parseNintendoSearch,
   parsePlayStationGrid,
   parseXboxDeals,
 } from "./storeOffers.ts";
-import { parseOcaratListing, parseTimeshop24Listing } from "./watchOffers.ts";
+import {
+  parseOcaratListing,
+  parseOcaratProduct,
+  parseTimeshop24Listing,
+  parseTimeshop24Product,
+} from "./watchOffers.ts";
 
 /**
  * Stores read with plain `fetch` — their own public JSON APIs or
@@ -100,9 +109,35 @@ export class GogCollector implements DealSource {
         ),
       );
     }
-    return uniqueById(deals);
+    const unique = uniqueById(deals);
+    // The product API, once per game (no facts stored yet), at most
+    // GOG_FACTS_PER_RUN per run, paced: description, systems, features,
+    // French texts/voices.
+    const todo = unique
+      .filter((deal) => context?.needsFacts?.(deal.externalId) ?? true)
+      .slice(0, GOG_FACTS_PER_RUN);
+    for (const [index, deal] of todo.entries()) {
+      context?.progress?.("Fiches GOG", index + 1, todo.length);
+      try {
+        const { description, facts } = parseGogProduct(
+          await fetchJson(
+            `https://api.gog.com/v2/games/${encodeURIComponent(deal.externalId)}?locale=fr-FR`,
+          ),
+        );
+        if (description) deal.description = description;
+        if (facts && deal.details) deal.details.facts = facts;
+      } catch {
+        // One unreadable product never stops the run: the deal keeps its
+        // listing data and is tried again next run.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    return unique;
   }
 }
+
+/** GOG product API reads per run (facts are read once per game). */
+const GOG_FACTS_PER_RUN = 12;
 
 /** Nintendo eShop: discounted Switch / Switch 2 games, most popular first. */
 export class NintendoCollector implements DealSource {
@@ -389,7 +424,18 @@ export class ScrewfixCollector implements DealSource {
         break;
       }
     }
-    return uniqueById(deals);
+    const unique = uniqueById(deals);
+    // Product pages, once per product: spec table, warranty, and whether
+    // it is « Click & Collect » only (a local offer for Dealabs).
+    await readFactsOnce(unique, {
+      context,
+      max: PRODUCT_FACTS_PER_RUN,
+      step: "Fiches produits",
+      read: async (deal) => parseScrewfixProduct(await fetchText(deal.url)),
+      sleep: this.sleep,
+      pauseMs: 2_000 + Math.random() * 2_000,
+    });
+    return unique;
   }
 }
 
@@ -404,6 +450,8 @@ abstract class WatchShopCollector implements DealSource {
   protected abstract pages: number;
   protected abstract pageUrl(page: number): string;
   protected abstract parse(html: string): RawDeal[];
+  /** Reads a product page's facts (epic 27). */
+  protected abstract productFacts(html: string): StoredFacts | undefined;
 
   constructor(
     protected sleep: (ms: number) => Promise<void> = (ms) =>
@@ -423,9 +471,22 @@ abstract class WatchShopCollector implements DealSource {
         break;
       }
     }
-    return uniqueById(deals);
+    const unique = uniqueById(deals);
+    // Product pages, once per watch: movement, diameter, water resistance…
+    await readFactsOnce(unique, {
+      context,
+      max: PRODUCT_FACTS_PER_RUN,
+      step: "Fiches montres",
+      read: async (deal) => this.productFacts(await fetchText(deal.url)),
+      sleep: this.sleep,
+      pauseMs: 1_500 + Math.random() * 1_500,
+    });
+    return unique;
   }
 }
+
+/** Product pages read per run by listing-only shops (facts once per product). */
+const PRODUCT_FACTS_PER_RUN = 12;
 
 /** Timeshop24 « Vente de montres » (~160 watches, 35 a page). */
 export class Timeshop24Collector extends WatchShopCollector {
@@ -437,6 +498,9 @@ export class Timeshop24Collector extends WatchShopCollector {
   }
   protected parse(html: string) {
     return parseTimeshop24Listing(html);
+  }
+  protected productFacts(html: string) {
+    return parseTimeshop24Product(html);
   }
 }
 
@@ -450,6 +514,9 @@ export class OcaratCollector extends WatchShopCollector {
   }
   protected parse(html: string) {
     return parseOcaratListing(html);
+  }
+  protected productFacts(html: string) {
+    return parseOcaratProduct(html);
   }
 }
 

@@ -2,7 +2,8 @@ import { load } from "cheerio";
 
 import { type AmazonPageText, parseAmazonSignals } from "./amazonSignals.ts";
 import { parsePriceFr } from "./browser.ts";
-import type { DealDetails } from "./DealSource.ts";
+import type { DealDetails, StoredFacts } from "./DealSource.ts";
+import { compactFacts, flatText, tidySpecs } from "./productFacts.ts";
 
 /** What a product page gives us, whichever way it was read. */
 export interface AmazonProductRead {
@@ -108,13 +109,87 @@ export function parseAmazonProductHtml(
     listPrice:
       listPrice !== undefined && listPrice > price ? listPrice : undefined,
     description: bulletsFrom($),
-    details: parseAmazonSignals(pageText, price),
+    details: {
+      ...parseAmazonSignals(pageText, price),
+      facts: parseAmazonFacts(html),
+    },
     title,
     breadcrumb: flat(
       $("#wayfinding-breadcrumbs_feature_div li a").first().text(),
     ),
     imageUrl: image.attr("data-old-hires") || image.attr("src") || undefined,
   };
+}
+
+/**
+ * The product facts an Amazon page shows beyond price and seller (epic 27):
+ * the key attributes block and the technical table (merged, noise
+ * dropped), brand, model, maker's reference, warranty, the return window,
+ * the stock line, a coupon, and « Livraison GRATUITE » when it is said.
+ * Delivery dates and costs are left out: they depend on the visitor's
+ * address (the cloud sandbox is shown « États-Unis »).
+ * Pure: the plain-fetch path passes the fetched HTML, the browser path
+ * `page.content()`.
+ */
+export function parseAmazonFacts(html: string): StoredFacts | undefined {
+  if (isAmazonChallenge(html)) return undefined;
+  const $ = load(html);
+  $("script, style, noscript").remove();
+  const rows: Array<{ label?: string; value?: string }> = [];
+  // « Marque : Crucial », « Taille de la mémoire : 32 Go »… (key attributes)
+  $("#productOverview_feature_div tr").each((_, tr) => {
+    const cells = $(tr).find("td");
+    rows.push({ label: cells.first().text(), value: cells.last().text() });
+  });
+  // The detailed table(s): « Technologie de mémoire vive : DDR5 »…
+  $("table.prodDetTable tr, #prodDetails tr").each((_, tr) => {
+    rows.push({
+      label: $(tr).find("th").first().text(),
+      value: $(tr).find("td").first().text(),
+    });
+  });
+  $("#detailBullets_feature_div li").each((_, li) => {
+    const [label, ...rest] = $(li)
+      .text()
+      .split(/\s*[:：]\s*/);
+    rows.push({ label, value: rest.join(" : ") });
+  });
+  const table = tidySpecs(rows);
+
+  const stock = flatText($("#availability").first().text())
+    ?.split(/(?<=\.)\s/)[0]
+    ?.replace(/\.$/, "");
+  const returns = flatText(
+    $("#returnsInfoFeature_feature_div .offer-display-feature-text-message")
+      .first()
+      .text(),
+  );
+  const couponText = flatText(
+    $(
+      "#couponsInBuybox_feature_div, #promoPriceBlockMessage_feature_div, #vpcButton, #couponBadgeRegularVpc",
+    ).text(),
+  );
+  const coupon = couponText?.match(
+    /(?:coupon de|appliquer (?:un |le )?coupon(?: de)?|économisez)\s*(\d+(?:[.,]\d+)?\s?(?:€|%))/i,
+  )?.[1];
+  const deliveryText = flatText(
+    $("#deliveryBlockMessage, #mir-layout-DELIVERY_BLOCK").text(),
+  );
+
+  return compactFacts({
+    specs: table.specs,
+    brand: table.brand,
+    model: table.model,
+    reference: table.reference,
+    warranty: table.warranty,
+    returns,
+    stock: stock && stock.length <= 80 ? stock : undefined,
+    coupon: coupon?.replace(/\s+/g, " "),
+    delivery:
+      deliveryText && /livraison gratuite/i.test(deliveryText)
+        ? "Livraison gratuite"
+        : undefined,
+  });
 }
 
 function bulletsFrom($: ReturnType<typeof load>): string | undefined {

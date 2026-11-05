@@ -1,4 +1,5 @@
-import type { RawDeal } from "./DealSource.ts";
+import type { RawDeal, StoredFacts } from "./DealSource.ts";
+import { compactFacts } from "./productFacts.ts";
 
 /**
  * Pure parsers for the stores read with plain `fetch` (no browser): each
@@ -167,6 +168,90 @@ export function parseGogCatalog(json: unknown): RawDeal[] {
       },
     ];
   });
+}
+
+/** GOG's product API (`api.gog.com/v2/games/<id>?locale=fr-FR`). */
+interface GogProductDetails {
+  description?: string;
+  _embedded?: {
+    supportedOperatingSystems?: Array<{
+      operatingSystem?: { name?: string; versions?: string };
+    }>;
+    tags?: Array<{ name?: string; level?: number }>;
+    features?: Array<{ name?: string }>;
+    developers?: Array<{ name?: string }>;
+    publisher?: { name?: string };
+    localizations?: Array<{
+      _embedded?: {
+        language?: { code?: string };
+        localizationScope?: { type?: string };
+      };
+    }>;
+  };
+}
+
+const OS_NAMES: Record<string, string> = {
+  windows: "Windows",
+  osx: "macOS",
+  mac: "macOS",
+  linux: "Linux",
+};
+
+/**
+ * A GOG game's facts for the Dealabs description (epic 27): a short text
+ * (the store's first paragraph), systems, features, genre, developer,
+ * and whether the game is in French (texts / voices). Pure.
+ */
+export function parseGogProduct(json: unknown): {
+  description?: string;
+  facts?: StoredFacts;
+} {
+  const product = (json ?? {}) as GogProductDetails;
+  const embedded = product._embedded ?? {};
+  const paragraphs = (product.description ?? "")
+    .split(/<br\s*\/?>\s*<br\s*\/?>|<\/p>|\n\s*\n/i)
+    .map((part) => decodeHtml(part.replace(/<[^>]+>/g, " ")))
+    .filter((part) => part.length > 40);
+  const description = paragraphs[0]
+    ? paragraphs[0].length > 500
+      ? `${paragraphs[0].slice(0, 497).replace(/\s+\S*$/, "")}…`
+      : paragraphs[0]
+    : undefined;
+  const platforms = [
+    ...new Set(
+      (embedded.supportedOperatingSystems ?? [])
+        .map((os) => OS_NAMES[os.operatingSystem?.name ?? ""])
+        .filter((name): name is string => !!name),
+    ),
+  ];
+  const features = (embedded.features ?? [])
+    .map((feature) => feature.name?.trim())
+    .filter((name): name is string => !!name)
+    .map((name) => name[0].toUpperCase() + name.slice(1));
+  const french = new Set(
+    (embedded.localizations ?? [])
+      .filter((loc) => loc._embedded?.language?.code === "fr")
+      .map((loc) => loc._embedded?.localizationScope?.type),
+  );
+  const languages = [
+    french.has("text") ? "Textes en français" : "",
+    french.has("audio") ? "Voix en français" : "",
+  ].filter(Boolean);
+  const genres = (embedded.tags ?? [])
+    .filter((tag) => (tag.level ?? 1) <= 2 && tag.name)
+    .map((tag) => tag.name as string);
+  const developer = embedded.developers?.[0]?.name ?? embedded.publisher?.name;
+  const specs = [
+    genres.length ? { label: "Genre", value: genres.join(", ") } : undefined,
+    developer ? { label: "Développeur", value: developer } : undefined,
+    platforms.length
+      ? { label: "Systèmes", value: platforms.join(", ") }
+      : undefined,
+  ].filter((spec): spec is { label: string; value: string } => !!spec);
+  return {
+    description,
+    facts: compactFacts({ specs, platforms, features, languages }),
+  };
 }
 
 // ------------------------------------------------------------ Nintendo

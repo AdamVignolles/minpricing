@@ -1,4 +1,7 @@
-import type { RawDeal } from "./DealSource.ts";
+import { load } from "cheerio";
+
+import type { RawDeal, StoredFacts, StoredSpec } from "./DealSource.ts";
+import { compactFacts, flatText, tidySpecs } from "./productFacts.ts";
 import { parseEuro } from "./storeOffers.ts";
 
 /**
@@ -189,4 +192,122 @@ export function parseOcaratListing(html: string): RawDeal[] {
         },
       ];
     });
+}
+
+// ----------------------------------------------------- product pages
+
+/**
+ * The watch facts a buyer checks, in that order, with the shop's label
+ * variants: « Diamètre (en mm) : 38,00 » becomes « Diamètre : 38 mm ».
+ */
+const WATCH_SPECS: Array<{ label: string; match: RegExp; unit?: string }> = [
+  { label: "Mouvement", match: /^mouvements?$/i },
+  { label: "Calibre", match: /^calibres?( \(mouvements\))?$/i },
+  {
+    label: "Diamètre",
+    match: /^(diamètre( \(en mm\))?|largeur de la casse)$/i,
+    unit: "mm",
+  },
+  { label: "Épaisseur", match: /^épaisseur( \(en mm\))?$/i, unit: "mm" },
+  {
+    label: "Étanchéité",
+    match: /^(étanchéité|résistance à l'eau)( \(en atm\))?$/i,
+    unit: "ATM",
+  },
+  { label: "Verre", match: /^(qualité du verre|verre)$/i },
+  {
+    label: "Boîtier",
+    match: /^(qualité de la matière|matière|matériel|matériau du boîtier)$/i,
+  },
+  {
+    label: "Bracelet",
+    match: /^(bracelet|matière du bracelet|matériau du bracelet)$/i,
+  },
+  { label: "Couleur du cadran", match: /^(couleur du cadran|cadran)$/i },
+  { label: "Fabrication", match: /^fabrication$/i },
+];
+
+function watchSpecs(rows: Array<{ label?: string; value?: string }>): {
+  specs: StoredSpec[];
+  warranty?: string;
+  brand?: string;
+  reference?: string;
+} {
+  const specs: StoredSpec[] = [];
+  let warranty: string | undefined;
+  let warrantyType: string | undefined;
+  const tidy = tidySpecs(rows, 60);
+  for (const row of rows) {
+    const label = flatText(row.label)?.replace(/\s*:$/, "");
+    const value = flatText(row.value);
+    if (!label || !value) continue;
+    if (/^garantie$/i.test(label)) warranty ??= value;
+    if (/^type de garantie$/i.test(label)) warrantyType ??= value;
+    const spec = WATCH_SPECS.find((s) => s.match.test(label));
+    if (!spec || specs.some((s) => s.label === spec.label)) continue;
+    const number = value.replace(",", ".").match(/^\d+(\.\d+)?$/);
+    const shown =
+      spec.unit && number
+        ? `${Number(number[0])
+            .toLocaleString("fr-FR")
+            .replace(/[\u202f\u00a0]/g, " ")} ${spec.unit}`
+        : value;
+    specs.push({ label: spec.label, value: shown });
+  }
+  specs.sort(
+    (a, b) =>
+      WATCH_SPECS.findIndex((s) => s.label === a.label) -
+      WATCH_SPECS.findIndex((s) => s.label === b.label),
+  );
+  return {
+    specs,
+    warranty: warranty
+      ? `Garantie ${warranty}${warrantyType ? ` (${warrantyType.toLowerCase()})` : ""}`
+      : tidy.warranty,
+    brand: tidy.brand,
+    reference: tidy.reference,
+  };
+}
+
+/** Ocarat product page: its « Caractéristiques » table (`tr.feature_*`). */
+export function parseOcaratProduct(html: string): StoredFacts | undefined {
+  const $ = load(html);
+  const rows = $("tr[class^='feature_']")
+    .toArray()
+    .map((tr) => {
+      const cells = $(tr).find("td");
+      cells.find("br").replaceWith(", ");
+      return { label: cells.first().text(), value: cells.last().text() };
+    });
+  const watch = watchSpecs(rows);
+  const delivery = /livraison gratuite/i.test($("body").text())
+    ? "Livraison gratuite"
+    : undefined;
+  return compactFacts({ ...watch, delivery });
+}
+
+/**
+ * Timeshop24 product page: the short « Libellé : valeur » list next to
+ * the price, then its specification table (`.ts-table` rows).
+ */
+export function parseTimeshop24Product(html: string): StoredFacts | undefined {
+  const $ = load(html);
+  const rows: Array<{ label?: string; value?: string }> = [];
+  $(".product.attribute.overview li").each((_, li) => {
+    const [label, ...rest] = $(li).text().split(":");
+    rows.push({ label, value: rest.join(":") });
+  });
+  $(".ts-table").each((_, row) => {
+    rows.push({
+      label: $(row).find(".ts-table-cell.label").text(),
+      value: $(row).find(".ts-table-cell.data").text(),
+    });
+  });
+  const watch = watchSpecs(rows);
+  const delivery = /livraison gratuite/i.test(
+    $('meta[name="description"]').attr("content") ?? "",
+  )
+    ? "Livraison gratuite"
+    : undefined;
+  return compactFacts({ ...watch, delivery });
 }
