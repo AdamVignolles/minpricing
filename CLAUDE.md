@@ -82,6 +82,21 @@ controllers → React console → Dealabs draft / auto-publish.
   `IdealoReferenceService` enriches scoring with Idealo's lowest market price
   for tracked products that have an `idealoUrl` (cached 24h); it is
   deliberately _not_ a `DealSource`.
+- **Deal facts** (`services/dealFacts.ts`, epic 27): `buildDealFacts(deal)`
+  turns a stored deal row into one typed set of facts for the Dealabs
+  description — product, the merchant's text split into bullets /
+  paragraphs / « Libellé : valeur » specs (Amazon's « TITRE EN CAPITALES: »
+  lines stay bullets), PC specs from the title when the merchant's own
+  don't already say them, seller, reviews, price references (struck price
+  and its kind, 30-day low, historical low, other shops cheapest first,
+  Dealabs history), availability, offer window, coupon code, and warnings
+  (marketplace seller, shipped from abroad, battery not included,
+  keyboard layout, refurbished/used, « remplacement pour » parts, out of
+  stock). Every fact carries its provenance (`via`: merchant / title /
+  cross-search / dealabs / price-history, the deal columns, `asOf`);
+  a fact the row doesn't hold is absent, never guessed. Computed at
+  render time (pure, no migration). The description renderer may only
+  write what is in here. `test/deal-facts.spec.ts`.
 - **Price history references** (run after each source's upserts, then the
   touched deals are rescored): `DealabsHistoryService` reads Dealabs' public
   search page with plain `fetch` (threads are JSON in `data-vue3` attributes,
