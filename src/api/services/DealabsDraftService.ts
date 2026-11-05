@@ -4,6 +4,10 @@ import { $repository } from "alepha/orm";
 
 import { dealEntity } from "../entities/Deal.ts";
 import { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
+import { merchantEntity } from "../entities/Merchant.ts";
+import { renderDescription } from "./dealDescription.ts";
+import { buildDealFacts } from "./dealFacts.ts";
+import { buildDealTitle } from "./dealTitle.ts";
 import type { Deal } from "./DealTypes.ts";
 
 /**
@@ -16,6 +20,7 @@ import type { Deal } from "./DealTypes.ts";
 export class DealabsDraftService {
   protected drafts = $repository(dealabsDraftEntity);
   protected deals = $repository(dealEntity);
+  protected merchants = $repository(merchantEntity);
   protected dateTime = $inject(DateTimeProvider);
 
   async maybeGenerateDraft(deal: Deal): Promise<void> {
@@ -28,7 +33,10 @@ export class DealabsDraftService {
       return;
     }
 
-    const { title, body, description } = this.render(deal);
+    const merchant = deal.merchantId
+      ? await this.merchants.findById(deal.merchantId).catch(() => undefined)
+      : undefined;
+    const { title, body, description } = this.render(deal, merchant?.name);
 
     if (existing) {
       await this.drafts.updateById(existing.id, {
@@ -69,24 +77,33 @@ export class DealabsDraftService {
   }
 
   /**
-   * The post text. No price anywhere — not the current one, not an
-   * average, not "lowest since we started tracking": Dealabs has its own
-   * price fields and shows them next to the post, and our internal
-   * statistics (a handful of observations) mean nothing to a reader. What
-   * goes in is what the product *is*: the merchant's own description
-   * (Amazon feature bullets, Cdiscount strengths and specs, Steam store
-   * facts).
+   * The post text, built from the deal's facts (`buildDealFacts` →
+   * `renderDescription`, epic 27): intro, how to get the price, the
+   * merchant's points, specs, the game or plan block, seller and delivery,
+   * and what a buyer must know. Only what was read from a source; prices
+   * only in « Repères de prix » (#129: trusted, dated, fresh), never
+   * DealRadar or a score.
    */
-  protected render(deal: Deal): {
+  protected render(
+    deal: Deal,
+    merchantName?: string,
+  ): {
     title: string;
     body: string;
     description: string;
   } {
-    // Dealabs requires a description. Without a merchant one (product page
-    // not read yet), the title itself is factual product info: merchant
-    // titles list the specs ("… - Moteur 900 W - Batterie 48 V - …").
+    // Dealabs requires a description. When the facts give nothing beyond
+    // an intro (product page not read yet), the merchant's text or, last,
+    // the title itself: merchant titles list the specs
+    // ("… - Moteur 900 W - Batterie 48 V - …").
+    const facts = buildDealFacts(deal, { merchantName });
+    const rendered = renderDescription(facts, {
+      now: this.dateTime.nowISOString(),
+    });
     const description =
-      deal.description?.trim() || describeFromTitle(deal.title);
+      rendered?.text ||
+      deal.description?.trim() ||
+      describeFromTitle(deal.title);
     const bodyLines = [
       `**${deal.title}**`,
       "",
@@ -94,7 +111,8 @@ export class DealabsDraftService {
       `Lien : ${deal.url}`,
     ];
     return {
-      title: dealabsTitle(deal.title),
+      // Dealabs-style (#130): type first, platform, « (Vendeur tiers) »…
+      title: buildDealTitle(facts),
       body: bodyLines.join("\n"),
       description,
     };
@@ -119,29 +137,4 @@ export function describeFromTitle(title: string): string {
   return [`${brand} - ${name}`, ...specs.map((spec) => `- ${spec}`)].join("\n");
 }
 
-/** Dealabs refuses titles longer than this. */
-export const DEALABS_TITLE_MAX = 140;
-
-/**
- * Fits a merchant title into Dealabs' 140 characters without cutting a
- * word in half: whole trailing segments ("…, avec prise en charge du
- * Wi-Fi 6", "– Clavier AZERTY") are dropped first, and only a single
- * over-long segment is cut, at a word boundary.
- */
-export function dealabsTitle(title: string, max = DEALABS_TITLE_MAX): string {
-  const clean = title.replace(/\s+/g, " ").trim();
-  if (clean.length <= max) {
-    return clean;
-  }
-  // Split points that end a meaningful part of a product title.
-  const cuts = [...clean.matchAll(/\s[-–—|]\s|,\s|\s\(|:\s/g)]
-    .map((match) => match.index)
-    .filter((index): index is number => index !== undefined && index <= max);
-  const lastCut = cuts.at(-1);
-  if (lastCut !== undefined && lastCut >= max * 0.4) {
-    return clean.slice(0, lastCut).trim();
-  }
-  const words = clean.slice(0, max + 1).split(" ");
-  words.pop();
-  return words.join(" ").replace(/[\s,;:–—-]+$/, "");
-}
+export { DEALABS_TITLE_MAX, dealabsTitle } from "./dealTitle.ts";

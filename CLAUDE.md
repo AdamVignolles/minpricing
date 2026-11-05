@@ -97,6 +97,31 @@ controllers → React console → Dealabs draft / auto-publish.
   a fact the row doesn't hold is absent, never guessed. Computed at
   render time (pure). The description renderer may only write what is in
   here. `test/deal-facts.spec.ts`.
+  **Description renderer** (`services/dealDescription.ts`, wording in
+  `services/descriptionPhrases.ts`): `renderDescription(facts)` picks a
+  template by deal type (`dealType`: product / game / free-game / plan)
+  and writes plain-text sections (« Pour obtenir le prix : », « En bref :
+  », « Le jeu : », « L'offre : », « Caractéristiques : », « Vendeur et
+  livraison : », « À savoir : ») plus the same in HTML. Phrase variants
+  are picked by a hash of the URL (same deal, same text); no intro for a
+  plain product (the seller line names the shop); Amazon's shouted bullet
+  headings in sentence case; capped at 2 200 characters (fewer bullets
+  and specs past it). Never a score, a heat chance or DealRadar; prices
+  only in « Repères de prix » (`priceContextLines`, given `now`).
+  `DealabsDraftService` uses it, falling back to the merchant text, then
+  the title's specs. `test/deal-description.spec.ts`.
+  **Titles** (`services/dealTitle.ts`, #130, rules from the moderators'
+  rewrites in folio F17 §3): `buildDealTitle(facts)` writes the draft
+  title Dealabs-style — the product type first (moved from the merchant
+  title within its first 8 words, not after « pour »/« compatible », or
+  added when implied: « Mémoire RAM », « SSD », « Carte graphique »),
+  « | » and « . » between blocks as « - », « 32 Go », marketing words and
+  a trailing SKU dropped (watches keep their reference); games « <Jeu> sur
+  <plateforme> (Dématérialisé - <store>) » from the store's own
+  « (PS5, PlayStation Store) » tag; « Reconditionné : … (État X) »,
+  « [Nouveaux clients] », « (Via Coupon) », « (Vendeur tiers) ». Cut to 140
+  by `dealabsTitle()` (now in the same file), prefix and suffix kept.
+  `test/deal-title.spec.ts`.
   **Product facts read by collectors** (`DealDetails.facts` →
   `Deal.extraFacts` JSON, `StoredFacts` in `DealSource.ts`, migration
   `20261105090000_add_deal_extra_facts`; written only when a run read them,
@@ -144,8 +169,15 @@ controllers → React console → Dealabs draft / auto-publish.
   `data/agents`) live under `appDir()` (Bay's `APP_FILES_DIR`). Auto-publish attempts are
   recorded on the draft (`publishAttempts`, `lastPublishResult`,
   `lastPublishError`); a "Vérifier" that doesn't confirm puts the draft back
-  to `draft`. Draft texts never contain prices — except, for Amazon deals,
-  Keepa's 90-day price chart (`services/keepa.ts`: the public
+  to `draft`. Draft texts contain prices only in the « Repères de prix »
+  section (`services/priceContext.ts`, #129: the score's own price
+  arguments from trusted references — shop's 30-day low or stated regular
+  price ≥ 20 % above, other shops read < 24 h ago ≥ 10 % dearer, under the
+  lowest price others posted on Dealabs, at a price-history low; each
+  dated, older than 48 h dropped; never a « prix conseillé », an
+  unlabelled struck price or our own measured price; the draft is rebuilt
+  just before each publication, after the page check), plus, for Amazon
+  deals, Keepa's 90-day price chart (`services/keepa.ts`: the public
   `graph.keepa.com/pricehistory.png` image, no API key), which the
   publisher inserts at the top of the description through the editor's
   « Image » → « Image depuis une URL » dialog (Dealabs re-hosts it). Best-
@@ -233,7 +265,7 @@ controllers → React console → Dealabs draft / auto-publish.
   VR, DLC or third-party "key giveaways"); each link is followed to the
   store page itself. Boulanger, Fnac and Darty block automated access —
   their official affiliate product feeds (Awin…) are the legitimate route. Dealabs titles are capped at 140
-  characters by `dealabsTitle()`.
+  characters by `dealabsTitle()` (see Titles above).
   `StoreCollectors.ts`: stores read with plain `fetch` from their own
   public APIs or server-rendered pages (parsers in
   `collectors/storeOffers.ts`) — Epic (free games of the week), GOG
