@@ -1,5 +1,6 @@
 import type { Infer } from "alepha";
 
+import type { StoredFacts } from "../collectors/DealSource.ts";
 import type { dealEntity } from "../entities/Deal.ts";
 import { isComputer, isKnownPcBrand, parsePcSpecs } from "./pcSpecs.ts";
 
@@ -68,7 +69,8 @@ export type WarningKind =
   | "refurbished"
   | "used"
   | "compatible-part"
-  | "out-of-stock";
+  | "out-of-stock"
+  | "store-pickup-only";
 
 export interface DealFacts {
   product: {
@@ -79,7 +81,35 @@ export interface DealFacts {
     category?: Fact<string>;
     merchant?: Fact<string>;
     condition?: Fact<"new" | "refurbished" | "used">;
+    brand?: Fact<string>;
+    model?: Fact<string>;
+    /** Maker's reference (« 80131-3NM-NIB »). */
+    reference?: Fact<string>;
   };
+  /** What the shop says about buying it: warranty, returns, stock, coupon. */
+  offer?: {
+    warranty?: Fact<string>;
+    returns?: Fact<string>;
+    delivery?: Fact<string>;
+    /** The shop's own stock line (« Plus que 3 exemplaires »). */
+    stockText?: Fact<string>;
+    /** A coupon amount shown on the page (« 10 € », « 15 % »). */
+    coupon?: Fact<string>;
+    /** Sold for store pickup only (« Click & Collect »): a local offer. */
+    storePickupOnly?: Fact<true>;
+  };
+  game?: {
+    platforms?: Fact<string[]>;
+    features?: Fact<string[]>;
+    languages?: Fact<string[]>;
+    edition?: Fact<string>;
+  };
+  variants?: {
+    sizes?: Fact<string[]>;
+    colors?: Fact<string[]>;
+  };
+  /** Mobile plans and boxes: commitment, price after the promo… */
+  planTerms?: Fact<string[]>;
   /** The merchant's own text: bullet points and plain paragraphs. */
   text: {
     bullets?: Fact<string[]>;
@@ -218,6 +248,19 @@ export function splitMerchantText(text: string): {
   return { specs, bullets, paragraphs };
 }
 
+/** `Deal.extraFacts`; an unreadable value is no facts, never an error. */
+export function parseStoredFacts(
+  json?: string | null,
+): StoredFacts | undefined {
+  if (!json) return undefined;
+  try {
+    const value = JSON.parse(json) as StoredFacts;
+    return value && typeof value === "object" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function parseOtherShops(json?: string | null): OtherShopPrice[] {
   if (!json) return [];
   try {
@@ -350,6 +393,58 @@ export function buildDealFacts(
         ? { ...facts.specs, value: [...facts.specs.value, ...fromTitle] }
         : { value: fromTitle, from: { via: "title", fields: ["title"] } };
     }
+  }
+
+  // Facts the product page / store API gave (Deal.extraFacts).
+  const stored = parseStoredFacts(deal.extraFacts);
+  if (stored) {
+    const fact = <T>(value: T): Fact<T> =>
+      merchantFact(value, ["extraFacts"], details);
+    if (stored.brand) facts.product.brand = fact(stored.brand);
+    if (stored.model) facts.product.model = fact(stored.model);
+    if (stored.reference) facts.product.reference = fact(stored.reference);
+    if (stored.specs?.length) {
+      // The page's spec table first; the merchant text's own « Libellé :
+      // valeur » lines only add what it doesn't say.
+      const labels = new Set(
+        stored.specs.map((spec) => spec.label.toLowerCase()),
+      );
+      const fromText = (facts.specs?.value ?? []).filter(
+        (spec) => !labels.has(spec.label.toLowerCase()),
+      );
+      facts.specs = fromText.length
+        ? {
+            value: [...stored.specs, ...fromText],
+            from: {
+              via: "merchant",
+              fields: ["extraFacts", "description"],
+              asOf: details ?? undefined,
+            },
+          }
+        : fact(stored.specs);
+    }
+    const offer: NonNullable<DealFacts["offer"]> = {};
+    if (stored.warranty) offer.warranty = fact(stored.warranty);
+    if (stored.returns) offer.returns = fact(stored.returns);
+    if (stored.delivery) offer.delivery = fact(stored.delivery);
+    if (stored.stock) offer.stockText = fact(stored.stock);
+    if (stored.coupon) offer.coupon = fact(stored.coupon);
+    if (stored.storePickupOnly) {
+      offer.storePickupOnly = fact(true as const);
+      facts.warnings.push(fact("store-pickup-only" as const));
+    }
+    if (Object.keys(offer).length) facts.offer = offer;
+    const game: NonNullable<DealFacts["game"]> = {};
+    if (stored.platforms?.length) game.platforms = fact(stored.platforms);
+    if (stored.features?.length) game.features = fact(stored.features);
+    if (stored.languages?.length) game.languages = fact(stored.languages);
+    if (stored.edition) game.edition = fact(stored.edition);
+    if (Object.keys(game).length) facts.game = game;
+    const variants: NonNullable<DealFacts["variants"]> = {};
+    if (stored.sizes?.length) variants.sizes = fact(stored.sizes);
+    if (stored.colors?.length) variants.colors = fact(stored.colors);
+    if (Object.keys(variants).length) facts.variants = variants;
+    if (stored.planTerms?.length) facts.planTerms = fact(stored.planTerms);
   }
 
   // Seller

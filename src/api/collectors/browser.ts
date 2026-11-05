@@ -24,6 +24,8 @@ export interface DealsPage {
     options: { timeout: number },
   ): Promise<unknown>;
   evaluate<T, A>(fn: (arg: A) => T, arg?: A): Promise<T>;
+  /** The rendered HTML (Playwright and Puppeteer both have it). */
+  content?(): Promise<string>;
 }
 
 /**

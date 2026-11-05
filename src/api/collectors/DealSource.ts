@@ -129,6 +129,61 @@ export interface DealDetails {
    */
   historicalLowPrice?: number;
   historicalLowSource?: string;
+  /**
+   * Product facts beyond the fields above, for the Dealabs description
+   * (epic 27): spec table, warranty, returns, stock line, coupon,
+   * platforms… Stored as JSON in `Deal.extraFacts`, replaced as a whole
+   * whenever a run reads them (only facts the page actually shows).
+   */
+  facts?: StoredFacts;
+}
+
+/** A « Libellé : valeur » line of a product's spec table. */
+export interface StoredSpec {
+  label: string;
+  value: string;
+}
+
+/**
+ * What a product page or store API says about the product itself, read by
+ * its collector. Every field is optional and only set from what the page
+ * shows — never guessed; see `services/dealFacts.ts` for how they reach
+ * the description.
+ */
+export interface StoredFacts {
+  /** The spec table, most useful lines first (capped by each reader). */
+  specs?: StoredSpec[];
+  brand?: string;
+  /** Model name as the shop writes it (« DDR5 Pro Overclocking RAM »). */
+  model?: string;
+  /** Maker's reference (« CP2K16G60C36U5B », « 80131-3NM-NIB »). */
+  reference?: string;
+  /** « Garantie 2 ans », « Garantie fabricant 5 ans ». */
+  warranty?: string;
+  /** « Retournable jusqu'au 15 janvier 2027 ». */
+  returns?: string;
+  /** Only location-independent wording: « Livraison gratuite ». */
+  delivery?: string;
+  /**
+   * The shop only sells it for pickup in a store (Screwfix « Click &
+   * Collect » only): Dealabs treats such a deal as a local offer that
+   * needs the store, the city and the stock (epic 29).
+   */
+  storePickupOnly?: boolean;
+  /** The shop's own stock line: « En stock », « Plus que 3 exemplaires ». */
+  stock?: string;
+  /** A coupon shown on the page: « 10 € », « 15 % ». */
+  coupon?: string;
+  /** Games: platforms and store features (« Sauvegardes sur le Cloud »). */
+  platforms?: string[];
+  features?: string[];
+  /** Interface/subtitle languages count or list, when the store says. */
+  languages?: string[];
+  edition?: string;
+  sizes?: string[];
+  colors?: string[];
+  /** Mobile plans and boxes: commitment, price after the promo… */
+  planTerms?: string[];
 }
 
 /**
@@ -140,6 +195,13 @@ export interface DealDetails {
  */
 export interface DiscoverContext {
   needsDetails(externalId: string): boolean;
+  /**
+   * True when no product facts (`Deal.extraFacts`, epic 27) are stored
+   * for this offer yet. For sources whose listing already gives the
+   * details on every run (GOG, watch shops, Screwfix): their product page
+   * or API is then read once per product, not every run.
+   */
+  needsFacts?(externalId: string): boolean;
   /**
    * True when the deal's details are fresh and its stored price equals
    * `price`: the product page would tell nothing new, so the collector can

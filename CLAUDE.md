@@ -95,8 +95,29 @@ controllers → React console → Dealabs draft / auto-publish.
   stock). Every fact carries its provenance (`via`: merchant / title /
   cross-search / dealabs / price-history, the deal columns, `asOf`);
   a fact the row doesn't hold is absent, never guessed. Computed at
-  render time (pure, no migration). The description renderer may only
-  write what is in here. `test/deal-facts.spec.ts`.
+  render time (pure). The description renderer may only write what is in
+  here. `test/deal-facts.spec.ts`.
+  **Product facts read by collectors** (`DealDetails.facts` →
+  `Deal.extraFacts` JSON, `StoredFacts` in `DealSource.ts`, migration
+  `20261105090000_add_deal_extra_facts`; written only when a run read them,
+  replaced as a whole): Amazon (`parseAmazonFacts`, same page both paths —
+  the browser path passes `page.content()`: key attributes + technical
+  table, brand, model, reference, warranty, return window, stock line,
+  coupon, « Livraison gratuite » only — delivery dates/costs depend on the
+  visitor's address), Steam (from the appdetails answer already fetched:
+  systems, features, French texts/voices, genre, developer, publisher,
+  release, Metacritic, Steam's review label), GOG (`api.gog.com/v2/games`,
+  description + systems, features, French, genre, developer), Ocarat and
+  Timeshop24 product pages (movement, calibre, diameter, thickness, water
+  resistance, glass, case, warranty), Screwfix product pages (spec table,
+  warranty, **`storePickupOnly`** when `#stock-state` says Click & Collect
+  only — a local offer for Dealabs, warning `store-pickup-only`).
+  Listing-only sources read product pages once per product
+  (`DiscoverContext.needsFacts`: no facts stored yet), at most 12 per run,
+  paced (`readFactsOnce` in `collectors/productFacts.ts`); `tidySpecs`
+  drops catalogue noise (ASIN, ranking, packaging, EAN…) and values
+  already listed. `test/product-facts.spec.ts` (fixtures cut from live
+  pages, 2026-11-05).
 - **Price history references** (run after each source's upserts, then the
   touched deals are rescored): `DealabsHistoryService` reads Dealabs' public
   search page with plain `fetch` (threads are JSON in `data-vue3` attributes,

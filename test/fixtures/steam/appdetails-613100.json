@@ -1,0 +1,89 @@
+{
+  "613100": {
+    "success": true,
+    "data": {
+      "name": "House Flipper",
+      "short_description": "House Flipper, c'est l'occasion unique de devenir une équipe de rénovation à vous tout seul. Achetez, réparez et rénovez des maisons en ruines pour leur donner une seconde vie et les vendre à profit !",
+      "genres": [
+        {
+          "id": "1",
+          "description": "Action"
+        },
+        {
+          "id": "25",
+          "description": "Aventure"
+        },
+        {
+          "id": "4",
+          "description": "Occasionnel"
+        },
+        {
+          "id": "23",
+          "description": "Indépendant"
+        },
+        {
+          "id": "29",
+          "description": "Massivement multijoueur"
+        },
+        {
+          "id": "28",
+          "description": "Simulation"
+        },
+        {
+          "id": "2",
+          "description": "Stratégie"
+        }
+      ],
+      "developers": ["Empyrean"],
+      "publishers": ["Frozen District", "PlayWay S.A."],
+      "release_date": {
+        "coming_soon": false,
+        "date": "17 mai 2018"
+      },
+      "metacritic": {
+        "score": 67,
+        "url": "https://www.metacritic.com/game/pc/house-flipper?ftag=MCD-06-10aaa1f"
+      },
+      "platforms": {
+        "windows": true,
+        "mac": true,
+        "linux": false
+      },
+      "supported_languages": "Anglais, Français, Italien, Allemand, Espagnol - Espagne, Polonais, Russe, Chinois simplifié, Tchèque, Japonais, Coréen, Roumain, Turc, Hongrois, Portugais du Brésil, Chinois traditionnel, Ukrainien, Grec, Néerlandais, Norvégien, Portugais du Portugal, Espagnol - Amérique latine",
+      "categories": [
+        {
+          "id": 2,
+          "description": "Solo"
+        },
+        {
+          "id": 22,
+          "description": "Succès Steam"
+        },
+        {
+          "id": 28,
+          "description": "Compat. contrôleurs complète"
+        },
+        {
+          "id": 29,
+          "description": "Cartes à échanger Steam"
+        },
+        {
+          "id": 30,
+          "description": "Workshop Steam"
+        },
+        {
+          "id": 23,
+          "description": "Steam Cloud"
+        },
+        {
+          "id": 42,
+          "description": "Remote Play sur tablette"
+        },
+        {
+          "id": 62,
+          "description": "Partage familial"
+        }
+      ]
+    }
+  }
+}

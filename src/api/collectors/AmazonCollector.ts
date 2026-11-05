@@ -1,6 +1,7 @@
 import {
   fetchAmazonProduct,
   fetchAmazonProductPage,
+  parseAmazonFacts,
 } from "./amazonProductHtml.ts";
 import { type AmazonPageText, parseAmazonSignals } from "./amazonSignals.ts";
 import type { CloudflareBrowserBinding, DealsPage } from "./browser.ts";
@@ -502,13 +503,20 @@ export class AmazonCollector implements DealSource {
     }
 
     const listPrice = listPriceText ? parsePriceFr(listPriceText) : undefined;
+    // Same reader as the plain-fetch path, on the rendered page.
+    const facts = page.content
+      ? await page
+          .content()
+          .then(parseAmazonFacts)
+          .catch(() => undefined)
+      : undefined;
 
     return {
       price,
       listPrice:
         listPrice !== undefined && listPrice > price ? listPrice : undefined,
       description: bullets,
-      details: parseAmazonSignals(pageText, price),
+      details: { ...parseAmazonSignals(pageText, price), facts },
       title: pageText.title,
       ...(await page.evaluate(() => {
         const image = document.querySelector(
