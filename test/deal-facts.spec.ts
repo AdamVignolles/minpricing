@@ -44,6 +44,15 @@ describe("splitMerchantText", () => {
     expect(split.paragraphs).toEqual(["Le jeu reste dans la bibliothèque."]);
   });
 
+  test("a stored text cut with « … » loses its half last line", () => {
+    const split = splitMerchantText(
+      "- Style linéaire : se déplace en ligne droite.\n- Design hot swap : s'insère facilement dans les claviers à pris…",
+    );
+    const all = JSON.stringify(split);
+    expect(all).toContain("Style linéaire");
+    expect(all).not.toContain("hot swap");
+  });
+
   test("« Prix avec le code … » is not a spec", () => {
     expect(splitMerchantText("- Prix avec le code : LENOVO10").specs).toEqual(
       [],

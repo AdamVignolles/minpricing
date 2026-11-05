@@ -392,6 +392,24 @@ describe("Repères de prix (#129)", () => {
     ).toBeUndefined();
   });
 
+  test("operators stored by id are named", () => {
+    expect(
+      priceLines({
+        sourceId: "sfr",
+        currentPrice: 15.99,
+        billingPeriod: "month",
+        marketComparisons: JSON.stringify([
+          { merchant: "free", price: 19.99 },
+          { merchant: "bouygues", price: 44.99 },
+        ]),
+        marketCheckedAt: "2026-11-05T06:00:00.000Z",
+        description: "- 250 Go en 5G",
+      }),
+    ).toEqual([
+      "Ailleurs au 05/11 : Free 19,99 €/mois, Bouygues Telecom 44,99 €/mois",
+    ]);
+  });
+
   test("monthly plans say « /mois »", () => {
     expect(
       priceLines({

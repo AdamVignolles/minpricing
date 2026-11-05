@@ -220,7 +220,14 @@ export function splitMerchantText(text: string): {
   const specs: Spec[] = [];
   const bullets: string[] = [];
   const paragraphs: string[] = [];
-  for (const raw of text.split(/\r?\n/)) {
+  const lines = text.split(/\r?\n/);
+  // Stored merchant texts are cut at a length and end with « … »: that
+  // last line is a half sentence (« … à pris… »), not a fact. Dropped.
+  while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+  if (lines.length > 1 && lines[lines.length - 1].trim().endsWith("…")) {
+    lines.pop();
+  }
+  for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
     const spec = line.match(SPEC_LINE);
