@@ -14,7 +14,15 @@ export const agentWriteEntity = $entity({
     /** Who wrote it: the skill or routine name (`deals-weekly`…), or `admin`. */
     agent: z.text({ maxLength: 80 }),
     kind: z
-      .enum(["config", "report", "proposal", "data", "schedule", "link"])
+      .enum([
+        "config",
+        "report",
+        "proposal",
+        "data",
+        "schedule",
+        "link",
+        "description",
+      ])
       .meta({ mode: "text" }),
     /** The file or plan written (`publish-rules`, `reports/weekly-…`). */
     target: z.text({ maxLength: 200 }),

@@ -58,6 +58,14 @@ export class PublishScheduleController {
         entries: z.array(publishScheduleEntity.schema),
         ranked: z.number(),
         dropped: z.array(z.text()),
+        /** Each agent description: applied, or why not (#131). */
+        descriptions: z.array(
+          z.object({
+            dealId: z.text(),
+            accepted: z.boolean(),
+            reason: z.text().optional(),
+          }),
+        ),
       }),
     },
     handler: async ({ body }) => {

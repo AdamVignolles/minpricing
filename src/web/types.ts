@@ -275,6 +275,13 @@ export interface Draft {
   lastPublishError?: string;
   /** The last publication's steps (`PublishRun` as JSON). */
   lastPublishSteps?: string;
+  /** Set when the owner or the agent wrote the text (#131). */
+  editedAt?: string;
+  /** `owner` or `agent:<name>`. */
+  editedBy?: string;
+  /** Description template, `legacy` for the fallback. */
+  templateVersion?: string;
+  generatedAt?: string;
 }
 
 export interface Breakdown {

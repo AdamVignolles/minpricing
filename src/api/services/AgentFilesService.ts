@@ -195,7 +195,14 @@ export class AgentFilesService {
 
   async audit(row: {
     agent: string;
-    kind: "config" | "report" | "proposal" | "data" | "schedule" | "link";
+    kind:
+      | "config"
+      | "report"
+      | "proposal"
+      | "data"
+      | "schedule"
+      | "link"
+      | "description";
     target: string;
     reason?: string;
     summary?: string;
