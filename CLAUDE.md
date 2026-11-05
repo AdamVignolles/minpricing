@@ -110,6 +110,18 @@ controllers → React console → Dealabs draft / auto-publish.
   only in « Repères de prix » (`priceContextLines`, given `now`).
   `DealabsDraftService` uses it, falling back to the merchant text, then
   the title's specs. `test/deal-description.spec.ts`.
+  **Titles** (`services/dealTitle.ts`, #130, rules from the moderators'
+  rewrites in folio F17 §3): `buildDealTitle(facts)` writes the draft
+  title Dealabs-style — the product type first (moved from the merchant
+  title within its first 8 words, not after « pour »/« compatible », or
+  added when implied: « Mémoire RAM », « SSD », « Carte graphique »),
+  « | » and « . » between blocks as « - », « 32 Go », marketing words and
+  a trailing SKU dropped (watches keep their reference); games « <Jeu> sur
+  <plateforme> (Dématérialisé - <store>) » from the store's own
+  « (PS5, PlayStation Store) » tag; « Reconditionné : … (État X) »,
+  « [Nouveaux clients] », « (Via Coupon) », « (Vendeur tiers) ». Cut to 140
+  by `dealabsTitle()` (now in the same file), prefix and suffix kept.
+  `test/deal-title.spec.ts`.
   **Product facts read by collectors** (`DealDetails.facts` →
   `Deal.extraFacts` JSON, `StoredFacts` in `DealSource.ts`, migration
   `20261105090000_add_deal_extra_facts`; written only when a run read them,
@@ -253,7 +265,7 @@ controllers → React console → Dealabs draft / auto-publish.
   VR, DLC or third-party "key giveaways"); each link is followed to the
   store page itself. Boulanger, Fnac and Darty block automated access —
   their official affiliate product feeds (Awin…) are the legitimate route. Dealabs titles are capped at 140
-  characters by `dealabsTitle()`.
+  characters by `dealabsTitle()` (see Titles above).
   `StoreCollectors.ts`: stores read with plain `fetch` from their own
   public APIs or server-rendered pages (parsers in
   `collectors/storeOffers.ts`) — Epic (free games of the week), GOG
