@@ -70,6 +70,25 @@ export const dealabsDraftEntity = $entity({
      * fallback — so the debrief can compare posts by template.
      */
     templateVersion: z.text({ maxLength: 40 }).optional(),
+    /**
+     * Dealabs moderation after publication (epic 29), read by
+     * `DealabsModerationService` — never answered by DealRadar.
+     * `hidden`: masqué, waiting for a fix; `deleted`: removed; `ok`: live.
+     */
+    moderationStatus: z
+      .enum(["hidden", "deleted", "ok"])
+      .meta({ mode: "text" })
+      .optional(),
+    /** `incomplete:location-stock`, `incomplete:image`, `seller`… */
+    moderationReason: z.text({ maxLength: 60 }).optional(),
+    /** The moderators' message, or what the thread's page showed. */
+    moderationMessage: z.text({ size: "rich" }).optional(),
+    /** When the moderation outcome was first seen. */
+    moderationAt: z.datetime().optional(),
+    /** Last time the thread and the messages were read. */
+    moderationCheckedAt: z.datetime().optional(),
+    /** Adam closed the alert (« Vu »). */
+    moderationDismissedAt: z.datetime().optional(),
     generatedAt: z.datetime(),
     createdAt: db.createdAt(),
     updatedAt: db.updatedAt(),

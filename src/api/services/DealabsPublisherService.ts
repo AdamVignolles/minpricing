@@ -35,6 +35,55 @@ export const SESSION_PATH = join(appDir(), ".dealabs-session.json");
 const DEBUG_DIR = join(appDir(), ".dealabs-debug");
 
 /** "Essentiel" step fields, in lookup order. */
+/** An `<img>` seen in the submission form's « Galerie d'images » step. */
+export interface FormImage {
+  src: string;
+  width: number;
+  height: number;
+  alt?: string;
+}
+
+/**
+ * Does the form's gallery show a product image (the one Dealabs scraped
+ * from the link, or ours)? Icons, avatars, logos and placeholders don't
+ * count: a real picture is at least 60 px each way and isn't a sprite.
+ */
+export function hasProductImage(images: FormImage[]): boolean {
+  return images.some(
+    (image) =>
+      image.width >= 60 &&
+      image.height >= 60 &&
+      /^(https?:|blob:|data:image\/)/.test(image.src) &&
+      !/avatar|logo|placeholder|sprite|icon|emoji|\.svg(\?|$)/i.test(
+        `${image.src} ${image.alt ?? ""}`,
+      ),
+  );
+}
+
+/** Extension and MIME type of a downloaded image, from its bytes' header. */
+export function imageFileType(
+  bytes: Uint8Array,
+): { ext: string; mimeType: string } | undefined {
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    return { ext: "jpg", mimeType: "image/jpeg" };
+  }
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) {
+    return { ext: "png", mimeType: "image/png" };
+  }
+  if (
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45
+  ) {
+    return { ext: "webp", mimeType: "image/webp" };
+  }
+  if (bytes[0] === 0x47 && bytes[1] === 0x49) {
+    return { ext: "gif", mimeType: "image/gif" };
+  }
+  return undefined;
+}
+
 const TITLE_SELECTORS = [
   'input[name="title"]',
   'input[name="dealTitle"]',
@@ -137,6 +186,11 @@ function significantWords(title: string): Set<string> {
   );
 }
 
+export interface PublishOptions {
+  /** Automatic paths: never post without a product image (epic 29). */
+  requireImage?: boolean;
+}
+
 export interface AutoPublishResult {
   dealabsUrl: string;
 }
@@ -193,6 +247,7 @@ export class DealabsPublisherService {
     deal: Deal,
     draft: Draft,
     chartImageUrl?: string,
+    options: PublishOptions = {},
   ): Promise<AutoPublishResult> {
     if (this.alepha.isServerless()) {
       throw new Error(
@@ -276,6 +331,7 @@ export class DealabsPublisherService {
           deal,
           draft,
           chartImageUrl ?? keepaChartForDeal(deal),
+          options,
         );
 
         // Refresh the saved session: Dealabs may rotate cookies on use, and
@@ -521,6 +577,7 @@ export class DealabsPublisherService {
     deal: Deal,
     draft: Draft,
     chart?: string,
+    options: PublishOptions = {},
   ): Promise<string> {
     // Step: Lien
     await this.progress.begin("form-link", deal.url);
@@ -598,11 +655,20 @@ export class DealabsPublisherService {
 
     await this.clickNavNext(page);
 
-    // Step: Galerie d'images — optional, nothing to fill.
+    // Step: Galerie d'images — Dealabs usually scraped the product image
+    // from the link; a post without one is hidden as incomplete (Asus ROG
+    // Strix, 04/11). None shown: upload the deal's own `imageUrl`. An
+    // automatic publish never goes on without an image (epic 29).
+    const image = await this.ensureProductImage(page, deal);
+    if (image === "absente" && options.requireImage) {
+      throw new Error(
+        "Image produit absente du formulaire Dealabs (non récupérée depuis le lien, ajout impossible) : publication automatique arrêtée",
+      );
+    }
     await this.clickNavNext(page);
     await this.progress.done(
       "form-essentials",
-      `${deal.currentPrice.toFixed(2).replace(".", ",")} €${deal.listPrice ? `, prix constaté ${deal.listPrice.toFixed(2).replace(".", ",")} €` : ""}`,
+      `${deal.currentPrice.toFixed(2).replace(".", ",")} €${deal.listPrice ? `, prix constaté ${deal.listPrice.toFixed(2).replace(".", ",")} €` : ""} ; image produit : ${image}`,
     );
 
     // Step: Description — a Tiptap/ProseMirror rich-text editor, not a
@@ -783,6 +849,79 @@ export class DealabsPublisherService {
       });
       // Leave the dialog closed so the next step can proceed.
       await page.keyboard.press("Escape").catch(() => undefined);
+    }
+  }
+
+  /** The `<img>` elements of the form's current step. */
+  protected async formImages(
+    page: import("playwright").Page,
+  ): Promise<FormImage[]> {
+    return page
+      .evaluate(() => {
+        const root =
+          document.querySelector("form") ??
+          document.querySelector("main") ??
+          document.body;
+        return Array.from(root.querySelectorAll("img"))
+          .filter((img) => {
+            const box = img.getBoundingClientRect();
+            return box.width > 0 && box.height > 0;
+          })
+          .map((img) => {
+            const box = img.getBoundingClientRect();
+            return {
+              src: img.currentSrc || img.src,
+              width: Math.round(box.width),
+              height: Math.round(box.height),
+              alt: img.alt,
+            };
+          });
+      })
+      .catch(() => [] as FormImage[]);
+  }
+
+  /**
+   * After the link step: is a product image in the gallery? If not, the
+   * deal's `imageUrl` is downloaded and given to the gallery's file
+   * input. Returns what the step detail says. Best-effort: selectors read
+   * from Dealabs' current markup, never fatal on its own.
+   */
+  protected async ensureProductImage(
+    page: import("playwright").Page,
+    deal: Deal,
+  ): Promise<"récupérée par Dealabs" | "ajoutée" | "absente"> {
+    // The gallery renders after the step change.
+    await page.waitForTimeout(1_500);
+    if (hasProductImage(await this.formImages(page))) {
+      return "récupérée par Dealabs";
+    }
+    if (!deal.imageUrl) return "absente";
+    try {
+      const response = await fetch(deal.imageUrl, {
+        headers: { "User-Agent": "Mozilla/5.0", Accept: "image/*" },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!response.ok) return "absente";
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const type = imageFileType(buffer);
+      if (!type || buffer.length > 10_000_000) return "absente";
+      const input = page.locator('input[type="file"]').first();
+      await input.setInputFiles(
+        { name: `produit.${type.ext}`, mimeType: type.mimeType, buffer },
+        { timeout: 5_000 },
+      );
+      // Dealabs uploads it and shows a preview.
+      for (let i = 0; i < 10; i++) {
+        await page.waitForTimeout(1_000);
+        if (hasProductImage(await this.formImages(page))) return "ajoutée";
+      }
+      return "absente";
+    } catch (error) {
+      this.log.warn("Product image not added to the Dealabs form", {
+        dealId: deal.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return "absente";
     }
   }
 

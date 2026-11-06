@@ -110,7 +110,13 @@ export class DealPageCheckService {
     currentPrice: number;
     sourceId: string;
     externalId: string;
-  }): Promise<DealPageVerdict & { snapshot?: Omit<DealPageSnapshot, "text"> }> {
+  }): Promise<
+    DealPageVerdict & {
+      snapshot?: Omit<DealPageSnapshot, "text">;
+      /** The page's first visible text, for the « Prêt pour Dealabs » checklist. */
+      pageText?: string;
+    }
+  > {
     let snapshot: DealPageSnapshot;
     try {
       snapshot =
@@ -257,6 +263,7 @@ export class DealPageCheckService {
     return {
       ...verdict,
       snapshot: { ...summary, prices: summary.prices.slice(0, 20) },
+      pageText: snapshot.text.slice(0, 20_000),
     };
   }
 }

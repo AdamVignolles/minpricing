@@ -14,6 +14,7 @@ export const AGENT_CONFIGS = {
   desirability: { file: "desirability.json", changelog: "desirability" },
   collection: { file: "collection.json", changelog: "sources" },
   "selection-lessons": { file: "selection-lessons.md", changelog: undefined },
+  moderation: { file: "moderation.json", changelog: "moderation" },
 } as const;
 
 export type AgentConfigName = keyof typeof AGENT_CONFIGS;
@@ -338,6 +339,81 @@ export function checkCollection(previous: Json, next: Json): ConfigCheck {
   return { errors, changes };
 }
 
+/**
+ * `config/moderation.json` (epic 29): thresholds within `bounds`; the
+ * seller blocklist and the local sources only grow — an agent or the
+ * moderation inbox adds, only Adam removes (by hand, in the file).
+ */
+export function checkModeration(previous: Json, next: Json): ConfigCheck {
+  const errors: string[] = [];
+  const changes: string[] = [];
+  locked(["bounds", "officialSellerWords"], previous, next, errors);
+  const bounds: Json = previous.bounds ?? {};
+  for (const key of ["minSellerRating", "minSellerSales", "minStock"]) {
+    if (bounds[key] && !inRange(next[key], bounds[key])) {
+      errors.push(
+        `${key} = ${JSON.stringify(next[key])} hors des bornes [${bounds[key].join(", ")}]`,
+      );
+    }
+    diffValues(key, previous[key], next[key], changes);
+  }
+  const names = (list: unknown): string[] =>
+    Array.isArray(list)
+      ? list.map((entry) =>
+          String(isObj(entry) ? entry.name : entry)
+            .trim()
+            .toLowerCase(),
+        )
+      : [];
+  if (!Array.isArray(next.sellerBlocklist)) {
+    errors.push("sellerBlocklist doit être une liste");
+  } else {
+    for (const entry of next.sellerBlocklist) {
+      if (
+        !isObj(entry) ||
+        typeof entry.name !== "string" ||
+        !entry.name.trim()
+      ) {
+        errors.push("chaque vendeur bloqué a un « name »");
+        break;
+      }
+    }
+    const after = new Set(names(next.sellerBlocklist));
+    const removed = names(previous.sellerBlocklist).filter(
+      (n) => !after.has(n),
+    );
+    if (removed.length) {
+      errors.push(
+        `un agent n'enlève pas de vendeur bloqué (${removed.join(", ")}) : seul Adam le fait`,
+      );
+    }
+    const before = new Set(names(previous.sellerBlocklist));
+    const added = [...after].filter((n) => !before.has(n));
+    if (added.length) changes.push(`sellerBlocklist + ${added.join(", ")}`);
+  }
+  if (
+    !Array.isArray(next.localSources) ||
+    next.localSources.some((id: unknown) => typeof id !== "string")
+  ) {
+    errors.push("localSources doit être une liste d'identifiants de source");
+  } else {
+    const after = new Set<string>(next.localSources);
+    const removed = (previous.localSources ?? []).filter(
+      (id: string) => !after.has(id),
+    );
+    if (removed.length) {
+      errors.push(
+        `un agent ne retire pas de source locale (${removed.join(", ")}) : seul Adam le fait`,
+      );
+    }
+    const added = [...after].filter(
+      (id) => !(previous.localSources ?? []).includes(id),
+    );
+    if (added.length) changes.push(`localSources + ${added.join(", ")}`);
+  }
+  return { errors, changes };
+}
+
 /** `config/selection-lessons.md`: free text, size-capped. */
 export function checkLessons(previous: string, next: string): ConfigCheck {
   const errors: string[] = [];
@@ -387,6 +463,7 @@ export function checkAgentConfig(
     return { errors: ["un objet JSON est attendu"], changes: [] };
   if (name === "publish-rules") return checkPublishRules(previous, next);
   if (name === "desirability") return checkDesirability(previous, next);
+  if (name === "moderation") return checkModeration(previous, next);
   return checkCollection(previous, next);
 }
 

@@ -11,6 +11,7 @@ export const PUBLISH_STEPS = [
   { id: "dealabs-duplicate", label: "Doublon déjà en ligne sur Dealabs" },
   { id: "merchant-check", label: "Page du marchand" },
   { id: "draft", label: "Brouillon" },
+  { id: "readiness", label: "Prêt pour Dealabs" },
   { id: "chart", label: "Graphique de prix" },
   { id: "existing-post", label: "Recherche d'un post existant" },
   { id: "browser", label: "Ouverture du navigateur" },

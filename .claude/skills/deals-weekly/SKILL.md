@@ -13,6 +13,14 @@ Numbers decide, not impressions. Everything you write is French.
    matured posts (≥ 3 days), plus `failures`, `agentAttempts`,
    `enoughData`. Read `config/publish-rules.json` and the top entry of
    `docs/publish-rules-changelog.md`.
+   Also `node scripts/agents/dealradar.mjs moderation 7` → the week's
+   hidden/deleted rate of our posts (epic 29, target < 5 %, baseline
+   15 %), `bySource`, `byCategory`, `byReason`. Put it in the Notion
+   row's Résumé and the report (one table: source → posts / masqués ou
+   supprimés). A source or category ≥ 2 rejections in the week: a
+   `sourceAdjust`/`categoryAdjust` step down is allowed even without
+   `enoughData`, or a code proposal when the checklist should have
+   caught it.
 2. **Rollback**: if the latest changelog entry is yours and the hot rate
    since then is ≥ 10 points below the overall rate → copy
    `config/publish-rules.previous.json` over the rules (keep the current

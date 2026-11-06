@@ -1,0 +1,42 @@
+{
+  "$comment": "Dealabs moderation (epic 29): the « Prêt pour Dealabs » checklist reads this before every publication. Thresholds move within `bounds` (Adam's); `sellerBlocklist` and `localSources` only grow — the moderation inbox adds a seller after a « vendeur non fiable » rejection and a source after an « incomplet : magasin et stock » one; agents may add, never remove. Changes are logged in docs/moderation-changelog.md.",
+  "version": 1,
+  "updatedAt": "2026-11-06",
+  "updatedBy": "adam",
+  "bounds": {
+    "minSellerRating": [4, 5],
+    "minSellerSales": [50, 10000],
+    "minStock": [1, 20]
+  },
+  "minSellerRating": 4.5,
+  "minSellerSales": 1000,
+  "minStock": 5,
+  "officialSellerWords": ["officiel", "official", "store officiel"],
+  "localSources": ["screwfix"],
+  "sellerBlocklist": [
+    {
+      "name": "AoEn",
+      "reason": "vendeur Cdiscount marketplace cité dans l'audit (Galaxy Tab A11+ masquée le 30/10)",
+      "at": "2026-11-05",
+      "by": "audit epic 29"
+    },
+    {
+      "name": "BJCA",
+      "reason": "vendeur Cdiscount marketplace cité dans l'audit (epic 29)",
+      "at": "2026-11-05",
+      "by": "audit epic 29"
+    },
+    {
+      "name": "XXINTERNA LIMITED",
+      "reason": "vendeur Cdiscount marketplace cité dans l'audit (epic 29)",
+      "at": "2026-11-05",
+      "by": "audit epic 29"
+    },
+    {
+      "name": "Zeroktek",
+      "reason": "vendeur sous les critères de Dealabs (batteries compatibles Makita, 29/10)",
+      "at": "2026-10-29",
+      "by": "audit epic 29"
+    }
+  ]
+}

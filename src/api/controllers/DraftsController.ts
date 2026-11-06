@@ -14,6 +14,7 @@ import {
   checkDealabsTitle,
   DealabsDraftService,
 } from "../services/DealabsDraftService.ts";
+import { DealabsModerationService } from "../services/DealabsModerationService.ts";
 import { DealabsDuplicateError } from "../services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../services/DealabsSessionService.ts";
 import { DealPageCheckService } from "../services/DealPageCheckService.ts";
@@ -75,6 +76,18 @@ const publishRunSchema = z.object({
   ),
 });
 
+const moderationAlertSchema = z.object({
+  dealId: z.text(),
+  title: z.text({ size: "rich" }),
+  dealabsUrl: z.text({ maxLength: 2000 }).optional(),
+  status: z.enum(["hidden", "deleted", "ok"]),
+  reason: z.text(),
+  label: z.text(),
+  message: z.text({ size: "rich" }).optional(),
+  at: z.text().optional(),
+  deadline: z.text().optional(),
+});
+
 const pauseSchema = z.object({
   paused: z.boolean(),
   since: z.text().optional(),
@@ -102,6 +115,113 @@ export class DraftsController {
   protected deals = $repository(dealEntity);
   protected progress = $inject(PublishProgressService);
   protected pause = $inject(PublishPauseService);
+  protected moderation = $inject(DealabsModerationService);
+
+  /**
+   * Dealabs moderation of our posts (epic 29): hidden/deleted posts not
+   * yet closed (banner, deal page), every outcome of the last `days` and
+   * the rejection rate. Read only — DealRadar never answers moderators.
+   */
+  moderationStatus = $action({
+    method: "GET",
+    path: "/dealabs/moderation",
+    use: [$adminSession()],
+    schema: {
+      query: z.object({ days: z.number().optional() }),
+      response: z.object({
+        alerts: z.array(moderationAlertSchema),
+        outcomes: z.array(moderationAlertSchema),
+        stats: z.object({
+          days: z.number(),
+          posts: z.number(),
+          rejected: z.number(),
+          rate: z.number(),
+          bySource: z.record(
+            z.text(),
+            z.object({ posts: z.number(), rejected: z.number() }),
+          ),
+          byCategory: z.record(
+            z.text(),
+            z.object({ posts: z.number(), rejected: z.number() }),
+          ),
+          byReason: z.record(z.text(), z.number()),
+        }),
+      }),
+    },
+    handler: async ({ query }) => ({
+      alerts: await this.moderation.alerts(),
+      outcomes: await this.moderation.outcomes(query.days ?? 30),
+      stats: await this.moderation.stats(query.days ?? 7),
+    }),
+  });
+
+  /** « Vu » on a moderation alert: it leaves the banner. */
+  dismissModeration = $action({
+    method: "POST",
+    path: "/dealabs/moderation/:dealId/dismiss",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ dealId: z.text() }),
+      response: z.object({ ok: z.boolean() }),
+    },
+    handler: async ({ params }) => {
+      await this.moderation.dismiss(params.dealId);
+      return { ok: true };
+    },
+  });
+
+  /** Reads Dealabs' moderation now instead of waiting for the job. */
+  checkModeration = $action({
+    method: "POST",
+    path: "/dealabs/moderation/check",
+    use: [$adminSession()],
+    schema: {
+      response: z.object({
+        threads: z.number(),
+        messages: z.number(),
+        changed: z.number(),
+        messagesSkipped: z.text({ size: "rich" }).optional(),
+        learned: z.array(z.text({ size: "rich" })),
+      }),
+    },
+    handler: async () => {
+      const pass = await this.moderation.poll();
+      return { ...pass, changed: pass.changed.length };
+    },
+  });
+
+  /**
+   * « Prêt pour Dealabs » for one deal, without opening the merchant page
+   * (the publication re-checks with it): shown on the deal page.
+   */
+  readiness = $action({
+    method: "GET",
+    path: "/deals/:id/readiness",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ id: z.text() }),
+      response: z.object({
+        status: z.enum(["ok", "fix", "block"]),
+        checks: z.array(
+          z.object({
+            rule: z.text(),
+            status: z.enum(["ok", "fix", "block"]),
+            reason: z.text({ size: "rich" }),
+          }),
+        ),
+      }),
+    },
+    handler: async ({ params }) => {
+      const deal = await this.deals.getById(params.id);
+      const draft = await this.draftService.ensureDraftForDeal(params.id);
+      const readiness = this.autoPublisher.assessReadiness(
+        deal,
+        draft ?? { title: deal.title, description: deal.description },
+        "schedule",
+      );
+      return { status: readiness.status, checks: readiness.checks };
+    },
+  });
 
   /**
    * Dry run of the pre-publish check: opens the merchant page and says

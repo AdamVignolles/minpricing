@@ -292,6 +292,13 @@ export interface Draft {
   titleApprovedAt?: string;
   titleApprovedBy?: string;
   generatedAt?: string;
+  /** Dealabs moderation after publication (epic 29). */
+  moderationStatus?: "hidden" | "deleted" | "ok";
+  moderationReason?: string;
+  moderationMessage?: string;
+  moderationAt?: string;
+  moderationDismissedAt?: string;
+  updatedAt?: string;
 }
 
 export interface Breakdown {

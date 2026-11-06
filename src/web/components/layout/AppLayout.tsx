@@ -26,6 +26,7 @@ import {
   CollectionProgressPanel,
   useCollectionProgress,
 } from "./CollectionProgressAside.tsx";
+import ModerationBanner from "./ModerationBanner.tsx";
 import PublishBanner from "./PublishBanner.tsx";
 
 /**
@@ -220,6 +221,7 @@ const AppLayout: FC = () => {
         </AppShell.Navbar>
 
         <AppShell.Main>
+          <ModerationBanner />
           <PublishBanner />
           <NestedView />
         </AppShell.Main>
