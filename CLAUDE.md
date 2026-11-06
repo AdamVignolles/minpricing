@@ -324,7 +324,7 @@ DismissedAt`, migration `20261106090000_add_draft_moderation`). A
   duplicate search (`ignoreThreadUrl`); the button may republish any
   non-live post. `/admin/agent-report` admits republishable posted
   drafts with `republish` (reason), `shortlist` passes it on; `PUT
-  /agent/schedule` drops deals whose post is live, slots skip a
+/agent/schedule` drops deals whose post is live, slots skip a
   forbidden republish without a try; the end-of-run batch never
   republishes. Stats: `statuses` in `GET /dealabs/moderation` and
   `dealradar.mjs moderation`. `test/dealabs-status.spec.ts`.

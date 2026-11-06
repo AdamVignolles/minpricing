@@ -166,6 +166,12 @@ describe("« Prêt pour Dealabs »: the six posts moderators hid (26/10–04/11)
     expect(foreignLanguage("Apple AirPods Pro 2 with MagSafe case")).toBe(
       undefined,
     );
+    // A French Lenovo bundle read as Polish in production (06/11).
+    expect(
+      foreignLanguage(
+        'PC portable Lenovo Legion Pro 5 16IRX10 I7 16G 1T 11H + Casque Legion H410 + Sac à dos Legion GB900 16" + Souris Legion M600s Qi - Core i7, 16 Go RAM, 1 To SSD. Livraison offerte, retours sous 30 jours, i z w',
+      ),
+    ).toBeUndefined();
     const readiness = assessReadiness(
       input(
         { title },
