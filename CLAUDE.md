@@ -276,6 +276,58 @@ DismissedAt`, migration `20261106090000_add_draft_moderation`). A
   longer counts as « Publié par vous ». **Never replies to a moderator
   nor edits a post** (owner, 2026-11-04). Push/e-mail alerts: not built
   (owner's open question). `test/dealabs-moderation.spec.ts`.
+- **Dealabs status of each deal** (epic 32): drafts carry our post's
+  checked status — `dealabsStatus` `not_published` | `live` | `expired` |
+  `hidden` | `deleted` (empty on an unchecked `posted` draft = `live`:
+  `currentDealabsStatus`), `dealabsStatusAt`, `dealabsCheckedAt`,
+  `dealabsStatusSource` (`publish` | `profile` | `thread` | `moderation` |
+  `manual-verify`), `postedBy` (`agent` | `button` | `manual`),
+  `dealabsTemperature`, `dealabsPostPrice`, `dealabsStatusHistory` (last
+  20 changes; migration `20261106120000_add_draft_dealabs_status`, which
+  starts posted drafts as `live`). `DealabsStatusService` (pure rules in
+  `services/dealabsStatus.ts`, labels in `dealabsStatusLabels.ts` for the
+  browser): our profile read fresh (`MyDealabsPostsService.postsFresh`,
+  `undefined` = unreadable → nothing changes) matched to drafts by thread
+  id (`dealabsThreadId`: `…-3445887`, `/share-deal/3446484`), then by
+  product (`isSameProduct` on `ownTitle` — our titles' commas aren't a
+  roundup — plus the same shop, `sameMerchant`, deals seen in 45 days);
+  a post with no draft or an unposted draft = **posted by hand**:
+  attached (`posted`, `postedBy: manual`, link fixed). Posted drafts the
+  profile didn't confirm: their page, anonymous, paced by
+  `DealabsHistoryService.waitForSlot` (20 per check, oldest-checked
+  first): 404/410 or redirect away = `deleted` (`hidden` when a
+  moderator's message said so), « en attente de modération » = `hidden`,
+  first `isExpired` of the page's JSON = `expired`/`live` (checked on
+  live pages 06/11, fixtures `test/fixtures/dealabs/`); Cloudflare,
+  errors, other codes = unchanged. `setStatus` writes the history and,
+  for `hidden`/`deleted`, raises epic 29's moderation alert (banner);
+  the moderation inbox calls it too. Run at the end of `runAll()` after
+  `refreshTop` (pseudo-source `dealabs-status`, « Statut Dealabs des
+  deals », at most hourly, never fails the run; run-log line
+  `statusSummaryLine`), and from the deal page (`DealabsStatusPanel`:
+  « Sur Dealabs » badge, link, checked when/how, history, « Vérifier sur
+  Dealabs » → `POST /deals/:id/dealabs/check`, also a fresh search for
+  someone else's live post; `GET /deals/:id/dealabs/status`, MCP
+  `get_dealabs_status`); the old paste-the-URL verify stays as « J'ai
+  publié ce deal moi-même » (status `manual-verify`). Publication sets
+  `live`/`publish`/`postedBy`/post price. **Effects**: cards — « Publié
+  par vous » for `live`/`expired` (« · expiré »), `hidden`/`deleted`
+  red « Masqué/Supprimé par Dealabs », not greyed; **republish rules**
+  (owner, 2026-11-05, `republishVerdict` via
+  `AutoPublishService.republishCheck`): never over our live post or
+  someone else's (`othersLiveOnDealabs`, stored history without `mine`);
+  `hidden`/`deleted` once « Prêt pour Dealabs » passes; `expired` when
+  today's price ≤ our post's price (the normal selection rules apply as
+  for any deal). `publishDeal` refuses a live post (409), refuses an
+  automatic republish the rules forbid, resets the draft to `draft`
+  (history kept) and tells the publisher to ignore our old thread in its
+  duplicate search (`ignoreThreadUrl`); the button may republish any
+  non-live post. `/admin/agent-report` admits republishable posted
+  drafts with `republish` (reason), `shortlist` passes it on; `PUT
+  /agent/schedule` drops deals whose post is live, slots skip a
+  forbidden republish without a try; the end-of-run batch never
+  republishes. Stats: `statuses` in `GET /dealabs/moderation` and
+  `dealradar.mjs moderation`. `test/dealabs-status.spec.ts`.
 - **Auto-publish**: `AutoPublishService.publishDeal()` is the single publish
   path (button and run). At the end of `runAll()`, `publishBestDeals()` posts
   deals seen in that run with score ≥ `AUTO_PUBLISH_MIN_SCORE` (65), draft

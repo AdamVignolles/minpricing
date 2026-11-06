@@ -10,6 +10,7 @@ import type { dealabsDraftEntity } from "../entities/DealabsDraft.ts";
 import { appDir } from "./appDir.ts";
 import { dealabsTitle } from "./DealabsDraftService.ts";
 import { isSameProduct } from "./dealabsSearch.ts";
+import { dealabsThreadId } from "./dealabsStatus.ts";
 import type { Deal } from "./DealTypes.ts";
 import { descriptionHtml, descriptionVisibleText } from "./descriptionHtml.ts";
 import { pasteHtml } from "./editorPaste.ts";
@@ -189,6 +190,8 @@ function significantWords(title: string): Set<string> {
 export interface PublishOptions {
   /** Automatic paths: never post without a product image (epic 29). */
   requireImage?: boolean;
+  /** Our own earlier post of this deal (expired, deleted): not a duplicate. */
+  ignoreThreadUrl?: string;
 }
 
 export interface AutoPublishResult {
@@ -267,7 +270,15 @@ export class DealabsPublisherService {
     // reposting the same deal isn't allowed.
     await this.progress.begin("existing-post");
     const existingUrl = await this.findExistingPost(deal);
-    if (existingUrl) {
+    if (
+      existingUrl &&
+      !(
+        options.ignoreThreadUrl &&
+        dealabsThreadId(existingUrl) &&
+        dealabsThreadId(existingUrl) ===
+          dealabsThreadId(options.ignoreThreadUrl)
+      )
+    ) {
       throw new DealabsDuplicateError(
         `Ce deal semble déjà publié sur Dealabs : ${existingUrl}`,
         existingUrl,

@@ -59,6 +59,22 @@ export class MyDealabsPostsService {
     return this.refreshing;
   }
 
+  /**
+   * Our posts read now (all pages), for a status check: `undefined` when
+   * the profile could not be read at all (no username, Dealabs down) —
+   * the caller must then change nothing.
+   */
+  async postsFresh(): Promise<DealabsThread[] | undefined> {
+    const user = this.env.DEALABS_USERNAME;
+    if (!user) return undefined;
+    const posts = await (this.refreshing ??= this.fetchPosts(user).finally(
+      () => {
+        this.refreshing = undefined;
+      },
+    ));
+    return posts.length > 0 ? posts : undefined;
+  }
+
   protected async fetchPosts(user: string): Promise<DealabsThread[]> {
     const posts: DealabsThread[] = [];
     for (let page = 1; page <= MAX_PAGES; page++) {

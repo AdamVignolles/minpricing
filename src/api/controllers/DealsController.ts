@@ -16,6 +16,7 @@ import {
   liveOnDealabs,
   type OnDealabs,
 } from "../services/dealabsSearch.ts";
+import { currentDealabsStatus, ownTitle } from "../services/dealabsStatus.ts";
 import { predictDealHeat } from "../services/heatPrediction.ts";
 import { IdealoReferenceService } from "../services/IdealoReferenceService.ts";
 import { ItadService } from "../services/ItadService.ts";
@@ -47,6 +48,7 @@ const dealResponseSchema = dealEntity.schema.extend({
       price: z.number(),
       temperature: z.number(),
       mine: z.boolean(),
+      status: z.enum(["live", "expired", "hidden", "deleted"]).optional(),
     })
     .optional(),
   /** Added by pasting its link (see `WatchedLink`), still watched or not. */
@@ -306,21 +308,36 @@ export class DealsController {
         ],
       },
     });
-    // A post Dealabs' moderators deleted is no longer « Publié par vous »
-    // (epic 29): the deal can be posted again, done properly.
-    const mine = new Map(
-      posted
-        .filter((draft) => draft.moderationStatus !== "deleted")
-        .map((draft) => [draft.dealId, draft]),
-    );
+    // Epic 32: our post's checked status decides — « Publié par vous »
+    // for live and expired posts, hidden and deleted ones say so.
+    const mine = new Map(posted.map((draft) => [draft.dealId, draft]));
     // Our live posts, from our profile: found even when the title we
     // posted differs from the merchant's.
     const ourLivePosts = (
       await this.myPosts.posts().catch(() => [] as DealabsThread[])
     ).filter((post) => !post.isExpired);
     return deals.map((deal) => {
+      const draft = mine.get(deal.id);
+      if (draft) {
+        const status = currentDealabsStatus(draft);
+        if (status !== "not_published") {
+          return {
+            ...deal,
+            onDealabs: {
+              url: draft.dealabsUrl ?? "",
+              price: draft.dealabsPostPrice ?? deal.currentPrice,
+              temperature: draft.dealabsTemperature ?? 0,
+              mine: true,
+              status,
+            },
+          };
+        }
+      }
       const ours = ourLivePosts.find((post) =>
-        isSameProduct(deal.title, deal.currentPrice, post),
+        isSameProduct(deal.title, deal.currentPrice, {
+          ...post,
+          title: ownTitle(post.title),
+        }),
       );
       if (ours) {
         return {
@@ -330,18 +347,7 @@ export class DealsController {
             price: ours.price,
             temperature: Math.round(ours.temperature),
             mine: true,
-          },
-        };
-      }
-      const draft = mine.get(deal.id);
-      if (draft) {
-        return {
-          ...deal,
-          onDealabs: {
-            url: draft.dealabsUrl ?? "",
-            price: deal.currentPrice,
-            temperature: 0,
-            mine: true,
+            status: "live" as const,
           },
         };
       }

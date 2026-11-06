@@ -32,6 +32,7 @@ import {
   isSameProduct,
   liveOnDealabs,
 } from "../services/dealabsSearch.ts";
+import { currentDealabsStatus } from "../services/dealabsStatus.ts";
 import { MyDealabsPostsService } from "../services/MyDealabsPostsService.ts";
 import { dropSameListings } from "../services/sameListing.ts";
 import { MIN_VISIBLE_SCORE } from "../services/ScoringService.ts";
@@ -446,6 +447,11 @@ export class AdminController {
              */
             readiness: z.enum(["ok", "fix", "block"]).optional(),
             readinessReasons: richText().optional(),
+            /**
+             * Epic 32: our earlier post is expired, hidden or deleted and
+             * the owner's rules allow it again — why, in French.
+             */
+            republish: richText().optional(),
           }),
         ),
         posted: z.array(
@@ -514,10 +520,30 @@ export class AdminController {
           })
         : [];
       const draftOf = new Map(drafts.map((draft) => [draft.dealId, draft]));
+      // Epic 32: a post that is no longer live may go out again under the
+      // owner's rules (`republishCheck`); the reason travels with the row.
+      const republish = new Map<string, string>();
       const candidates = dropSameListings(
         seen.filter((deal) => {
           const draft = draftOf.get(deal.id);
-          if (!draft || draft.status !== "draft") return false;
+          if (!draft) return false;
+          const status = currentDealabsStatus(draft);
+          if (status !== "not_published") {
+            if (draft.status === "discarded") return false;
+            const verdict = this.autoPublish.republishCheck(
+              deal,
+              draft,
+              "schedule",
+            );
+            if (!verdict.allowed) return false;
+            republish.set(deal.id, verdict.reason);
+            return !recentThreads.some(
+              (thread) =>
+                !thread.isExpired &&
+                isSameProduct(deal.title, deal.currentPrice, thread),
+            );
+          }
+          if (draft.status !== "draft") return false;
           const panelOnly =
             draft.lastPublishResult === "duplicate" &&
             (draft.publishAttempts ?? 0) < 2 &&
@@ -579,6 +605,9 @@ export class AdminController {
           dealabsTitle: draftOf.get(deal.id)?.title,
           needsTitle: draftNeedsTitleNow(draftOf.get(deal.id), deal),
           ...this.readinessOf(deal, draftOf.get(deal.id)),
+          ...(republish.has(deal.id)
+            ? { republish: republish.get(deal.id) }
+            : {}),
         }));
 
       const report = {

@@ -349,6 +349,16 @@ export class McpTools {
       this.drafts.moderationStatus.run({ query: { days: params.days } }),
   });
 
+  get_dealabs_status = $tool({
+    title: "Statut Dealabs d'un deal",
+    description:
+      "One deal's checked Dealabs status (epic 32): our post not_published / live / expired / hidden / deleted, its link, temperature, price, who posted it (agent, button, manual), when it was checked and the history of changes, plus whether someone else's post for the product is live (stored history). Re-checked every collection run (at most hourly).",
+    annotations: readOnly,
+    schema: { params: z.object({ dealId: z.text() }) },
+    handler: ({ params }) =>
+      this.drafts.dealabsStatusOf.run({ params: { id: params.dealId } }),
+  });
+
   /** « Prêt pour Dealabs » for one deal (without the merchant page). */
   get_readiness = $tool({
     title: "Prêt pour Dealabs",

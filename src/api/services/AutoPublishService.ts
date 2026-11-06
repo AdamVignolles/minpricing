@@ -21,6 +21,13 @@ import {
   readinessSummary,
 } from "./dealabsReadiness.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
+import {
+  currentDealabsStatus,
+  type DealabsStatus,
+  othersLiveOnDealabs,
+  republishVerdict,
+  withChange,
+} from "./dealabsStatus.ts";
 import { buildDealFacts } from "./dealFacts.ts";
 import type { DealPageProblem } from "./dealPageCheck.ts";
 import { DealPageCheckService } from "./DealPageCheckService.ts";
@@ -353,6 +360,36 @@ export class AutoPublishService {
     });
   }
 
+  /**
+   * May this deal go out again (epic 32, owner's decisions 2026-11-05)?
+   * See `republishVerdict`: never over our live post or someone else's,
+   * hidden/deleted once « Prêt pour Dealabs » passes, expired when the
+   * price is back at or under our post's.
+   */
+  republishCheck(
+    deal: Deal,
+    draft: {
+      status: string;
+      title: string;
+      description?: string | null;
+      dealabsStatus?: string | null;
+      dealabsPostPrice?: number | null;
+      moderationReason?: string | null;
+    },
+    trigger: PublishTrigger,
+  ): { allowed: boolean; reason: string; status: DealabsStatus } {
+    const status = currentDealabsStatus(draft);
+    const verdict = republishVerdict({
+      status,
+      currentPrice: deal.currentPrice,
+      postedPrice: draft.dealabsPostPrice ?? undefined,
+      othersLive: othersLiveOnDealabs(deal.dealabsHistory, deal.currentPrice),
+      readiness: this.assessReadiness(deal, draft, trigger).status,
+      moderationReason: draft.moderationReason,
+    });
+    return { ...verdict, status };
+  }
+
   /** One publish at a time: the button and the run share one browser flow. */
   protected busy = false;
 
@@ -395,13 +432,42 @@ export class AutoPublishService {
     }
     // Our own record of having already posted this one — cheap, no browser
     // needed (double click, retry after a flaky run…).
-    if (draft.status === "posted") {
-      throw new PublishRefusedError(
-        draft.dealabsUrl
-          ? `Ce deal est déjà publié sur Dealabs : ${draft.dealabsUrl}`
-          : "Ce deal est déjà marqué comme publié.",
-        409,
-      );
+    // Epic 32: a post that is no longer live (expired, hidden, deleted)
+    // may go out again — the agents only under the owner's rules
+    // (`republishCheck`), the button whenever the owner decides.
+    let republishOf: string | undefined;
+    if (
+      draft.status === "posted" ||
+      (draft.dealabsStatus && draft.dealabsStatus !== "not_published")
+    ) {
+      const status = currentDealabsStatus(draft);
+      if (status === "live" && draft.status === "posted") {
+        throw new PublishRefusedError(
+          draft.dealabsUrl
+            ? `Ce deal est déjà publié sur Dealabs : ${draft.dealabsUrl}`
+            : "Ce deal est déjà marqué comme publié.",
+          409,
+        );
+      }
+      if (status !== "live" && status !== "not_published") {
+        const deal = await this.deals.getById(dealId);
+        const verdict = this.republishCheck(deal, draft, trigger);
+        if (!verdict.allowed && trigger !== "button") {
+          throw new PublishRefusedError(
+            `Pas de republication : ${verdict.reason}`,
+            409,
+          );
+        }
+        republishOf = draft.dealabsUrl ?? undefined;
+        if (draft.status === "posted") {
+          // The old post stays in the status history; the draft is
+          // written again like a new one.
+          draft = (await this.drafts.updateById(draft.id, {
+            status: "draft",
+            moderationDismissedAt: this.dateTime.nowISOString(),
+          })) as typeof draft;
+        }
+      }
     }
     // Rename once (epic 28): a title cut to fit Dealabs' 140 characters
     // is never posted as the machine cut it — written and approved by
@@ -548,8 +614,11 @@ export class AutoPublishService {
 
       const { dealabsUrl } = await this.publisher.publish(deal, draft, chart, {
         requireImage: trigger !== "button",
+        // Our own old post (expired, deleted) is not a duplicate.
+        ignoreThreadUrl: republishOf,
       });
       await this.progress.finish(dealabsUrl);
+      const postedAt = this.dateTime.nowISOString();
       return await this.drafts.updateById(draft.id, {
         ...attempt,
         lastPublishResult: "success",
@@ -557,7 +626,24 @@ export class AutoPublishService {
         lastPublishSteps: this.trail(),
         status: "posted",
         dealabsUrl,
-        verifiedAt: this.dateTime.nowISOString(),
+        verifiedAt: postedAt,
+        // Epic 32: live from our side; the next status check confirms.
+        dealabsStatus: "live",
+        dealabsStatusAt: postedAt,
+        dealabsStatusSource: "publish",
+        postedBy: trigger === "button" ? "button" : "agent",
+        dealabsPostPrice: deal.currentPrice,
+        dealabsStatusHistory: withChange(draft.dealabsStatusHistory, {
+          at: postedAt,
+          from: draft.dealabsStatus ? currentDealabsStatus(draft) : undefined,
+          to: "live",
+          source: "publish",
+          url: dealabsUrl,
+        }),
+        moderationStatus: null as unknown as undefined,
+        moderationReason: null as unknown as undefined,
+        moderationMessage: null as unknown as undefined,
+        moderationAt: null as unknown as undefined,
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);

@@ -390,6 +390,9 @@ async function shortlist() {
       ...(c.needsTitle
         ? { needsTitle: true, dealabsTitle: c.dealabsTitle }
         : {}),
+      // Epic 32: our earlier post expired / was hidden or deleted and may
+      // go out again — say so in the queue item's `reason`.
+      ...(c.republish ? { republish: c.republish } : {}),
       // « fix »: DealRadar adds a price condition (coupon, Prime…) itself.
       ...(c.readiness === "fix"
         ? { readiness: "fix", readinessReasons: c.readinessReasons }
@@ -490,6 +493,8 @@ async function moderationReview(days = 7) {
     bySource: stats.bySource,
     byCategory: stats.byCategory,
     byReason: stats.byReason,
+    // Epic 32: our posts by checked Dealabs status.
+    statuses: res.body.statuses,
     // A pattern worth a lesson in selection-lessons.md.
     repeated: Object.entries(byReason)
       .filter(([, titles]) => titles.length >= 2)

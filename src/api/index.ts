@@ -32,6 +32,7 @@ import { DealabsCommentsService } from "./services/DealabsCommentsService.ts";
 import { DealabsDraftService } from "./services/DealabsDraftService.ts";
 import { DealabsHistoryService } from "./services/DealabsHistoryService.ts";
 import { DealabsModerationService } from "./services/DealabsModerationService.ts";
+import { DealabsStatusService } from "./services/DealabsStatusService.ts";
 import { DealPageCheckService } from "./services/DealPageCheckService.ts";
 import { HotWatchlistService } from "./services/HotWatchlistService.ts";
 import { IdealoReferenceService } from "./services/IdealoReferenceService.ts";
@@ -99,6 +100,7 @@ export const ApiModule = $module({
     DealabsCommentsService,
     DealabsHistoryService,
     DealabsModerationService,
+    DealabsStatusService,
     DealPageCheckService,
     ItadService,
     SeedService,

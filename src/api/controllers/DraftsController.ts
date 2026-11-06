@@ -17,6 +17,8 @@ import {
 import { DealabsModerationService } from "../services/DealabsModerationService.ts";
 import { DealabsDuplicateError } from "../services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../services/DealabsSessionService.ts";
+import { othersLiveOnDealabs } from "../services/dealabsStatus.ts";
+import { DealabsStatusService } from "../services/DealabsStatusService.ts";
 import { DealPageCheckService } from "../services/DealPageCheckService.ts";
 import { PublishPauseService } from "../services/PublishPauseService.ts";
 import {
@@ -76,6 +78,36 @@ const publishRunSchema = z.object({
   ),
 });
 
+const dealabsStatusSchema = z.object({
+  status: z.enum(["not_published", "live", "expired", "hidden", "deleted"]),
+  url: z.text({ maxLength: 2000 }).optional(),
+  temperature: z.number().optional(),
+  postPrice: z.number().optional(),
+  checkedAt: z.text().optional(),
+  statusAt: z.text().optional(),
+  source: z.text().optional(),
+  postedBy: z.text().optional(),
+  history: z.array(
+    z.object({
+      at: z.text(),
+      from: z.text().optional(),
+      to: z.text(),
+      source: z.text(),
+      url: z.text({ maxLength: 2000 }).optional(),
+      temperature: z.number().optional(),
+    }),
+  ),
+  othersLive: z
+    .object({
+      url: z.text({ maxLength: 2000 }),
+      price: z.number(),
+      temperature: z.number(),
+    })
+    .optional(),
+  othersLiveStored: z.boolean().optional(),
+  note: z.text({ size: "rich" }).optional(),
+});
+
 const moderationAlertSchema = z.object({
   dealId: z.text(),
   title: z.text({ size: "rich" }),
@@ -116,6 +148,51 @@ export class DraftsController {
   protected progress = $inject(PublishProgressService);
   protected pause = $inject(PublishPauseService);
   protected moderation = $inject(DealabsModerationService);
+  protected dealabsStatus = $inject(DealabsStatusService);
+
+  /**
+   * A deal's Dealabs status as stored (epic 32): our post live, expired,
+   * hidden, deleted or not published, its link, temperature, when it was
+   * checked and the history of changes; `othersLive` from the stored
+   * Dealabs history. A read: the agent token may call it.
+   */
+  dealabsStatusOf = $action({
+    method: "GET",
+    path: "/deals/:id/dealabs/status",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ id: z.text() }),
+      response: dealabsStatusSchema,
+    },
+    handler: async ({ params }) => {
+      const deal = await this.deals.getById(params.id);
+      const draft = await this.drafts.findOne({
+        where: { dealId: { eq: params.id } },
+      });
+      return {
+        ...this.dealabsStatus.describe(draft ?? undefined),
+        othersLiveStored: othersLiveOnDealabs(
+          deal.dealabsHistory,
+          deal.currentPrice,
+        ),
+      };
+    },
+  });
+
+  /**
+   * « Vérifier sur Dealabs » (epic 32): our profile and the post's page
+   * read now for this deal, then a fresh search for anyone's live post.
+   */
+  checkDealabsStatus = $action({
+    method: "POST",
+    path: "/deals/:id/dealabs/check",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ id: z.text() }),
+      response: dealabsStatusSchema,
+    },
+    handler: async ({ params }) => this.dealabsStatus.checkDeal(params.id),
+  });
 
   /**
    * Dealabs moderation of our posts (epic 29): hidden/deleted posts not
@@ -146,12 +223,15 @@ export class DraftsController {
           ),
           byReason: z.record(z.text(), z.number()),
         }),
+        /** Our posts by checked Dealabs status (epic 32). */
+        statuses: z.record(z.text(), z.number()),
       }),
     },
     handler: async ({ query }) => ({
       alerts: await this.moderation.alerts(),
       outcomes: await this.moderation.outcomes(query.days ?? 30),
       stats: await this.moderation.stats(query.days ?? 7),
+      statuses: await this.dealabsStatus.counts(),
     }),
   });
 
@@ -602,16 +682,24 @@ export class DraftsController {
       // post): the draft goes back to "to review" so auto-publish is
       // available again. A real duplicate is still caught by Dealabs' own
       // "already posted?" check during auto-publish.
-      const draft = matched
+      let draft = matched
         ? await this.drafts.updateById(existing.id, {
             status: "posted",
             dealabsUrl: body.dealabsUrl,
             verifiedAt: new Date().toISOString(),
+            postedBy: existing.postedBy ?? "manual",
           })
         : await this.drafts.updateById(existing.id, {
             status: "draft",
             dealabsUrl: body.dealabsUrl,
           });
+      // Epic 32: a confirmed post is live, as the owner just saw it.
+      if (matched) {
+        await this.dealabsStatus.setStatus(draft, "live", "manual-verify", {
+          url: body.dealabsUrl,
+        });
+        draft = (await this.drafts.getById(existing.id)) as typeof draft;
+      }
 
       return { matched, draft };
     },
