@@ -357,6 +357,24 @@ export function checkModeration(previous: Json, next: Json): ConfigCheck {
     }
     diffValues(key, previous[key], next[key], changes);
   }
+  const bySource: Json = next.minSellerSalesBySource ?? {};
+  if (!isObj(bySource)) {
+    errors.push("minSellerSalesBySource doit être un objet");
+  } else {
+    for (const [source, value] of Object.entries(bySource)) {
+      if (bounds.minSellerSales && !inRange(value, bounds.minSellerSales)) {
+        errors.push(
+          `minSellerSalesBySource.${source} = ${JSON.stringify(value)} hors des bornes [${bounds.minSellerSales.join(", ")}]`,
+        );
+      }
+    }
+    diffMap(
+      "minSellerSalesBySource",
+      previous.minSellerSalesBySource ?? {},
+      bySource,
+      changes,
+    );
+  }
   const names = (list: unknown): string[] =>
     Array.isArray(list)
       ? list.map((entry) =>

@@ -125,11 +125,11 @@ describe("« Prêt pour Dealabs »: the six posts moderators hid (26/10–04/11)
         soldByMerchant: false,
         sellerName: "TECHSHOP EU",
         sellerRating: 4.3,
-        sellerSalesCount: 300,
+        sellerSalesCount: 150,
       }),
     );
     expect(rule(thin, "seller")?.status).toBe("block");
-    expect(rule(thin, "seller")?.reason).toMatch(/1000 ventes/);
+    expect(rule(thin, "seller")?.reason).toMatch(/300 ventes/);
     // The brand's own store on the marketplace is fine.
     const official = assessReadiness(
       input({
