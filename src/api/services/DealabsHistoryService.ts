@@ -208,6 +208,14 @@ export class DealabsHistoryService {
    */
   protected nextSlot = 0;
 
+  /**
+   * Waits for this app's next Dealabs slot (1 request per 1.5 s, shared
+   * by every Dealabs reader: history, status checks).
+   */
+  async waitForSlot(): Promise<void> {
+    await this.waitTurn();
+  }
+
   protected async waitTurn(): Promise<void> {
     const now = Date.now();
     const slot = Math.max(now, this.nextSlot);

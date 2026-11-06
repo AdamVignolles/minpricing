@@ -109,6 +109,8 @@ export interface Deal {
     price: number;
     temperature: number;
     mine: boolean;
+    /** Our post's checked status (epic 32). */
+    status?: "live" | "expired" | "hidden" | "deleted";
   };
   /** Added by pasting its link (see `WatchedLink`). */
   addedByLink?: { linkId: string; addedBy: string; watched: boolean };
@@ -298,6 +300,10 @@ export interface Draft {
   moderationMessage?: string;
   moderationAt?: string;
   moderationDismissedAt?: string;
+  /** Our post's checked Dealabs status (epic 32). */
+  dealabsStatus?: "not_published" | "live" | "expired" | "hidden" | "deleted";
+  dealabsCheckedAt?: string;
+  postedBy?: string;
   updatedAt?: string;
 }
 

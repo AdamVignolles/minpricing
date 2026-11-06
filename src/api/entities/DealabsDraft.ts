@@ -89,6 +89,30 @@ export const dealabsDraftEntity = $entity({
     moderationCheckedAt: z.datetime().optional(),
     /** Adam closed the alert (« Vu »). */
     moderationDismissedAt: z.datetime().optional(),
+    /**
+     * Our post's true status on Dealabs (epic 32), checked back on our
+     * profile and the post's page by `DealabsStatusService` (every run,
+     * at most hourly, and « Vérifier sur Dealabs »). Empty on a draft
+     * never checked: `posted` then means `live` (`currentDealabsStatus`).
+     */
+    dealabsStatus: z
+      .enum(["not_published", "live", "expired", "hidden", "deleted"])
+      .meta({ mode: "text" })
+      .optional(),
+    /** When the status last changed. */
+    dealabsStatusAt: z.datetime().optional(),
+    /** When it was last confirmed (unchanged on an unreadable answer). */
+    dealabsCheckedAt: z.datetime().optional(),
+    /** `publish`, `profile`, `thread`, `moderation`, `manual-verify`. */
+    dealabsStatusSource: z.text({ maxLength: 20 }).optional(),
+    /** `agent` (slot / end of run), `button`, `manual` (posted by hand). */
+    postedBy: z.text({ maxLength: 20 }).optional(),
+    /** Our post's temperature at the last check. */
+    dealabsTemperature: z.number().optional(),
+    /** Our post's price, from the profile (republish rule of `expired`). */
+    dealabsPostPrice: z.number().optional(),
+    /** Last 20 status changes, JSON (`DealabsStatusChange[]`). */
+    dealabsStatusHistory: z.text({ size: "rich" }).optional(),
     generatedAt: z.datetime(),
     createdAt: db.createdAt(),
     updatedAt: db.updatedAt(),

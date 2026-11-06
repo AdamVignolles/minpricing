@@ -22,6 +22,7 @@ import {
   threadUrls,
 } from "./dealabsModeration.ts";
 import { SESSION_PATH } from "./DealabsPublisherService.ts";
+import { DealabsStatusService } from "./DealabsStatusService.ts";
 
 type Draft = Infer<typeof dealabsDraftEntity.schema>;
 
@@ -88,6 +89,7 @@ export class DealabsModerationService {
   protected drafts = $repository(dealabsDraftEntity);
   protected deals = $repository(dealEntity);
   protected agentFiles = $inject(AgentFilesService);
+  protected dealabsStatus = $inject(DealabsStatusService);
 
   protected running?: Promise<ModerationPass>;
 
@@ -217,6 +219,13 @@ export class DealabsModerationService {
     const deadline = outcome.deadlineHours
       ? `\n[délai : ${outcome.deadlineHours} h]`
       : "";
+    // The deal's Dealabs status follows at once (epic 32); the hourly
+    // check confirms it on the post's page.
+    if (outcome.status !== "ok") {
+      await this.dealabsStatus
+        .setStatus(draft, outcome.status, "moderation")
+        .catch(() => false);
+    }
     await this.drafts.updateById(draft.id, {
       moderationStatus: outcome.status,
       moderationReason: outcome.reason,

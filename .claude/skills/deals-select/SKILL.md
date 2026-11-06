@@ -43,6 +43,12 @@ seller, sold` (sold by the merchant), `dlBest` (best Dealabs
      `readiness: "fix"` is fine: the app adds the price condition
      (« (Via Coupon) », « [Prime] ») to the title and the description
      itself — don't remove it from your `dealabsTitle` if you write one.
+     A row with `republish` (epic 32) is a deal we already posted: our
+     post expired with the price now back at or under it, or was hidden /
+     deleted and the cause is fixed (owner's rules, 2026-11-05). Keep it
+     like any deal if it deserves it, and start its queue `reason` with
+     that text (« republication : prix revenu à … »). Deals whose post is
+     live never reach the shortlist.
      Never add a deal that isn't in the shortlist.
 4. **Order by desirability** (Dealabs votes on "I want it", not on the
    percentage): put first what a large audience wants at a price they can

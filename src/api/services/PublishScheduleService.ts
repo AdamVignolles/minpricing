@@ -25,6 +25,7 @@ import {
 import { DealabsDuplicateError } from "./DealabsPublisherService.ts";
 import { readinessSummary } from "./dealabsReadiness.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
+import { currentDealabsStatus } from "./dealabsStatus.ts";
 import { DealPageCheckService } from "./DealPageCheckService.ts";
 import { PublishPauseService } from "./PublishPauseService.ts";
 import {
@@ -215,6 +216,18 @@ export class PublishScheduleService {
         dropped.push(candidate.dealId);
         continue;
       }
+      // Epic 32: our post for it is live on Dealabs — never again.
+      const draftRow = await this.drafts
+        .ensureDraftForDeal(deal.id)
+        .catch(() => undefined);
+      if (
+        draftRow &&
+        currentDealabsStatus(draftRow) === "live" &&
+        draftRow.status === "posted"
+      ) {
+        dropped.push(candidate.dealId);
+        continue;
+      }
       if (ranked.some((c) => c.dealId === deal.id)) continue;
       // The agent's own description travels separately (#131).
       // So does its Dealabs title (rename once, epic 28): `dealabsTitle`,
@@ -358,7 +371,7 @@ export class PublishScheduleService {
       reason: input.reason,
       summary: [
         `${times.length} publication(s) : ${times.map(parisTime).join(", ") || "aucune"}`,
-        `${ranked.length} deal(s) classés${dropped.length ? `, ${dropped.length} écarté(s) (inactifs ou ajoutés à la main)` : ""}`,
+        `${ranked.length} deal(s) classés${dropped.length ? `, ${dropped.length} écarté(s) (inactifs, ajoutés à la main ou déjà en ligne sur Dealabs)` : ""}`,
         input.dryRun ? "essai à blanc (aucune publication)" : "",
       ]
         .filter(Boolean)
@@ -665,6 +678,22 @@ export class PublishScheduleService {
       const draftRow = await this.drafts
         .ensureDraftForDeal(deal.id)
         .catch(() => undefined);
+      // Epic 32: a deal we already posted goes out again only under the
+      // owner's rules (expired with the price back, hidden/deleted fixed).
+      if (draftRow && currentDealabsStatus(draftRow) !== "not_published") {
+        const verdict = this.publisher.republishCheck(
+          deal,
+          draftRow,
+          "schedule",
+        );
+        if (!verdict.allowed) {
+          tried.add(deal.id);
+          outcomes.push(
+            `déjà publié sur Dealabs : ${deal.title.slice(0, 80)} (${verdict.reason})`,
+          );
+          continue;
+        }
+      }
       const early = draftRow
         ? this.publisher.assessReadiness(deal, draftRow, "schedule")
         : undefined;

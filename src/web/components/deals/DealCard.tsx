@@ -56,12 +56,22 @@ const DealCard: FC<DealCardProps> = ({
   const isNew = isFresh && deal.freshReason !== "price-drop";
   const isDrop = isFresh && deal.freshReason === "price-drop";
   // Already on Dealabs: still openable, but out of the way.
-  const posted = deal.onDealabs;
-  const postedLabel = posted
-    ? posted.mine
-      ? "Publié par vous"
-      : `Déjà sur Dealabs${posted.temperature ? ` · ${posted.temperature}°` : ""}`
-    : null;
+  // Epic 32: our post's checked status. A hidden or deleted post is not
+  // « on Dealabs » any more: labelled, not greyed (it may go out again).
+  const onDealabs = deal.onDealabs;
+  const gone =
+    onDealabs?.mine &&
+    (onDealabs.status === "hidden" || onDealabs.status === "deleted");
+  const posted = gone ? undefined : onDealabs;
+  const postedLabel = gone
+    ? onDealabs?.status === "hidden"
+      ? "Masqué par Dealabs"
+      : "Supprimé par Dealabs"
+    : posted
+      ? posted.mine
+        ? `Publié par vous${posted.status === "expired" ? " · expiré" : posted.temperature ? ` · ${posted.temperature}°` : ""}`
+        : `Déjà sur Dealabs${posted.temperature ? ` · ${posted.temperature}°` : ""}`
+      : null;
 
   return (
     <Card
@@ -85,7 +95,7 @@ const DealCard: FC<DealCardProps> = ({
       }}
     >
       {postedLabel && compact ? (
-        <Badge size="xs" variant="filled" color="gray" mb={6}>
+        <Badge size="xs" variant="filled" color={gone ? "red" : "gray"} mb={6}>
           {postedLabel}
         </Badge>
       ) : null}
@@ -112,8 +122,8 @@ const DealCard: FC<DealCardProps> = ({
             <Badge
               size="sm"
               variant="filled"
-              color="dark"
-              leftSection={<Icon name="check" size={11} />}
+              color={gone ? "red" : "dark"}
+              leftSection={<Icon name={gone ? "alert" : "check"} size={11} />}
               style={{ position: "absolute", top: 16, right: 16 }}
             >
               {postedLabel}
