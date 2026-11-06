@@ -1,5 +1,5 @@
 {
-  "$comment": "Dealabs moderation (epic 29): the « Prêt pour Dealabs » checklist reads this before every publication. Thresholds move within `bounds` (Adam's); `sellerBlocklist` and `localSources` only grow — the moderation inbox adds a seller after a « vendeur non fiable » rejection and a source after an « incomplet : magasin et stock » one; agents may add, never remove. Changes are logged in docs/moderation-changelog.md.",
+  "$comment": "Dealabs moderation (epic 29): the « Prêt pour Dealabs » checklist reads this before every publication. Thresholds move within `bounds` (Adam's); `sellerBlocklist` and `localSources` only grow — the moderation inbox adds a seller after a « vendeur non fiable » rejection and a source after an « incomplet : magasin et stock » one; agents may add, never remove. Changes are logged in docs/moderation-changelog.md. Seller thresholds follow Dealabs' published marketplace rules (/reglespublication, read 2026-11-06: ≥ 80 % positive reviews and ≥ 100 reviews on Amazon/Cdiscount/Darty, 500 on Fnac/eBay/Rakuten/AliExpress, 50 on Rueducommerce); we read the seller's sales, not its reviews, so the minimum is about 3× their review count, with a margin on the rating (80 % ≈ 4/5).",
   "version": 1,
   "updatedAt": "2026-11-06",
   "updatedBy": "adam",
@@ -8,8 +8,11 @@
     "minSellerSales": [50, 10000],
     "minStock": [1, 20]
   },
-  "minSellerRating": 4.5,
-  "minSellerSales": 1000,
+  "minSellerRating": 4.2,
+  "minSellerSales": 300,
+  "minSellerSalesBySource": {
+    "aliexpress": 1500
+  },
   "minStock": 5,
   "officialSellerWords": ["officiel", "official", "store officiel"],
   "localSources": ["screwfix"],

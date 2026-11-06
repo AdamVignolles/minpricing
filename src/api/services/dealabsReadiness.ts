@@ -64,6 +64,12 @@ export interface ModerationConfig {
   /** Marketplace seller: minimum rating /5 and number of sales. */
   minSellerRating: number;
   minSellerSales: number;
+  /**
+   * Per source (`aliexpress`, `fnac`…): Dealabs asks more reviews on some
+   * marketplaces (/reglespublication: 100 on Amazon/Cdiscount/Darty, 500
+   * on Fnac/eBay/Rakuten/AliExpress, 50 on Rueducommerce).
+   */
+  minSellerSalesBySource?: Record<string, number>;
   /** « Plus que N exemplaires » under this blocks. */
   minStock: number;
   sellerBlocklist: BlockedSeller[];
@@ -74,8 +80,9 @@ export interface ModerationConfig {
 }
 
 export const DEFAULT_MODERATION_CONFIG: ModerationConfig = {
-  minSellerRating: 4.5,
-  minSellerSales: 1000,
+  minSellerRating: 4.2,
+  minSellerSales: 300,
+  minSellerSalesBySource: { aliexpress: 1500 },
   minStock: 5,
   sellerBlocklist: [],
   localSources: ["screwfix"],
@@ -342,6 +349,9 @@ export function assessReadiness(input: ReadinessInput): Readiness {
   // Seller.
   const blocked = isBlockedSeller(deal.sellerName, config.sellerBlocklist);
   const marketplace = isMarketplaceOffer(deal);
+  const minSales =
+    config.minSellerSalesBySource?.[deal.sourceId.split("-")[0]] ??
+    config.minSellerSales;
   if (blocked) {
     add(
       "seller",
@@ -377,12 +387,12 @@ export function assessReadiness(input: ReadinessInput): Readiness {
       );
     } else if (
       deal.sellerRating < config.minSellerRating ||
-      deal.sellerSalesCount < config.minSellerSales
+      deal.sellerSalesCount < minSales
     ) {
       add(
         "seller",
         "block",
-        `Vendeur tiers « ${name} » trop peu sûr pour Dealabs (${euro(deal.sellerRating)}, ${deal.sellerSalesCount} ventes ; il faut ${euro(config.minSellerRating)} et ${config.minSellerSales} ventes)`,
+        `Vendeur tiers « ${name} » trop peu sûr pour Dealabs (${euro(deal.sellerRating)}, ${deal.sellerSalesCount} ventes ; il faut ${euro(config.minSellerRating)} et ${minSales} ventes)`,
       );
     } else {
       add(

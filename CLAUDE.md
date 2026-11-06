@@ -227,7 +227,9 @@ controllers → React console → Dealabs draft / auto-publish.
   after `draft`, before any browser. Rules, each `ok` / `fix` / `block`
   with a French reason: seller (marketplace = `soldByMerchant: false` or
   AliExpress: brand's own store, else ≥ `minSellerRating` and ≥
-  `minSellerSales`, unknown numbers block; `sellerBlocklist`;
+  `minSellerSales` (per source: `minSellerSalesBySource`; from Dealabs'
+  `/reglespublication`: 80 % positive, 100 reviews, 500 on AliExpress —
+  we read sales, so ~3×), unknown numbers block; `sellerBlocklist`;
   « compatible / remplacement pour <Marque> » parts always block), local
   offer (`localSources` or `storePickupOnly`: block — we don't read store,
   city and stock yet), image (`imageUrl`), language (title and page start
