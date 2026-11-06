@@ -188,10 +188,10 @@ const STOPWORDS: Record<string, string[]> = {
   ],
   suédois: ["och", "för", "med", "till", "av", "är", "som", "st", "svart"],
   allemand: ["und", "für", "mit", "der", "die", "das", "schwarz", "stück"],
-  espagnol: ["y", "para", "con", "el", "negro", "unidades", "los"],
-  italien: ["e", "per", "con", "il", "della", "nero", "pezzi"],
+  espagnol: ["para", "con", "el", "negro", "unidades", "los", "del"],
+  italien: ["per", "con", "il", "della", "nero", "pezzi", "di"],
   néerlandais: ["en", "voor", "met", "het", "zwart", "stuks", "van"],
-  polonais: ["i", "dla", "z", "czarny", "sztuk"],
+  polonais: ["dla", "czarny", "sztuk", "oraz", "jest"],
 };
 
 /**
@@ -215,11 +215,14 @@ export function foreignLanguage(text: string): string | undefined {
   return best.hits > french * 2 ? best.language : undefined;
 }
 
+// One- and two-letter words (« i », « z », « e », « y », « st »…) are
+// model names and units far more often than a language (« Lenovo … I7 »,
+// 06/11): only words of three letters or more count.
 const normalizeLanguageWords = (text: string): string[] =>
   text
     .toLowerCase()
     .split(/[^a-zà-ÿąćęłńóśźż]+/)
-    .filter(Boolean);
+    .filter((word) => word.length >= 3);
 
 // --- Stock ---------------------------------------------------------------
 
