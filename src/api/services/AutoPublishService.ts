@@ -12,9 +12,19 @@ import {
   DealabsDuplicateError,
   DealabsPublisherService,
 } from "./DealabsPublisherService.ts";
+import {
+  applyReadinessFixes,
+  assessReadiness,
+  type ModerationConfig,
+  moderationConfig,
+  type Readiness,
+  readinessSummary,
+} from "./dealabsReadiness.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
+import { buildDealFacts } from "./dealFacts.ts";
 import type { DealPageProblem } from "./dealPageCheck.ts";
 import { DealPageCheckService } from "./DealPageCheckService.ts";
+import { dealabsTitle } from "./dealTitle.ts";
 import type { Deal } from "./DealTypes.ts";
 import { keepaChartForDeal } from "./keepa.ts";
 import {
@@ -58,6 +68,21 @@ export class PublishRefusedError extends Error {
   ) {
     super(message);
     this.name = "PublishRefusedError";
+  }
+}
+
+/**
+ * « Prêt pour Dealabs » (epic 29) refused the post on an automatic path:
+ * a moderator would hide it. Like an unavailable deal, it isn't a try —
+ * the evening slot moves on to the next deal.
+ */
+export class DealNotReadyError extends DealNotAvailableError {
+  constructor(
+    message: string,
+    public readonly readiness: Readiness,
+  ) {
+    super(message);
+    this.name = "DealNotReadyError";
   }
 }
 
@@ -296,6 +321,38 @@ export class AutoPublishService {
     return outcome.deal;
   }
 
+  /** `config/moderation.json`, or the defaults when it can't be read. */
+  moderationConfig(): ModerationConfig {
+    try {
+      return moderationConfig(
+        JSON.parse(this.agentFiles.readConfig("moderation")),
+      );
+    } catch {
+      return moderationConfig();
+    }
+  }
+
+  /**
+   * The « Prêt pour Dealabs » checklist for one deal and its draft, with
+   * what the merchant page showed when it was read (see
+   * `dealabsReadiness.ts`). Pure apart from reading the config.
+   */
+  assessReadiness(
+    deal: Deal,
+    draft: { title: string; description?: string | null },
+    trigger: PublishTrigger,
+    page?: { title?: string; text?: string; availability?: string },
+  ): Readiness {
+    return assessReadiness({
+      deal,
+      facts: buildDealFacts(deal),
+      draft,
+      page,
+      trigger,
+      config: this.moderationConfig(),
+    });
+  }
+
   /** One publish at a time: the button and the run share one browser flow. */
   protected busy = false;
 
@@ -391,9 +448,19 @@ export class AutoPublishService {
 
       // A moderator clicks the link before validating: the merchant page
       // must be up, the product there and still at our price.
+      // What it showed (anonymously: a fresh browser, no shop session)
+      // also feeds « Prêt pour Dealabs » below.
+      let pageRead:
+        | { title?: string; text?: string; availability?: string }
+        | undefined;
       if (this.pageCheck.enabled) {
         await this.progress.begin("merchant-check", deal.url);
         const verdict = await this.pageCheck.check(deal);
+        pageRead = {
+          title: verdict.snapshot?.title,
+          text: verdict.pageText,
+          availability: verdict.snapshot?.availability,
+        };
         if (!verdict.ok && verdict.problem === "price") {
           deal = await this.followPriceChange(deal, verdict, trigger);
         } else if (!verdict.ok) {
@@ -436,6 +503,30 @@ export class AutoPublishService {
             : "Prêt",
       );
 
+      // « Prêt pour Dealabs » (epic 29): would a moderator accept it?
+      // Automatic paths stop on a block (not a try: the slot moves on);
+      // the owner's button shows it as a warning and goes on.
+      await this.progress.begin("readiness");
+      const readiness = this.assessReadiness(deal, draft, trigger, pageRead);
+      const summary = readinessSummary(readiness);
+      if (readiness.status === "block" && !readiness.overridable) {
+        throw new DealNotReadyError(
+          `Pas prêt pour Dealabs : ${summary}`,
+          readiness,
+        );
+      }
+      if (readiness.fixes.titleSuffix || readiness.fixes.descriptionLines) {
+        const fixed = applyReadinessFixes(draft, readiness.fixes, dealabsTitle);
+        await this.drafts.updateById(draft.id, fixed);
+        Object.assign(draft, fixed);
+      }
+      await this.progress.done(
+        "readiness",
+        readiness.status === "block"
+          ? `À vos risques (avertissements) : ${summary}`
+          : summary,
+      );
+
       attempt = {
         publishAttempts: (draft.publishAttempts ?? 0) + 1,
         lastPublishAttemptAt: this.dateTime.nowISOString(),
@@ -455,7 +546,9 @@ export class AutoPublishService {
         await this.progress.skip("chart", "Aucun historique de prix à joindre");
       }
 
-      const { dealabsUrl } = await this.publisher.publish(deal, draft, chart);
+      const { dealabsUrl } = await this.publisher.publish(deal, draft, chart, {
+        requireImage: trigger !== "button",
+      });
       await this.progress.finish(dealabsUrl);
       return await this.drafts.updateById(draft.id, {
         ...attempt,
@@ -620,7 +713,9 @@ export class AutoPublishService {
         draft?.status === "draft" &&
         !draft.publishAttempts &&
         // A cut title waits for its rewrite (epic 28): not this batch.
-        !(await this.draftService.titleNeedsRewrite(deal.id))
+        !(await this.draftService.titleNeedsRewrite(deal.id)) &&
+        // A post Dealabs would hide (epic 29): not even opened.
+        this.assessReadiness(deal, draft, "collection").status !== "block"
       ) {
         candidates.push(deal);
         takenKeys.add(key);

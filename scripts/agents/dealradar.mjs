@@ -11,6 +11,7 @@
  *   publish-queue <queue.json>  random plan (count + times), then publish
  *   draft <dealId>              the deal's Dealabs draft (title, description, who wrote it)
  *   descriptions-review [days]  our posts' temperatures by description template / author
+ *   moderation [days]           Dealabs moderation of our posts (epic 29): rate, by source/category/reason, outcomes
  *   notion-log <plan|final>     the Notion rows/journal to write (for deals-log)
  *   stats [days]                aggregates for the weekly review (deals-weekly)
  *   posted                      one line per published deal with its result
@@ -103,6 +104,7 @@ const CONFIG_FILES = {
   desirability: "desirability.json",
   collection: "collection.json",
   "selection-lessons": "selection-lessons.md",
+  moderation: "moderation.json",
 };
 const credentials = {
   username: env.ADMIN_USERNAME ?? "admin",
@@ -325,6 +327,7 @@ async function shortlist() {
     dejaTenteAujourdhui: 0,
     scoreTropBas: 0,
     chanceHotTropBasse: 0,
+    pasPretPourDealabs: 0,
   };
   // Deals added by hand (pasted link) are not part of the evening
   // selection: they live in « Mes ajouts » and are published from their
@@ -335,6 +338,9 @@ async function shortlist() {
       if (r.excludedSources.includes(c.sourceId))
         return (rejected.sourceExclue++, false);
       if (tried.has(c.id)) return (rejected.dejaTenteAujourdhui++, false);
+      // « Prêt pour Dealabs » (epic 29): a moderator would hide it.
+      if (c.readiness === "block")
+        return (rejected.pasPretPourDealabs++, false);
       return true;
     })
     .map((c) => {
@@ -383,6 +389,10 @@ async function shortlist() {
       // write `dealabsTitle` in the queue item or the slot skips the deal.
       ...(c.needsTitle
         ? { needsTitle: true, dealabsTitle: c.dealabsTitle }
+        : {}),
+      // « fix »: DealRadar adds a price condition (coupon, Prime…) itself.
+      ...(c.readiness === "fix"
+        ? { readiness: "fix", readinessReasons: c.readinessReasons }
         : {}),
     }));
   const result = {
@@ -451,6 +461,53 @@ async function publish(dealId) {
     error: res.ok
       ? undefined
       : String(res.body?.message ?? res.body).slice(0, 300),
+  };
+}
+
+/**
+ * What Dealabs' moderators did with our posts (epic 29): the hidden or
+ * deleted rate over `days` (target < 5 %; baseline 6/40 on 26/10–04/11),
+ * by source, category and reason, the outcomes with the moderators' own
+ * words, and the patterns repeated on ≥ 2 posts (a lesson for the
+ * debrief). DealRadar never replies to moderators.
+ */
+async function moderationReview(days = 7) {
+  const res = await api("GET", `/dealabs/moderation?days=${days}`);
+  if (!res.ok) throw new Error(`moderation: ${res.status}`);
+  const { stats, outcomes, alerts } = res.body;
+  const recent = (outcomes ?? []).filter(
+    (o) => !o.at || Date.now() - new Date(o.at).getTime() <= days * 86400_000,
+  );
+  const byReason = {};
+  for (const o of recent) (byReason[o.reason] ??= []).push(o.title);
+  return {
+    days,
+    posts: stats.posts,
+    rejected: stats.rejected,
+    ratePercent: stats.rate,
+    targetPercent: 5,
+    baseline: "6 / ~40 (15 %) du 26/10 au 04/11, avant l'epic 29",
+    bySource: stats.bySource,
+    byCategory: stats.byCategory,
+    byReason: stats.byReason,
+    // A pattern worth a lesson in selection-lessons.md.
+    repeated: Object.entries(byReason)
+      .filter(([, titles]) => titles.length >= 2)
+      .map(([reason, titles]) => ({ reason, posts: titles })),
+    openAlerts: (alerts ?? []).map((a) => ({
+      title: a.title,
+      status: a.status,
+      label: a.label,
+      deadline: a.deadline,
+      url: a.dealabsUrl,
+    })),
+    outcomes: recent.map((o) => ({
+      title: o.title,
+      status: o.status,
+      reason: o.reason,
+      at: o.at,
+      message: o.message?.slice(0, 300),
+    })),
   };
 }
 
@@ -1886,6 +1943,9 @@ try {
     case "descriptions-review":
       print(await descriptionsReview(Number(args[0] ?? 14)));
       break;
+    case "moderation":
+      print(await moderationReview(Number(args[0] ?? 7)));
+      break;
     case "draft": {
       // The Dealabs draft as it stands (#131): read it before writing a
       // better `description` for the queue.
@@ -2003,7 +2063,7 @@ try {
     }
     default:
       throw new Error(
-        "commands: add-link <url> | ensure-server | report | shortlist | draft <dealId> | descriptions-review [days] | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days] | sources-review [days] | probe <url> | pull [--force] | push-config <name> | push-proposal <file>",
+        "commands: add-link <url> | ensure-server | report | shortlist | draft <dealId> | descriptions-review [days] | moderation [days] | publish-queue <file> | notion-log <plan|final> | stats [days] | posted | check-shop <id> | publish <id> | ledger [days] | sources-review [days] | probe <url> | pull [--force] | push-config <name> | push-proposal <file>",
       );
   }
   if (

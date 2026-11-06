@@ -39,6 +39,10 @@ import PriceHistoryPanel from "../components/deals/PriceHistoryPanel.tsx";
 import PublishSteps, {
   usePublishProgress,
 } from "../components/deals/PublishSteps.tsx";
+import {
+  ModerationNotice,
+  ReadinessPanel,
+} from "../components/deals/ReadinessPanel.tsx";
 import RemoteScreen from "../components/deals/RemoteScreen.tsx";
 import RemoveHandAdded from "../components/deals/RemoveHandAdded.tsx";
 import StoreHistoryChart from "../components/deals/StoreHistoryChart.tsx";
@@ -1126,6 +1130,19 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                     onValidate={(title) => void validateTitle(title)}
                   />
                 </Group>
+
+                <ModerationNotice
+                  status={current.moderationStatus}
+                  reason={current.moderationReason}
+                  message={current.moderationMessage}
+                  at={current.moderationAt}
+                />
+                {current.status !== "posted" ? (
+                  <ReadinessPanel
+                    dealId={deal.id}
+                    version={current.updatedAt}
+                  />
+                ) : null}
 
                 {publishAttemptNotice && !publishRunning ? (
                   <Text size="xs" c="red">

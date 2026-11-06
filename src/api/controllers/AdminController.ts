@@ -16,6 +16,7 @@ import {
   nextCollectionTime,
 } from "../jobs/CollectDealsJob.ts";
 import { $adminSession } from "../services/AdminAuth.ts";
+import { AutoPublishService } from "../services/AutoPublishService.ts";
 import { CollectionProgressService } from "../services/CollectionProgressService.ts";
 import { CollectionService } from "../services/CollectionService.ts";
 import {
@@ -25,6 +26,7 @@ import {
 } from "../services/collectionTuning.ts";
 import { draftNeedsTitleNow } from "../services/DealabsDraftService.ts";
 import type { StoredDealabsDeal } from "../services/DealabsHistoryService.ts";
+import { readinessSummary } from "../services/dealabsReadiness.ts";
 import {
   type DealabsThread,
   isSameProduct,
@@ -62,6 +64,31 @@ export class AdminController {
   protected progress = $inject(CollectionProgressService);
   protected myPosts = $inject(MyDealabsPostsService);
   protected watchedLinks = $inject(WatchedLinkService);
+  protected autoPublish = $inject(AutoPublishService);
+
+  /** The checklist's verdict without the page, for the agents' report. */
+  protected readinessOf(
+    deal: Parameters<AutoPublishService["assessReadiness"]>[0],
+    draft: { title: string; description?: string | null } | undefined,
+  ): { readiness?: "ok" | "fix" | "block"; readinessReasons?: string } {
+    if (!draft) return {};
+    try {
+      const readiness = this.autoPublish.assessReadiness(
+        deal,
+        draft,
+        "schedule",
+      );
+      return {
+        readiness: readiness.status,
+        readinessReasons:
+          readiness.status === "ok"
+            ? undefined
+            : readinessSummary(readiness).slice(0, 500),
+      };
+    } catch {
+      return {};
+    }
+  }
 
   stats = $action({
     method: "GET",
@@ -412,6 +439,13 @@ export class AdminController {
              * `dealabsTitle` in the queue, or the slot skips the deal.
              */
             needsTitle: z.boolean().optional(),
+            /**
+             * « Prêt pour Dealabs » (epic 29) without the merchant page:
+             * `block` = a moderator would hide it (seller, local offer,
+             * image, language, text); the selector leaves it out.
+             */
+            readiness: z.enum(["ok", "fix", "block"]).optional(),
+            readinessReasons: richText().optional(),
           }),
         ),
         posted: z.array(
@@ -544,6 +578,7 @@ export class AdminController {
           freshAt: deal.freshAt,
           dealabsTitle: draftOf.get(deal.id)?.title,
           needsTitle: draftNeedsTitleNow(draftOf.get(deal.id), deal),
+          ...this.readinessOf(deal, draftOf.get(deal.id)),
         }));
 
       const report = {

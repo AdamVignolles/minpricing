@@ -145,6 +145,10 @@ describe("publish progress", () => {
       externalId: title,
       title,
       url: `https://example.com/${encodeURIComponent(title)}`,
+      // What « Prêt pour Dealabs » (epic 29) asks of any post.
+      imageUrl: `https://example.com/${encodeURIComponent(title)}.jpg`,
+      description:
+        "Jeu d'action et d'exploration en 2D, entièrement traduit en français. Plus de 20 heures de jeu, plusieurs fins, mode photo et succès Steam.",
       currentPrice: 19.99,
       status: "active",
       firstSeenAt: new Date().toISOString(),
@@ -154,7 +158,8 @@ describe("publish progress", () => {
       dealId: deal.id,
       title,
       body: `${title}\n\nUn bon prix.`,
-      description: "Un bon prix.",
+      description:
+        "Un bon prix. Jeu d'action et d'exploration en 2D, entièrement traduit en français, plus de 20 heures de jeu.",
       generatedAt: new Date().toISOString(),
     } as any);
     return { deal, draft };
@@ -289,7 +294,7 @@ describe("publish progress", () => {
     const agent = await drafts.publishProgress.fetch({
       headers: { authorization: `Bearer ${"p".repeat(64)}` },
     });
-    expect(agent.data.last?.steps.length).toBe(17);
+    expect(agent.data.last?.steps.length).toBe(18);
 
     const login = await alepha.inject(AuthController).login.fetch({
       body: { username: "admin", password: "s3cret-admin-pass" },

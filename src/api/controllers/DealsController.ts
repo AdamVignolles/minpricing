@@ -306,7 +306,13 @@ export class DealsController {
         ],
       },
     });
-    const mine = new Map(posted.map((draft) => [draft.dealId, draft]));
+    // A post Dealabs' moderators deleted is no longer « Publié par vous »
+    // (epic 29): the deal can be posted again, done properly.
+    const mine = new Map(
+      posted
+        .filter((draft) => draft.moderationStatus !== "deleted")
+        .map((draft) => [draft.dealId, draft]),
+    );
     // Our live posts, from our profile: found even when the title we
     // posted differs from the merchant's.
     const ourLivePosts = (
