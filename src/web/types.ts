@@ -113,7 +113,15 @@ export interface Deal {
     status?: "live" | "expired" | "hidden" | "deleted";
   };
   /** Added by pasting its link (see `WatchedLink`). */
-  addedByLink?: { linkId: string; addedBy: string; watched: boolean };
+  addedByLink?: {
+    linkId: string;
+    addedBy: string;
+    watched: boolean;
+    /** « Mes ajouts » status, why, since when (epic 33). */
+    watchStatus?: "waiting" | "price_drop" | "published" | "on_dealabs";
+    watchReason?: string;
+    watchStatusAt?: string;
+  };
   /**
    * The score's price argument, on « Bons plans » rows only
    * (`withPriceArgument`, epic 30).

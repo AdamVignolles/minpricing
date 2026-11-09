@@ -161,7 +161,9 @@ const AddedLinksList: FC = () => {
                   </Text>
                   {isWatched(link) ? (
                     <Text fz="xs" c="dimmed">
-                      suivi jusqu'au {f.date(link.watchUntil)}
+                      {new Date(link.watchUntil).getTime() > now
+                        ? `chaque heure jusqu'au ${f.date(link.watchUntil)}, puis chaque jour`
+                        : "relu chaque jour"}
                     </Text>
                   ) : null}
                 </Table.Td>

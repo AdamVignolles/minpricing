@@ -144,6 +144,41 @@ export class DealabsHistoryService {
     return done;
   }
 
+  /**
+   * The hand-added products shown « Publié » or « Déjà sur Dealabs »
+   * (epic 33): their history searched again once a day, so a Dealabs post
+   * that expired puts the product back in the running. Paced like every
+   * Dealabs request; at most {@link SEARCHES_PER_RUN} per run, oldest
+   * check first. Only these deals: none for the others.
+   * @returns ids of the deals re-checked.
+   */
+  async refreshWatched(
+    dealIds: string[],
+    maxAgeMs = CACHE_TTL_MS,
+  ): Promise<string[]> {
+    if (dealIds.length === 0) return [];
+    const now = Date.now();
+    const due = (
+      await this.deals.findMany({ where: { id: { inArray: dealIds } } })
+    )
+      .filter(
+        (deal) =>
+          !deal.dealabsCheckedAt ||
+          now - new Date(deal.dealabsCheckedAt).getTime() > maxAgeMs,
+      )
+      .sort((a, b) =>
+        String(a.dealabsCheckedAt ?? "").localeCompare(
+          String(b.dealabsCheckedAt ?? ""),
+        ),
+      )
+      .slice(0, SEARCHES_PER_RUN);
+    const done: string[] = [];
+    for (const deal of due) {
+      if (await this.refreshDeal(deal)) done.push(deal.id);
+    }
+    return done;
+  }
+
   /** One deal's Dealabs history, searched again and stored. */
   protected async refreshDeal(deal: {
     id: string;

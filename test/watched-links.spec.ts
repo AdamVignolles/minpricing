@@ -615,13 +615,12 @@ describe("watched links", () => {
     const dealId = (await links.get(link.id)).dealId as string;
     expect(await links.removeByDeal(dealId)).toBe(1);
 
-    // A check queued before the removal, « Arrêter », a timed-out watch
-    // or an expired deal don't bring it back.
+    // A check queued before the removal, « Arrêter » or a late check
+    // don't bring it back.
     amazon.asked = [];
     expect((await collection.checkLink(link.id)).status).toBe("removed");
     expect(amazon.asked).toHaveLength(0);
     expect((await links.end(link.id, "x")).status).toBe("removed");
-    await links.endForExpiredDeals([dealId]);
     expect((await links.get(link.id)).status).toBe("removed");
     await links.record(link.id, { status: "ok", verdict: "late check" });
     expect((await links.get(link.id)).status).toBe("removed");
@@ -795,10 +794,11 @@ describe("watched links", () => {
       headers: { authorization: `Bearer ${TOKEN}` },
       query: { status: "active" },
     });
-    expect(page.data.content[0].addedByLink).toEqual({
+    expect(page.data.content[0].addedByLink).toMatchObject({
       linkId: link.id,
       addedBy: "admin",
       watched: true,
+      watchStatus: "price_drop",
     });
   });
 
@@ -844,29 +844,142 @@ describe("watched links", () => {
     expect((collection as any).collectorsById.manual).toBeUndefined();
   });
 
-  test("the watch ends after its time, and with its expired deal", async () => {
-    const old = await add("https://www.amazon.fr/dp/B0BXYCS74H");
-    amazon.offers.set("B0BXYCS74H", goodOffer("B0BXYCS74H"));
+  test("epic 33: hourly for 14 days, then daily, and never ends on its own", async () => {
+    const link = await add("https://www.amazon.fr/dp/B0BXYCS74H");
+    // Not on sale: « Pas intéressant », read daily after 14 days.
+    const notOnSale = () =>
+      goodOffer("B0BXYCS74H", {
+        price: 379,
+        details: { ...goodOffer("B0BXYCS74H").details, lowestRecentPrice: 379 },
+      });
+    amazon.offers.set("B0BXYCS74H", notOnSale());
     await collection.runOne("amazon");
+    expect((await links.get(link.id)).watchStatus).toBe("waiting");
 
+    // Past the hourly phase: read once, then not again within the day.
     clock().ref = clock().of("2026-11-13T16:00:00.000Z");
     amazon.asked = [];
     await collection.runOne("amazon");
-    expect(amazon.asked).toEqual([]);
-    expect((await links.get(old.id)).status).toBe("ended");
-
-    // Unread for 48 h → its deal expires and the watch ends with it.
-    const other = await add("https://www.amazon.fr/dp/B0OTHER001");
-    amazon.offers.set("B0OTHER001", goodOffer("B0OTHER001"));
+    expect(amazon.asked).toHaveLength(1);
+    clock().ref = clock().of("2026-11-13T17:00:00.000Z");
+    amazon.asked = [];
     await collection.runOne("amazon");
+    expect(amazon.asked).toHaveLength(0);
+    clock().ref = clock().of("2026-11-14T16:00:00.000Z");
+    await collection.runOne("amazon");
+    expect(amazon.asked).toHaveLength(1);
+    expect((await links.get(link.id)).status).not.toBe("ended");
+
+    // Unread for 48 h, its deal expires: the watch goes on, and the next
+    // read brings the deal back.
     amazon.offers.clear();
-    clock().ref = clock().of("2026-11-16T16:00:00.000Z");
+    clock().ref = clock().of("2026-11-17T16:00:00.000Z");
     await (collection as any).expireUnseen([
       { sourceId: "amazon", collected: 0, created: 0, updated: 0 },
     ]);
-    const ended = await links.get(other.id);
-    expect(ended.status).toBe("ended");
-    expect(ended.verdict).toMatch(/48 h/);
+    const dealId = (await links.get(link.id)).dealId as string;
+    expect((await fx.deals.getById(dealId)).status).toBe("expired");
+    expect((await links.get(link.id)).status).not.toBe("ended");
+    amazon.offers.set("B0BXYCS74H", notOnSale());
+    await collection.runOne("amazon");
+    expect((await fx.deals.getById(dealId)).status).toBe("active");
+  });
+
+  test("epic 33: a real drop moves « Pas intéressant » to « Baisse de prix » on its own", async () => {
+    const link = await add("https://www.amazon.fr/dp/B0BXYCS74H");
+    const base = goodOffer("B0BXYCS74H");
+    amazon.offers.set("B0BXYCS74H", {
+      ...base,
+      price: 379,
+      details: { ...base.details, lowestRecentPrice: 379 },
+    });
+    await collection.runOne("amazon");
+    let watched = await links.get(link.id);
+    expect(watched.watchStatus).toBe("waiting");
+    expect(watched.watchReason).toMatch(/plus bas des 30 derniers jours/);
+
+    // Same price again: nothing changes, nothing rewritten.
+    clock().ref = clock().of("2026-10-29T16:00:00.000Z");
+    await collection.runOne("amazon");
+    expect((await links.get(link.id)).watchStatusAt).toBe(
+      watched.watchStatusAt,
+    );
+
+    // Amazon drops it to 249 € under its 30-day low of 379 €.
+    clock().ref = clock().of("2026-10-29T17:00:00.000Z");
+    amazon.offers.set("B0BXYCS74H", base);
+    await collection.runOne("amazon");
+    watched = await links.get(link.id);
+    expect(watched.watchStatus).toBe("price_drop");
+    expect(watched.watchReason).toMatch(/^−34 % sous le prix le plus bas/);
+    const history = JSON.parse(watched.watchHistory ?? "[]");
+    expect(history.at(-1)).toMatchObject({ from: "waiting", to: "price_drop" });
+
+    // Back to its usual price: « Pas intéressant » again.
+    clock().ref = clock().of("2026-10-29T18:00:00.000Z");
+    amazon.offers.set("B0BXYCS74H", {
+      ...base,
+      price: 379,
+      details: { ...base.details, lowestRecentPrice: 379 },
+    });
+    await collection.runOne("amazon");
+    expect((await links.get(link.id)).watchStatus).toBe("waiting");
+  });
+
+  test("epic 33: our post expired on Dealabs puts the product back in the running", async () => {
+    const link = await add("https://www.amazon.fr/dp/B0BXYCS74H");
+    amazon.offers.set("B0BXYCS74H", goodOffer("B0BXYCS74H"));
+    await collection.runOne("amazon");
+    const dealId = (await links.get(link.id)).dealId as string;
+    const draft = await fx.drafts.create({
+      dealId,
+      title: "Casque Sony WH-1000XM5",
+      body: "x",
+      status: "posted",
+      dealabsUrl: "https://www.dealabs.com/bons-plans/casque-3400001",
+      dealabsStatus: "live",
+      generatedAt: new Date(NOW).toISOString(),
+    } as any);
+    const recheck = vi
+      .spyOn(alepha.inject(DealabsHistoryService), "refreshWatched")
+      .mockResolvedValue([]);
+    try {
+      await (collection as any).refreshWatchStatuses();
+      expect((await links.get(link.id)).watchStatus).toBe("published");
+      // Re-checked on Dealabs because it is « Publié »…
+      expect(recheck).toHaveBeenLastCalledWith([dealId]);
+
+      // …and once epic 32's check sees the post expired: back to a real
+      // drop, so « Baisse de prix », and the card is no longer greyed.
+      await fx.drafts.updateById(draft.id, { dealabsStatus: "expired" });
+      await (collection as any).refreshWatchStatuses();
+      const watched = await links.get(link.id);
+      expect(watched.watchStatus).toBe("price_drop");
+      const page = await alepha.inject(DealsController).list.fetch({
+        headers: { cookie: await adminCookie() },
+        query: { addedByHand: true },
+      });
+      const row = page.data.content.find((d: any) => d.id === dealId) as any;
+      expect(row.addedByLink.watchStatus).toBe("price_drop");
+
+      // Not on Dealabs any more: no Dealabs search for it.
+      recheck.mockClear();
+      await (collection as any).refreshWatchStatuses();
+      expect(recheck).toHaveBeenLastCalledWith([]);
+    } finally {
+      recheck.mockRestore();
+    }
+  });
+
+  test("epic 33: an unreadable page keeps the status", async () => {
+    const link = await add("https://www.amazon.fr/dp/B0BXYCS74H");
+    amazon.offers.set("B0BXYCS74H", goodOffer("B0BXYCS74H"));
+    await collection.runOne("amazon");
+    expect((await links.get(link.id)).watchStatus).toBe("price_drop");
+    amazon.offers.clear();
+    clock().ref = clock().of("2026-10-29T16:00:00.000Z");
+    await collection.checkLink(link.id);
+    expect((await links.get(link.id)).watchStatus).toBe("price_drop");
   });
 });
 

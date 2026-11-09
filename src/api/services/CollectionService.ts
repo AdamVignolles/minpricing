@@ -101,6 +101,8 @@ import {
   type SourceReliability,
 } from "./ScoringService.ts";
 import { type WatchedLink, WatchedLinkService } from "./WatchedLinkService.ts";
+import { WATCH_STATUS_LABELS } from "./watchStatus.ts";
+import { WatchStatusService } from "./WatchStatusService.ts";
 
 /** Sources that open many browser pages: started first in a run. */
 const HEAVY_SOURCES = [
@@ -218,6 +220,7 @@ export class CollectionService {
   protected progress = $inject(CollectionProgressService);
   protected autoPublish = $inject(AutoPublishService);
   protected watchedLinks = $inject(WatchedLinkService);
+  protected watchStatus = $inject(WatchStatusService);
 
   /**
    * How long a deal's seller/review details are reused before the
@@ -516,6 +519,9 @@ export class CollectionService {
         this.log.warn("Dealabs top refresh failed", { error });
       });
       const dealabsStatus = await this.checkDealabsStatus();
+      await this.refreshWatchStatuses().catch((error: unknown) => {
+        this.log.warn("Watch statuses not refreshed", { error });
+      });
       this.logRun(
         runStartedAt,
         summaries,
@@ -630,7 +636,8 @@ export class CollectionService {
           },
           { status: "expired" },
         );
-        await this.watchedLinks.endForExpiredDeals(expired.map(String));
+        // A hand-added product keeps its watch when its deal expires
+        // (epic 33): read again, it comes back active.
         if (expired.length > 0) {
           this.progress.note(
             `${expired.length} deal(s) plus listés depuis 48 h : expirés`,
@@ -666,6 +673,53 @@ export class CollectionService {
     if (ids.length) {
       this.progress.note(
         `${ids.length} deal(s) à fort potentiel revérifiés sur Dealabs`,
+      );
+    }
+  }
+
+  /**
+   * « Mes ajouts » after the Dealabs checks (epic 33): the products shown
+   * « Publié » or « Déjà sur Dealabs » have their Dealabs history searched
+   * again once a day (our own posts were just checked by
+   * `checkDealabsStatus`), then every watched product's status is
+   * recomputed from the database — an expired post puts it back in the
+   * running. One run-log line when something changed.
+   */
+  protected async refreshWatchStatuses(): Promise<void> {
+    // From what is stored (our posts were just checked), then a fresh
+    // Dealabs search for the ones on Dealabs, then those again.
+    const changes = await this.watchStatus.refresh(
+      await this.watchedLinks.watchedForStatus(),
+    );
+    const watched = await this.watchedLinks.watchedForStatus();
+    const onDealabs = watched.filter(
+      (link) =>
+        link.watchStatus === "published" || link.watchStatus === "on_dealabs",
+    );
+    const rechecked = await this.dealabsHistory
+      .refreshWatched(onDealabs.map((link) => link.dealId as string))
+      .catch(() => [] as string[]);
+    if (rechecked.length) {
+      changes.push(
+        ...(await this.watchStatus.refresh(
+          onDealabs.filter((link) => rechecked.includes(link.dealId as string)),
+        )),
+      );
+    }
+    if (rechecked.length || changes.length) {
+      const counts = new Map<string, number>();
+      for (const change of changes) {
+        const label = WATCH_STATUS_LABELS[change.to];
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+      }
+      this.progress.note(
+        `Mes ajouts : ${rechecked.length} revérifié(s) sur Dealabs${
+          changes.length
+            ? `, ${changes.length} changement(s) de statut (${[...counts]
+                .map(([label, n]) => `${n} ${label}`)
+                .join(", ")})`
+            : ""
+        }`,
       );
     }
   }
@@ -1406,6 +1460,7 @@ export class CollectionService {
         shop,
       });
       await this.watchedLinks.record(link.id, verdict, existing?.id);
+      await this.updateWatchStatus(link.id);
       return verdict;
     }
     const evaluation = await this.rescore(outcome.dealId, sourceType);
@@ -1438,7 +1493,27 @@ export class CollectionService {
       blocked,
     });
     await this.watchedLinks.record(link.id, verdict, deal.id);
+    await this.updateWatchStatus(link.id);
     return verdict;
+  }
+
+  /**
+   * « Mes ajouts » status of a link just read (epic 33): recomputed from
+   * the stored deal; a change goes to the run log. An unreadable read
+   * never gets here, so it keeps the status. Never throws.
+   */
+  protected async updateWatchStatus(linkId: string): Promise<void> {
+    try {
+      const link = await this.watchedLinks.get(linkId);
+      for (const change of await this.watchStatus.refresh([link])) {
+        this.progress.note(
+          `${change.title.slice(0, 60)} : ${WATCH_STATUS_LABELS[change.to]}${change.from ? ` (était ${WATCH_STATUS_LABELS[change.from]})` : ""} — ${change.reason}`,
+          link.sourceId,
+        );
+      }
+    } catch (error) {
+      this.log.warn("Watch status not updated", { linkId, error });
+    }
   }
 
   /**

@@ -458,8 +458,38 @@ DismissedAt`, migration `20261106090000_add_draft_moderation`). A
   again before publishing (a link pasted after the queue was set); they are published from
   their page, and end-of-run `publishBestDeals` treats them like any other
   deal. Each run's
-  `checkLinksNotRun` re-reads the active links whose shop did not run
-  (spaced out or switched off), so every link is checked hourly.
+  `checkLinksNotRun` re-reads the due links whose shop did not run
+  (spaced out or switched off).
+  **Price watch** (epic 33): the watch never ends on its own — hourly
+  for 14 days (`watchUntil`) and while « Baisse de prix », then daily
+  (`linkDue`); only « Retirer » / « Arrêter » stop it, an expired deal
+  no longer does (read again, it comes back active). Each link has a
+  `watchStatus` (migration `20261109130000_add_link_watch_status`):
+  `waiting` « Pas intéressant » (default), `price_drop` « Baisse de
+  prix », `published` « Publié » (our post live), `on_dealabs` « Déjà
+  sur Dealabs » (someone else's), with `watchReason`, `watchStatusAt`
+  and a 20-entry `watchHistory`. `WatchStatusService.refresh` recomputes
+  it from the database after each read (`recordLinkVerdict`; an
+  unreadable page keeps it) and at the end of each run
+  (`refreshWatchStatuses`, after epic 32's check: `published` /
+  `on_dealabs` products get `DealabsHistoryService.refreshWatched`, once
+  a day each); nothing is written when nothing changed. Precedence in
+  `watchStatusOf` (`services/watchStatus.ts`, pure): our live post >
+  someone else's > a real drop > waiting; our post expired / hidden /
+  deleted puts it back in the running and ungreys its card (cards and
+  statuses share `dealabsStanding`). **Real drop** (`assessRealDrop`,
+  `services/priceDrop.ts`, pure): the first reference available decides
+  — Amazon's 30-day low, a `regular` struck price (never `rrp`; a week
+  of our history at this price makes it the usual one), the usual price
+  from our `PriceHistory` (`assessSilentDrop`) — ≥ 15 % and ≥ 5 % under
+  it; vetoed by our history when the product swings to this level
+  (≥ 2 past dips, `pastDips`) or is back to its usual price after a
+  rise. Keepa stays a chart only (owner's decision, no paid API). The
+  page filters by status with counts (`GET /deals?addedByHand=true&
+  watchStatus=…`, `GET /deals/hand-added/counts`, `?status=` in the
+  URL) and shows expired deals too; MCP `search_deals` exposes
+  `watchStatus` / `watchReason`. `test/price-drop.spec.ts`,
+  `test/watch-status.spec.ts`, `test/watched-links.spec.ts`.
   « Retirer des ajouts à la main » (card ✕ and detail page,
   `DELETE /deals/:id/hand-added` → `removeByDeal`) sets the deal's links to
   `removed`: no longer read, not hand-picked, so the normal rules apply
@@ -721,8 +751,8 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   reported through `DiscoverContext.blocked` and named on the verdict, never
   worked around; Amazon stops reading the remaining products at the first
   one (no browser retry), and a link read before keeps being evaluated on
-  that last reading. Refused links stay watched; the watch ends after 14
-  days or when the deal expires. Deals carry `addedByLink`; « Mes ajouts »
+  that last reading. Refused links stay watched; the watch goes on until
+  « Retirer » / « Arrêter » (hourly 14 days, then daily — epic 33). Deals carry `addedByLink`; « Mes ajouts »
   lists the links (Revérifier, Arrêter, Retirer). Manual price entry
   (`ManualCollector`, `PATCH /products/:id/price`, the `manual` and
   `manual-link` sources) is gone: at startup `SeedService` turns tracked

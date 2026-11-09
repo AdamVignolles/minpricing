@@ -62,12 +62,21 @@ const COMPACT_KEYS = [
 /** What an agent needs to choose among deals, without the long text fields. */
 function compactDeal(deal: DealRow | null | undefined) {
   if (!deal) return null;
-  return Object.fromEntries(
-    COMPACT_KEYS.filter((key) => deal[key] !== undefined).map((key) => [
-      key,
-      deal[key],
-    ]),
-  );
+  const link = deal.addedByLink as
+    | { watchStatus?: string; watchReason?: string }
+    | undefined;
+  return {
+    ...Object.fromEntries(
+      COMPACT_KEYS.filter((key) => deal[key] !== undefined).map((key) => [
+        key,
+        deal[key],
+      ]),
+    ),
+    // « Mes ajouts » (epic 33): the hand-added product's status and why.
+    ...(link?.watchStatus
+      ? { watchStatus: link.watchStatus, watchReason: link.watchReason }
+      : {}),
+  };
 }
 
 /**
@@ -91,7 +100,7 @@ export class McpTools {
   search_deals = $tool({
     title: "Rechercher des deals",
     description:
-      "List deals collected by DealRadar, with filters and sort. Returns a compact row per deal (price, discount, score /100, hotChance = chance in % to reach 100° on Dealabs, freshness, onDealabs when it is already posted there). Deals under score 40 are hidden by the console. Use get_deal for the full detail of one deal.",
+      "List deals collected by DealRadar, with filters and sort. Returns a compact row per deal (price, discount, score /100, hotChance = chance in % to reach 100° on Dealabs, freshness, onDealabs when it is already posted there; for products added by hand, watchStatus = waiting « Pas intéressant » / price_drop « Baisse de prix » / published / on_dealabs, and watchReason). Deals under score 40 are hidden by the console, except hand-added ones. addedByHand=true lists only « Mes ajouts », watchStatus filters them. Use get_deal for the full detail of one deal.",
     annotations: readOnly,
     schema: {
       params: z.object({
@@ -102,6 +111,11 @@ export class McpTools {
         maxPrice: z.number().min(0).optional(),
         categoryId: z.text().optional(),
         sourceId: z.text().optional(),
+        /** Only the hand-added products (« Mes ajouts »), any status or one. */
+        addedByHand: z.boolean().optional(),
+        watchStatus: z
+          .enum(["waiting", "price_drop", "published", "on_dealabs"])
+          .optional(),
         sortBy: z
           .enum([
             "relevance",
@@ -118,7 +132,12 @@ export class McpTools {
     },
     handler: async ({ params }) => {
       const result = await this.deals.list.run({
-        query: { status: "active", size: 20, ...params },
+        query: {
+          // « Mes ajouts » shows expired deals too: their watch goes on.
+          ...(params.addedByHand ? {} : { status: "active" as const }),
+          size: 20,
+          ...params,
+        },
       });
       return {
         page: result.page,

@@ -171,6 +171,37 @@ const STABLE_SHARE = 0.7;
 const STABLE_DAYS = 3;
 const STABLE_SPREAD = 0.05;
 
+/**
+ * The price in force at the end of each day, over the last `days` days
+ * before today (today left out), from the first observation on. Shared by
+ * silent drops and the hand-added deals' real-drop rule (`priceDrop.ts`).
+ */
+export function dailyPrices(
+  observations: Observation[],
+  now: Date,
+  days: number,
+): number[] {
+  const sorted = [...observations].sort((a, b) =>
+    a.observedAt.localeCompare(b.observedAt),
+  );
+  if (sorted.length === 0) return [];
+  const first = new Date(sorted[0].observedAt).getTime();
+  const today = Math.floor(now.getTime() / DAY_MS) * DAY_MS;
+  const start = Math.max(first, today - days * DAY_MS);
+  const daily: number[] = [];
+  for (
+    let day = Math.floor(start / DAY_MS) * DAY_MS;
+    day < today;
+    day += DAY_MS
+  ) {
+    const inForce = sorted
+      .filter((o) => new Date(o.observedAt).getTime() < day + DAY_MS)
+      .pop();
+    if (inForce) daily.push(inForce.price);
+  }
+  return daily;
+}
+
 /** {@link silentDrop} with the reason when it isn't one. */
 export function assessSilentDrop(
   observations: Observation[],
@@ -187,19 +218,7 @@ export function assessSilentDrop(
   }
 
   const today = Math.floor(now.getTime() / DAY_MS) * DAY_MS;
-  const start = Math.max(first, today - 30 * DAY_MS);
-  const daily: number[] = [];
-  for (
-    let day = Math.floor(start / DAY_MS) * DAY_MS;
-    day < today;
-    day += DAY_MS
-  ) {
-    // The price in force at the end of that day.
-    const inForce = sorted
-      .filter((o) => new Date(o.observedAt).getTime() < day + DAY_MS)
-      .pop();
-    if (inForce) daily.push(inForce.price);
-  }
+  const daily = dailyPrices(sorted, now, 30);
   if (daily.length < MIN_WATCH_DAYS) return { reason: "too-young" };
   const ordered = [...daily].sort((a, b) => a - b);
   const usualPrice = ordered[Math.floor(ordered.length / 2)];

@@ -12,11 +12,8 @@ import { $adminSession } from "../services/AdminAuth.ts";
 import type { StoredDealabsDeal } from "../services/DealabsHistoryService.ts";
 import {
   type DealabsThread,
-  isSameProduct,
-  liveOnDealabs,
   type OnDealabs,
 } from "../services/dealabsSearch.ts";
-import { currentDealabsStatus, ownTitle } from "../services/dealabsStatus.ts";
 import { predictDealHeat } from "../services/heatPrediction.ts";
 import { IdealoReferenceService } from "../services/IdealoReferenceService.ts";
 import { ItadService } from "../services/ItadService.ts";
@@ -31,6 +28,7 @@ import {
   ScoringService,
 } from "../services/ScoringService.ts";
 import { WatchedLinkService } from "../services/WatchedLinkService.ts";
+import { dealabsStanding, type WatchStatus } from "../services/watchStatus.ts";
 
 /**
  * A deal as the console lists it: the stored row, plus whether it is
@@ -40,7 +38,18 @@ interface AddedByLink {
   linkId: string;
   addedBy: string;
   watched: boolean;
+  /** « Mes ajouts » status, why, since when (epic 33). */
+  watchStatus?: WatchStatus;
+  watchReason?: string;
+  watchStatusAt?: string;
 }
+
+const WATCH_STATUSES = [
+  "waiting",
+  "price_drop",
+  "published",
+  "on_dealabs",
+] as const;
 
 const priceReferenceSchema = z.object({
   kind: z.enum(["lowest30d", "history", "regular", "rrp", "listed"]),
@@ -81,6 +90,9 @@ const dealResponseSchema = dealEntity.schema.extend({
       linkId: z.text(),
       addedBy: z.text(),
       watched: z.boolean(),
+      watchStatus: z.enum(WATCH_STATUSES).optional(),
+      watchReason: z.text({ size: "rich" }).optional(),
+      watchStatusAt: z.text().optional(),
     })
     .optional(),
 });
@@ -168,6 +180,8 @@ export class DealsController {
         search: z.text().optional(),
         /** Only deals added by hand (pasted link) — the « Mes ajouts » tab. */
         addedByHand: z.boolean().optional(),
+        /** With `addedByHand`: only this « Mes ajouts » status (epic 33). */
+        watchStatus: z.enum(WATCH_STATUSES).optional(),
         /**
          * Leave out the deals added by hand: « Bons plans » lists collected
          * deals only, hand-added ones have their own tab. Without it (the
@@ -208,6 +222,7 @@ export class DealsController {
         sourceId,
         search,
         addedByHand,
+        watchStatus,
         hideHandAdded,
         withPriceArgument,
       } = query;
@@ -221,9 +236,15 @@ export class DealsController {
         score: { gte: Math.max(minScore ?? 0, MIN_VISIBLE_SCORE) },
       };
       if (addedByHand) {
+        const statuses = watchStatus
+          ? await this.watchedLinks.statusesByDeal()
+          : undefined;
+        const ids = statuses
+          ? handPicked.filter((id) => statuses.get(id) === watchStatus)
+          : handPicked;
         conditions.push(
-          handPicked.length > 0
-            ? { id: { inArray: handPicked } }
+          ids.length > 0
+            ? { id: { inArray: ids } }
             : // None yet: an empty page, not an empty IN ().
               { id: { eq: "" } },
         );
@@ -367,6 +388,11 @@ export class DealsController {
               linkId: link.id,
               addedBy: link.addedBy,
               watched: link.status !== "ended",
+              watchStatus: (link.watchStatus ?? "waiting") as WatchStatus,
+              ...(link.watchReason ? { watchReason: link.watchReason } : {}),
+              ...(link.watchStatusAt
+                ? { watchStatusAt: String(link.watchStatusAt) }
+                : {}),
             },
           }
         : deal;
@@ -398,50 +424,42 @@ export class DealsController {
       await this.myPosts.posts().catch(() => [] as DealabsThread[])
     ).filter((post) => !post.isExpired);
     return deals.map((deal) => {
-      const draft = mine.get(deal.id);
-      if (draft) {
-        const status = currentDealabsStatus(draft);
-        if (status !== "not_published") {
-          return {
-            ...deal,
-            onDealabs: {
-              url: draft.dealabsUrl ?? "",
-              price: draft.dealabsPostPrice ?? deal.currentPrice,
-              temperature: draft.dealabsTemperature ?? 0,
-              mine: true,
-              status,
-            },
-          };
-        }
-      }
-      const ours = ourLivePosts.find((post) =>
-        isSameProduct(deal.title, deal.currentPrice, {
-          ...post,
-          title: ownTitle(post.title),
-        }),
-      );
-      if (ours) {
-        return {
-          ...deal,
-          onDealabs: {
-            url: ours.url,
-            price: ours.price,
-            temperature: Math.round(ours.temperature),
-            mine: true,
-            status: "live" as const,
-          },
-        };
-      }
-      let history: StoredDealabsDeal[] = [];
-      try {
-        history = deal.dealabsHistory ? JSON.parse(deal.dealabsHistory) : [];
-      } catch {
-        // Unreadable history: no status.
-      }
-      const live = liveOnDealabs(history, deal.currentPrice);
-      return live ? { ...deal, onDealabs: live } : deal;
+      // One rule for cards and « Mes ajouts » statuses (epic 33).
+      const onDealabs = dealabsStanding(deal, mine.get(deal.id), ourLivePosts);
+      return onDealabs ? { ...deal, onDealabs } : deal;
     });
   }
+
+  /**
+   * « Mes ajouts » filters (epic 33): how many hand-added products have
+   * each status, from the same stored statuses the list filters on.
+   */
+  handAddedCounts = $action({
+    method: "GET",
+    path: "/deals/hand-added/counts",
+    use: [$adminSession()],
+    schema: {
+      response: z.object({
+        all: z.number(),
+        waiting: z.number(),
+        price_drop: z.number(),
+        published: z.number(),
+        on_dealabs: z.number(),
+      }),
+    },
+    handler: async () => {
+      const statuses = await this.watchedLinks.statusesByDeal();
+      const counts = {
+        all: statuses.size,
+        waiting: 0,
+        price_drop: 0,
+        published: 0,
+        on_dealabs: 0,
+      };
+      for (const status of statuses.values()) counts[status]++;
+      return counts;
+    },
+  });
 
   /**
    * The rails the dashboard is built around, in one round-trip.

@@ -48,6 +48,7 @@ import { PublishScheduleService } from "./services/PublishScheduleService.ts";
 import { ScoringService } from "./services/ScoringService.ts";
 import { SeedService } from "./services/SeedService.ts";
 import { WatchedLinkService } from "./services/WatchedLinkService.ts";
+import { WatchStatusService } from "./services/WatchStatusService.ts";
 
 export const ApiModule = $module({
   name: "minpricing.api",
@@ -106,5 +107,6 @@ export const ApiModule = $module({
     SeedService,
     BrowserInstallService,
     WatchedLinkService,
+    WatchStatusService,
   ],
 });

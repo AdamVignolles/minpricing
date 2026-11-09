@@ -11,11 +11,39 @@ import {
 } from "./linkResolver.ts";
 import { type LinkStep, initialLinkSteps } from "./linkSteps.ts";
 import type { LinkVerdict } from "./linkVerdict.ts";
+import type { WatchStatus } from "./watchStatus.ts";
 
 export type WatchedLink = Infer<typeof watchedLinkEntity.schema>;
 
-/** How long a pasted link is re-read on each run of its shop. */
+/**
+ * How long a pasted link is read on every run of its shop (hourly). After
+ * that it is read once a day (epic 33), hourly again while its status is
+ * « Baisse de prix »; the watch only ends by « Retirer » or « Arrêter ».
+ */
 export const WATCH_DAYS = 14;
+/** Past the hourly phase, a link is read again after this long. */
+export const DAILY_READ_MS = 23 * 3_600_000;
+
+/**
+ * Is this link due for a read now? Hourly while new (before
+ * `watchUntil`), never read, waiting for its first verdict or in
+ * « Baisse de prix »; otherwise once a day. Pure.
+ */
+export function linkDue(
+  link: Pick<
+    WatchedLink,
+    "status" | "watchUntil" | "lastCheckedAt" | "watchStatus"
+  >,
+  now: Date,
+): boolean {
+  if (link.status === "ended" || link.status === "removed") return false;
+  if (!link.lastCheckedAt || link.status === "pending") return true;
+  if (link.watchStatus === "price_drop") return true;
+  if (new Date(link.watchUntil).getTime() > now.getTime()) return true;
+  return (
+    now.getTime() - new Date(link.lastCheckedAt).getTime() >= DAILY_READ_MS
+  );
+}
 
 export type AddLinkResult =
   | { ok: true; link: WatchedLink; duplicate: boolean }
@@ -89,12 +117,13 @@ export class WatchedLinkService {
   }
 
   /**
-   * The links a run of this source reads (every shop's without one): not
-   * ended nor removed, watch not over. Ends the ones whose time is up on
-   * the way.
+   * The links a run of this source reads now (every shop's without one):
+   * neither ended nor removed, and due (`linkDue`: hourly for the first
+   * {@link WATCH_DAYS} days or while « Baisse de prix », then daily). The
+   * watch never ends on its own (epic 33).
    */
   async active(sourceId?: string): Promise<WatchedLink[]> {
-    const now = this.dateTime.nowISOString();
+    const now = new Date(this.dateTime.nowISOString());
     const watched = {
       status: { notInArray: ["ended" as const, "removed" as const] },
     };
@@ -103,16 +132,22 @@ export class WatchedLinkService {
         ? { and: [{ sourceId: { eq: sourceId } }, watched] }
         : watched,
     });
-    const over = links.filter(
-      (link) => new Date(link.watchUntil).getTime() <= new Date(now).getTime(),
-    );
-    for (const link of over) {
-      await this.end(
-        link.id,
-        `Surveillance terminée après ${WATCH_DAYS} jours. ${link.verdict ?? ""}`.trim(),
-      );
-    }
-    return links.filter((link) => !over.includes(link));
+    return links.filter((link) => linkDue(link, now));
+  }
+
+  /**
+   * Every link whose « Mes ajouts » status counts (epic 33): pointing at a
+   * deal, neither ended nor removed — due for a read or not.
+   */
+  async watchedForStatus(): Promise<WatchedLink[]> {
+    return this.links.findMany({
+      where: {
+        and: [
+          { dealId: { isNotNull: true } },
+          { status: { notInArray: ["ended", "removed"] } },
+        ],
+      },
+    });
   }
 
   /** What a collector's `collect()` needs to read the link's product. */
@@ -143,7 +178,7 @@ export class WatchedLinkService {
     await this.links.updateById(id, { steps: JSON.stringify(steps) });
   }
 
-  /** Stops watching (button, watch over, deal expired). */
+  /** Stops watching (« Arrêter »). */
   async end(id: string, verdict?: string): Promise<WatchedLink> {
     const link = await this.links.getById(id);
     if (link.status === "removed") return link;
@@ -151,29 +186,6 @@ export class WatchedLinkService {
       status: "ended",
       ...(verdict ? { verdict } : {}),
     });
-  }
-
-  /**
-   * Ends the watch of links whose deal expired: unread for 48 h like any
-   * collected deal (see `CollectionService.expireUnseen`).
-   */
-  async endForExpiredDeals(expiredDealIds: string[]): Promise<number> {
-    if (expiredDealIds.length === 0) return 0;
-    const links = await this.links.findMany({
-      where: {
-        and: [
-          { dealId: { inArray: expiredDealIds } },
-          { status: { notInArray: ["ended", "removed"] } },
-        ],
-      },
-    });
-    for (const link of links) {
-      await this.end(
-        link.id,
-        "Surveillance arrêtée : l'offre n'a plus été lue depuis 48 h (expirée).",
-      );
-    }
-    return links.length;
   }
 
   /**
@@ -201,6 +213,25 @@ export class WatchedLinkService {
       },
     });
     return [...new Set(links.map((link) => link.dealId as string))];
+  }
+
+  /**
+   * Each hand-added deal's « Mes ajouts » status (epic 33): its link's,
+   * « Pas intéressant » until a first one is computed. Removed links are
+   * left out, like `handPickedDealIds`.
+   */
+  async statusesByDeal(): Promise<Map<string, WatchStatus>> {
+    const links = await this.links.findMany({
+      where: {
+        and: [{ dealId: { isNotNull: true } }, { status: { ne: "removed" } }],
+      },
+    });
+    return new Map(
+      links.map((link) => [
+        link.dealId as string,
+        (link.watchStatus ?? "waiting") as WatchStatus,
+      ]),
+    );
   }
 
   /**
