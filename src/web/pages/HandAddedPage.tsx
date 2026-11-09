@@ -1,4 +1,12 @@
-import { Group, Pagination, Select, Stack, Text, Title } from "@mantine/core";
+import {
+  Chip,
+  Group,
+  Pagination,
+  Select,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
 import { useRouter } from "alepha/react/router";
 import type { FC } from "react";
 
@@ -9,16 +17,38 @@ import Icon from "../components/ui/Icon.tsx";
 import { EmptyState } from "../components/ui/States.tsx";
 import type { DealsPage, RefItem } from "../types.ts";
 
+type WatchStatus = "waiting" | "price_drop" | "published" | "on_dealabs";
+
 export interface HandAddedQuery {
   sortBy?: string;
+  status?: WatchStatus;
   page?: number;
 }
 
 export interface HandAddedPageProps {
   dealsPage: DealsPage;
   merchants: RefItem[];
+  /** How many products have each status (epic 33). */
+  counts: Record<WatchStatus | "all", number>;
   query: HandAddedQuery;
 }
+
+/** The status filters, in the order the owner asked for. */
+const FILTERS: Array<{ value: WatchStatus | "all"; label: string }> = [
+  { value: "all", label: "Tous" },
+  { value: "price_drop", label: "Baisse de prix" },
+  { value: "published", label: "Publié" },
+  { value: "on_dealabs", label: "Déjà sur Dealabs" },
+  { value: "waiting", label: "Pas intéressant" },
+];
+
+const EMPTY: Record<WatchStatus, string> = {
+  price_drop:
+    "Aucune vraie baisse de prix pour l'instant. Les produits sont relus chaque jour : ils passent ici dès qu'une vraie promotion apparaît.",
+  published: "Aucun de vos ajouts n'est publié et en ligne sur Dealabs.",
+  on_dealabs: "Aucun de vos ajouts n'est déjà en ligne sur Dealabs.",
+  waiting: "Aucun produit en attente d'une baisse de prix.",
+};
 
 const SORTS = [
   { value: "newest", label: "Plus récents" },
@@ -34,6 +64,7 @@ const buildHref = (query: HandAddedQuery): string => {
   if (query.sortBy && query.sortBy !== "newest") {
     params.set("sortBy", query.sortBy);
   }
+  if (query.status) params.set("status", query.status);
   if (query.page) params.set("page", String(query.page));
   const qs = params.toString();
   return qs ? `/ajouts?${qs}` : "/ajouts";
@@ -47,6 +78,7 @@ const buildHref = (query: HandAddedQuery): string => {
 const HandAddedPage: FC<HandAddedPageProps> = ({
   dealsPage,
   merchants,
+  counts,
   query,
 }) => {
   const router = useRouter();
@@ -63,9 +95,9 @@ const HandAddedPage: FC<HandAddedPageProps> = ({
             Mes ajouts
           </Title>
           <Text fz="sm" c="dimmed" className="tnum">
-            {total} bon{total > 1 ? "s" : ""} plan{total > 1 ? "s" : ""} ajouté
-            {total > 1 ? "s" : ""} à la main, même mal noté
-            {total > 1 ? "s" : ""}
+            {counts.all} produit{counts.all > 1 ? "s" : ""} ajouté
+            {counts.all > 1 ? "s" : ""} à la main et surveillé
+            {counts.all > 1 ? "s" : ""} chaque jour
           </Text>
         </Stack>
         <Select
@@ -74,7 +106,11 @@ const HandAddedPage: FC<HandAddedPageProps> = ({
           value={query.sortBy ?? "newest"}
           onChange={(value) =>
             void router.push(
-              buildHref({ sortBy: value ?? undefined, page: undefined }),
+              buildHref({
+                sortBy: value ?? undefined,
+                status: query.status,
+                page: undefined,
+              }),
             )
           }
           leftSection={<Icon name="sortDesc" size={15} />}
@@ -85,12 +121,49 @@ const HandAddedPage: FC<HandAddedPageProps> = ({
 
       <AddLinkField />
 
+      {counts.all > 0 ? (
+        <Chip.Group
+          multiple={false}
+          value={query.status ?? "all"}
+          onChange={(value) =>
+            void router.push(
+              buildHref({
+                sortBy: query.sortBy,
+                status: value === "all" ? undefined : (value as WatchStatus),
+              }),
+            )
+          }
+        >
+          <Group gap={8} wrap="wrap" aria-label="Filtrer mes ajouts par statut">
+            {FILTERS.map((filter) => (
+              <Chip
+                key={filter.value}
+                value={filter.value}
+                variant="light"
+                color={filter.value === "price_drop" ? "signal" : "gray"}
+                className="tnum"
+              >
+                {filter.label} · {counts[filter.value]}
+              </Chip>
+            ))}
+          </Group>
+        </Chip.Group>
+      ) : null}
+
       {dealsPage.content.length === 0 ? (
-        <EmptyState
-          icon="link"
-          title="Aucun bon plan ajouté à la main"
-          description="Collez le lien d'une fiche produit (Amazon, Cdiscount, AliExpress, Steam) dans le champ ci-dessus : il est vérifié comme une offre collectée, puis apparaît ici."
-        />
+        query.status ? (
+          <EmptyState
+            icon="link"
+            title={`Aucun produit « ${FILTERS.find((f) => f.value === query.status)?.label} »`}
+            description={EMPTY[query.status]}
+          />
+        ) : (
+          <EmptyState
+            icon="link"
+            title="Aucun bon plan ajouté à la main"
+            description="Collez le lien d'une fiche produit (Amazon, Cdiscount, AliExpress, Steam) dans le champ ci-dessus : il est surveillé chaque jour, même s'il n'est pas en promotion, et passe en « Baisse de prix » dès qu'une vraie promotion apparaît."
+          />
+        )
       ) : (
         <Stack gap="lg">
           <DealGrid deals={dealsPage.content} merchants={merchants} />
@@ -119,8 +192,11 @@ const HandAddedPage: FC<HandAddedPageProps> = ({
           Liens et vérifications
         </Title>
         <Text fz="sm" c="dimmed">
-          Chaque lien est relu à chaque collecte (toutes les heures) pendant 14
-          jours, ou jusqu'à l'expiration du bon plan.
+          Chaque lien est relu toutes les heures pendant 14 jours (et tant qu'il
+          est en « Baisse de prix »), puis une fois par jour, jusqu'à ce que
+          vous le retiriez ou l'arrêtiez. Seules les vraies baisses comptent :
+          jamais un prix conseillé, ni un prix auquel le produit revient
+          régulièrement.
         </Text>
         <AddedLinksList />
       </Stack>

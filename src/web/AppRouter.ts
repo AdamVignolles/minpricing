@@ -36,6 +36,10 @@ const handAddedQuerySchema = z.object({
   sortBy: z
     .enum(["relevance", "hot", "discount", "price-asc", "price-desc", "newest"])
     .optional(),
+  /** « Mes ajouts » status filter (epic 33). */
+  status: z
+    .enum(["waiting", "price_drop", "published", "on_dealabs"])
+    .optional(),
   page: z.number().optional(),
 });
 
@@ -227,19 +231,22 @@ export class AppRouter {
     schema: { query: handAddedQuerySchema },
     lazy: () => import("./pages/HandAddedPage.tsx"),
     loader: async ({ query }) => {
-      const [dealsPage, merchants] = await Promise.all([
+      // Every watched product, expired deals included: the watch goes on
+      // and the next read brings them back (epic 33).
+      const [dealsPage, merchants, counts] = await Promise.all([
         this.deals.list({
           query: {
             size: 24,
-            status: "active",
             addedByHand: true,
+            watchStatus: query.status,
             sortBy: query.sortBy ?? "newest",
             page: query.page,
           },
         }),
         this.catalog.listMerchants({}),
+        this.deals.handAddedCounts({}),
       ]);
-      return { dealsPage, merchants, query };
+      return { dealsPage, merchants, counts, query };
     },
   });
 

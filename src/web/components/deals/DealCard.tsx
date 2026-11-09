@@ -12,6 +12,38 @@ import RemoveHandAdded from "./RemoveHandAdded.tsx";
 
 const DAY_MS = 86_400_000;
 
+const WATCH_LABELS = {
+  waiting: "Pas intéressant",
+  price_drop: "Baisse de prix",
+  published: "Publié",
+  on_dealabs: "Déjà sur Dealabs",
+} as const;
+
+/**
+ * « Mes ajouts » status in words, and why (epic 33). The `signal` colour
+ * is for « Baisse de prix » only: it is price information.
+ */
+const WatchStatusLine: FC<{
+  status: keyof typeof WATCH_LABELS;
+  reason?: string;
+}> = ({ status, reason }) => (
+  <Group gap={6} wrap="nowrap" align="flex-start">
+    <Badge
+      size="sm"
+      variant={status === "price_drop" ? "filled" : "light"}
+      color={status === "price_drop" ? "signal" : "gray"}
+      style={{ flexShrink: 0 }}
+    >
+      {WATCH_LABELS[status]}
+    </Badge>
+    {reason ? (
+      <Text fz="xs" c="dimmed" lh={1.35} className="clamp-2" title={reason}>
+        {reason}
+      </Text>
+    ) : null}
+  </Group>
+);
+
 export interface DealCardProps {
   deal: Deal;
   /** Merchant rows, so the card can show "Amazon" instead of `amazon`. */
@@ -62,7 +94,14 @@ const DealCard: FC<DealCardProps> = ({
   const gone =
     onDealabs?.mine &&
     (onDealabs.status === "hidden" || onDealabs.status === "deleted");
-  const posted = gone ? undefined : onDealabs;
+  // A hand-added product follows its « Mes ajouts » status (epic 33):
+  // greyed only while « Publié » or « Déjà sur Dealabs » — an expired
+  // post puts it back in the running.
+  const watch = deal.addedByLink?.watchStatus;
+  const posted =
+    gone || (watch && watch !== "published" && watch !== "on_dealabs")
+      ? undefined
+      : onDealabs;
   const postedLabel = gone
     ? onDealabs?.status === "hidden"
       ? "Masqué par Dealabs"
@@ -171,6 +210,12 @@ const DealCard: FC<DealCardProps> = ({
             <RemoveHandAdded dealId={deal.id} title={deal.title} />
           ) : null}
         </Group>
+        {watch ? (
+          <WatchStatusLine
+            status={watch}
+            reason={deal.addedByLink?.watchReason}
+          />
+        ) : null}
 
         <Group gap={8} align="baseline" mt="auto" wrap="wrap">
           <Text fz={compact ? "lg" : "xl"} fw={700} lh={1.1} className="tnum">
