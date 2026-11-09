@@ -555,8 +555,9 @@ export class DealsController {
       params: z.object({ id: z.text() }),
       response: dealResponseSchema,
     },
+    // With `onDealabs` too: the deal page's verdict says where it stands.
     handler: async ({ params }) =>
-      (await this.withLinks([await this.deals.getById(params.id)]))[0],
+      (await this.withDealabsStatus([await this.deals.getById(params.id)]))[0],
   });
 
   /**

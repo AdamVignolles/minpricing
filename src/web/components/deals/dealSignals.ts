@@ -128,3 +128,27 @@ export function dealabsSignal(deal: Deal): DealabsSignal {
   }
   return { label: "Jamais posté", color: "gray", posted: false };
 }
+
+/**
+ * Our own post for this product still live on Dealabs, read from the
+ * stored Dealabs history (threads tagged `mine`). Epic 32 attaches it to
+ * the draft on the next status check; until then this is what says it.
+ */
+export function ourLivePost(
+  deal: Deal,
+): { price: number; publishedAt: string; temperature: number } | undefined {
+  try {
+    const threads = deal.dealabsHistory
+      ? (JSON.parse(deal.dealabsHistory) as Array<{
+          price: number;
+          publishedAt: string;
+          temperature: number;
+          isExpired: boolean;
+          mine?: boolean;
+        }>)
+      : [];
+    return threads.find((thread) => thread.mine && !thread.isExpired);
+  } catch {
+    return undefined;
+  }
+}

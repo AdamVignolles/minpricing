@@ -730,6 +730,22 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   for removal. To support a new shop: a `SUPPORTED_SHOPS` entry and a
   `collect()` on its collector, with a fixture test
   (`test/link-collect.spec.ts`).
+- **« Bons plans » and the deal page** (epic 30, Adam's choice 2026-11-09,
+  audit folio F20): built around the four things Adam reads first — price
+  and real drop (with what it is measured against), Dealabs, chance of
+  100°, seller and reviews — worded once in
+  `components/deals/dealSignals.ts` (`test/deal-signals.spec.ts`).
+  « Bons plans » is a table (`DealTable.tsx`, design A « Lire vite »):
+  sortable headers map to `GET /deals` sorts, filters in the drawer, rows
+  fold into two-line cards on a phone; the page asks
+  `withPriceArgument=true`, which adds each row's `priceArgument` from the
+  same `evaluate()` as `/deals/:id/price-stats`. The deal page (design A
+  « Verdict d'abord ») opens with the price, one « Publier sur Dealabs »
+  button that says why it is blocked (posted and live, our live post in
+  the stored history, someone else's live post), the four boxes
+  (`DealVerdict.tsx`), then tabs Analyse / Historique / Dealabs /
+  Brouillon / Données; a running publication (remote screen, stop, steps)
+  shows right under the header. `GET /deals/:id` carries `onDealabs`.
 - **Web**: `src/web/AppRouter.ts` declares `$page` routes and one
   `$client<Controller>()` per backend controller; pages are lazy-loaded.
   New controllers must be registered in `src/api/index.ts` and get a matching
