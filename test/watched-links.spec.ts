@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Alepha } from "alepha";
 import { DateTimeProvider } from "alepha/datetime";
 import { $repository } from "alepha/orm";
-import { AlephaServer } from "alepha/server";
+import { AlephaServer, ServerProvider } from "alepha/server";
 import {
   afterAll,
   beforeAll,
@@ -1003,6 +1003,62 @@ describe("watched links", () => {
     } finally {
       spy.mockResolvedValue([]);
     }
+  });
+
+  test("« Lire dans DealRadar »: a page read in the owner's browser, through the API", async () => {
+    const link = await add("https://www.amazon.fr/dp/B0DQVFFXN2");
+    // The server's read meets Amazon's robot check.
+    amazon.robot.add("B0DQVFFXN2");
+    await collection.checkLink(link.id);
+    expect((await links.get(link.id)).status).toBe("failed");
+
+    const html = readFileSync(
+      join(import.meta.dirname, "fixtures", "links", "amazon-B0DQVFFXN2.html"),
+      "utf8",
+    );
+    const send = async (body: FormData, cookie?: string) =>
+      fetch(
+        `${alepha.inject(ServerProvider).hostname}/api/links/${link.id}/page-read`,
+        {
+          method: "POST",
+          body,
+          headers: cookie ? { cookie } : {},
+        },
+      );
+    const form = (url: string, page: string) => {
+      const data = new FormData();
+      data.append("url", url);
+      data.append("page", new Blob([page], { type: "text/html" }), "page.html");
+      return data;
+    };
+    // Never without the admin session (an agent's token neither).
+    expect(
+      (await send(form("https://www.amazon.fr/dp/B0DQVFFXN2", html))).status,
+    ).toBe(401);
+    const cookie = await adminCookie();
+    // Another product's page: refused, said in French.
+    const wrong = await send(
+      form("https://www.amazon.fr/dp/B0OTHER001", html),
+      cookie,
+    );
+    expect(wrong.status).toBe(422);
+    expect(((await wrong.json()) as any).message).toMatch(/produit suivi/);
+
+    amazon.asked = [];
+    const res = await send(
+      form("https://www.amazon.fr/Produit/dp/B0DQVFFXN2?th=1", html),
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    const view = (await res.json()) as any;
+    expect(view.status).not.toBe("failed");
+    expect(view.verdict).toMatch(/^Lu depuis votre navigateur le /);
+    // The server asked Amazon nothing.
+    expect(amazon.asked).toEqual([]);
+    const deal = await fx.deals.getById(view.deal.id);
+    expect(deal.externalId).toBe("B0DQVFFXN2");
+    expect(deal.currentPrice).toBeGreaterThan(0);
+    expect((await links.get(link.id)).watchStatus).toBeDefined();
   });
 
   test("epic 33: an unreadable page keeps the status", async () => {

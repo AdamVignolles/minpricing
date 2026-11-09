@@ -465,7 +465,19 @@ DismissedAt`, migration `20261106090000_add_draft_moderation`). A
   (`linkDue`), at most `LINK_READS_PER_RUN` (6) links per shop and run,
   never read / « Baisse de prix » / oldest read first (`pickLinkReads`),
   and Amazon reads them one at a time 3–6 s apart (`linkSpacingMs`) —
-  less traffic for its robot check, never a way around it; only
+  less traffic for its robot check, never a way around it. When the
+  server is blocked, « Lire dans DealRadar » (bookmarklet installed from
+  « Mes ajouts », `ReadButtonInstall.tsx`) reads the page the owner's
+  own browser shows: on an Amazon.fr product page it opens `/lire`
+  (`ReadPagePage.tsx`), hands it the page by `postMessage` (origins
+  checked both ways), and `/lire` sends it with the admin session to
+  `POST /links/:id/page-read` (multipart file, ≤ 5 MB; adds the link
+  first if it isn't watched) → `CollectionService.checkLinkFromPage`:
+  `readSentPage` (`services/pageRead.ts`, pure: Amazon.fr, the very
+  ASIN, not a robot check, price and title found by
+  `parseAmazonProductHtml`), then the same check as any read; verdict
+  « Lu depuis votre navigateur le … ». The server asks Amazon nothing;
+  `test/page-read.spec.ts`. Only
   « Retirer » / « Arrêter » stop it, an expired deal
   no longer does (read again, it comes back active). Each link has a
   `watchStatus` (migration `20261109130000_add_link_watch_status`):

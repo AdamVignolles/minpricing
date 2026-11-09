@@ -1,4 +1,5 @@
 import {
+  type AmazonProductRead,
   fetchAmazonProduct,
   fetchAmazonProductPage,
   parseAmazonFacts,
@@ -64,6 +65,44 @@ const LIST_PRICE_SELECTORS = [
   'span[data-a-strike="true"] .a-offscreen',
   ".a-price.a-text-price .a-offscreen",
 ];
+
+/**
+ * One product page read, as the offer collection stores it — shared by
+ * the server's reads and a page read in the owner's browser (« Lire dans
+ * DealRadar », `CollectionService.checkLinkFromPage`).
+ */
+export function amazonRawDeal(
+  asin: string,
+  priced: Pick<
+    AmazonProductRead,
+    | "title"
+    | "imageUrl"
+    | "price"
+    | "listPrice"
+    | "description"
+    | "breadcrumb"
+    | "details"
+  >,
+  product?: { id?: string; title?: string },
+): RawDeal {
+  return {
+    externalId: asin,
+    productId: product?.id,
+    title: priced.title || product?.title || asin,
+    url: `https://www.amazon.fr/dp/${asin}`,
+    imageUrl: upscaleAmazonImage(priced.imageUrl),
+    price: priced.price,
+    listPrice: priced.listPrice,
+    description: priced.description,
+    currency: "EUR",
+    availability: "in_stock",
+    merchantId: "amazon",
+    categoryHint: priced.breadcrumb
+      ? `amazon-crumb:${priced.breadcrumb}`
+      : undefined,
+    details: priced.details,
+  };
+}
 
 /**
  * Auto-discovers current Amazon.fr deals via a headless-browser visit to
@@ -189,23 +228,7 @@ export class AmazonCollector implements DealSource {
           }
           return undefined;
         }
-        return {
-          externalId: asin,
-          productId: product.id,
-          title: priced.title || product.title || asin,
-          url,
-          imageUrl: upscaleAmazonImage(priced.imageUrl),
-          price: priced.price,
-          listPrice: priced.listPrice,
-          description: priced.description,
-          currency: "EUR",
-          availability: "in_stock",
-          merchantId: "amazon",
-          categoryHint: priced.breadcrumb
-            ? `amazon-crumb:${priced.breadcrumb}`
-            : undefined,
-          details: priced.details,
-        };
+        return amazonRawDeal(asin, priced, product);
       },
       {
         // One at a time: the spacing above only means something then.

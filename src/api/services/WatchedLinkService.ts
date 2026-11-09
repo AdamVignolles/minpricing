@@ -212,6 +212,11 @@ export class WatchedLinkService {
     });
   }
 
+  /** Replaces the verdict's text only (status untouched). */
+  async setVerdictText(id: string, verdict: string): Promise<void> {
+    await this.links.updateById(id, { verdict });
+  }
+
   async setSteps(id: string, steps: LinkStep[]): Promise<void> {
     await this.links.updateById(id, { steps: JSON.stringify(steps) });
   }

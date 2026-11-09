@@ -55,7 +55,7 @@ const euros = (value: number) =>
 const STILL_WATCHED =
   "Le lien reste surveillé : il est réévalué à chaque passage (une baisse de prix peut le rendre visible).";
 
-const parisDateTime = (iso: string) =>
+export const parisDateTime = (iso: string) =>
   new Date(iso).toLocaleString("fr-FR", {
     day: "numeric",
     month: "short",

@@ -212,6 +212,38 @@ export class LinksController {
     },
   });
 
+  /**
+   * « Lire dans DealRadar » (epic 33): the product page as the owner's own
+   * browser shows it, sent by the `/lire` page when the server's read meets
+   * Amazon's robot check. Admin session only (never an agent); the page is
+   * a file part (multipart, up to 5 MB). The server never asks Amazon.
+   */
+  pageRead = $action({
+    method: "POST",
+    path: "/links/:id/page-read",
+    use: [$adminSession()],
+    schema: {
+      params: z.object({ id: z.text() }),
+      body: z.object({
+        url: z.text({ maxLength: 2000 }),
+        page: z.file(),
+      }),
+      response: linkSchema,
+    },
+    handler: async ({ params, body }) => {
+      const html = await body.page.text();
+      const outcome = await this.collection.checkLinkFromPage(
+        params.id,
+        body.url,
+        html,
+      );
+      if (!outcome.ok) {
+        throw new HttpError({ status: 422, message: outcome.reason });
+      }
+      return this.view(outcome.link);
+    },
+  });
+
   stopLink = $action({
     method: "POST",
     path: "/links/:id/stop",
