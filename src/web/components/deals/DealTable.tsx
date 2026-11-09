@@ -13,7 +13,7 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { Link } from "alepha/react/router";
-import type { FC, ReactNode } from "react";
+import { type FC, type ReactNode, useState } from "react";
 
 import type { Deal, RefItem } from "../../types.ts";
 import * as f from "../ui/format.ts";
@@ -47,14 +47,24 @@ const merchantName = (deal: Deal, merchants?: RefItem[]) =>
   merchants?.find((row) => row.id === deal.merchantId)?.name ??
   f.titleize(deal.merchantId ?? deal.sourceId);
 
-const Thumb: FC<{ deal: Deal; size: number }> = ({ deal, size }) =>
-  deal.imageUrl ? (
+/**
+ * The product image, or a grey placeholder when there is none or the
+ * shop's link doesn't load (a broken image icon is noise in a list).
+ */
+const Thumb: FC<{ deal: Deal; size: number }> = ({ deal, size }) => {
+  const [failed, setFailed] = useState<string>();
+  return deal.imageUrl && failed !== deal.imageUrl ? (
     <img
       src={deal.imageUrl}
       alt=""
       loading="lazy"
       width={size}
       height={size}
+      onError={() => setFailed(deal.imageUrl)}
+      // Server-rendered: the image may have failed before hydration.
+      ref={(el) => {
+        if (el?.complete && el.naturalWidth === 0) setFailed(deal.imageUrl);
+      }}
       style={{
         width: size,
         height: size,
@@ -79,6 +89,7 @@ const Thumb: FC<{ deal: Deal; size: number }> = ({ deal, size }) =>
       <Icon name="image" size={16} aria-hidden />
     </Box>
   );
+};
 
 /** « −31 % vs plus bas 30 j »: lime only when the reference is trusted. */
 const Drop: FC<{ deal: Deal; compact?: boolean }> = ({ deal, compact }) => {
