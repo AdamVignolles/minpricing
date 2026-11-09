@@ -89,8 +89,9 @@ import {
   type LinkStep,
   type LinkStepId,
 } from "./linkSteps.ts";
-import { type LinkVerdict, linkVerdict } from "./linkVerdict.ts";
+import { type LinkVerdict, linkVerdict, parisDateTime } from "./linkVerdict.ts";
 import { MarketReferenceService } from "./MarketReferenceService.ts";
+import { readSentPage } from "./pageRead.ts";
 import { PriceSeriesService } from "./PriceSeriesService.ts";
 import { PricingService } from "./PricingService.ts";
 import { qualityIssue } from "./qualityGate.ts";
@@ -1232,7 +1233,41 @@ export class CollectionService {
     return run;
   }
 
-  protected async runLinkCheck(link: WatchedLink): Promise<WatchedLink> {
+  /**
+   * « Lire dans DealRadar » (epic 33): the product page as the owner's own
+   * browser showed it, read instead of the server's read (Amazon answers
+   * the server with its robot check). Checked by `readSentPage` (Amazon.fr,
+   * the very product, not a robot check, price and title found), then the
+   * same check as any read — quality gate, comparison, Dealabs history,
+   * score, status. The server never asks Amazon anything here.
+   */
+  async checkLinkFromPage(
+    linkId: string,
+    url: string,
+    html: string,
+  ): Promise<{ ok: true; link: WatchedLink } | { ok: false; reason: string }> {
+    const link = await this.watchedLinks.get(linkId);
+    if (link.status === "removed") {
+      return { ok: false, reason: "Ce lien a été retiré de vos ajouts." };
+    }
+    const read = readSentPage(link, url, html);
+    if (!read.ok) return read;
+    const previous = this.linkChecks.get(link.sourceId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => this.runLinkCheck(link, read.raw));
+    this.linkChecks.set(
+      link.sourceId,
+      run.catch(() => link),
+    );
+    return { ok: true, link: await run };
+  }
+
+  protected async runLinkCheck(
+    link: WatchedLink,
+    /** Read by the owner's browser (« Lire dans DealRadar »). */
+    sentRaw?: RawDeal,
+  ): Promise<WatchedLink> {
     const steps = initialLinkSteps();
     const set = async (
       id: LinkStepId,
@@ -1285,29 +1320,34 @@ export class CollectionService {
     const context = await this.discoverContext(source.id, undefined, blocked);
     // A browser that can't start is not the page's fault: say so.
     let browserDown: string | undefined;
-    const raw = (
-      await collector
-        .collect([this.watchedLinks.toRef(link)], context)
-        .catch((error: unknown) => {
-          if (
-            error instanceof BrowserUnavailableError ||
-            isMissingExecutable(error)
-          ) {
-            browserDown =
-              error instanceof BrowserUnavailableError
-                ? error.message
-                : "Navigateur indisponible sur le serveur : Chromium absent";
-          }
-          return [] as RawDeal[];
-        })
-    ).find((deal) => deal.externalId === link.externalId);
+    const raw = sentRaw
+      ? { ...sentRaw, productId: link.id }
+      : (
+          await collector
+            .collect([this.watchedLinks.toRef(link)], context)
+            .catch((error: unknown) => {
+              if (
+                error instanceof BrowserUnavailableError ||
+                isMissingExecutable(error)
+              ) {
+                browserDown =
+                  error instanceof BrowserUnavailableError
+                    ? error.message
+                    : "Navigateur indisponible sur le serveur : Chromium absent";
+              }
+              return [] as RawDeal[];
+            })
+        ).find((deal) => deal.externalId === link.externalId);
+    const byBrowser = sentRaw
+      ? `Lu depuis votre navigateur le ${parisDateTime(this.dateTime.nowISOString())}. `
+      : "";
     let outcome: UpsertOutcome;
     let listedAt: string | undefined;
     if (raw) {
       await set(
         "page",
         "done",
-        `${raw.title.slice(0, 120)} : ${raw.price.toLocaleString("fr-FR")} €`,
+        `${byBrowser}${raw.title.slice(0, 120)} : ${raw.price.toLocaleString("fr-FR")} €`,
       );
       outcome = await this.upsertDeal(source.id, source.type, raw, {
         handPicked: true,
@@ -1393,12 +1433,16 @@ export class CollectionService {
       );
     }
     await set("score", "running");
-    const verdict = await this.recordLinkVerdict(
+    let verdict = await this.recordLinkVerdict(
       link,
       outcome,
       source.type,
       listedAt,
     );
+    if (byBrowser) {
+      verdict = { ...verdict, verdict: `${byBrowser}${verdict.verdict}` };
+      await this.watchedLinks.setVerdictText(link.id, verdict.verdict);
+    }
     const deal =
       outcome.result === "rejected"
         ? undefined

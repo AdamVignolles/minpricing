@@ -96,6 +96,7 @@ export class AppRouter {
       this.home,
       this.dealsList,
       this.handAdded,
+      this.readPage,
       this.dealDetail,
       this.statsPage,
       this.agentsPage,
@@ -247,6 +248,28 @@ export class AppRouter {
         this.deals.handAddedCounts({}),
       ]);
       return { dealsPage, merchants, counts, query };
+    },
+  });
+
+  /**
+   * « Lire dans DealRadar » (epic 33): opened by the bookmarklet from an
+   * Amazon.fr product page; reads the page the owner's browser shows. The
+   * loader gates it (admin session) and finds the watched link.
+   */
+  readPage = $page({
+    path: "/lire",
+    name: "read-page",
+    lazy: () => import("./pages/ReadPagePage.tsx"),
+    loader: async () => {
+      const { links } = await this.links.listLinks({ query: { size: 200 } });
+      return {
+        links: links.map((link) => ({
+          id: link.id,
+          externalId: link.externalId,
+          sourceId: link.sourceId,
+          status: link.status,
+        })),
+      };
     },
   });
 

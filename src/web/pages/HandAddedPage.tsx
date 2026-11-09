@@ -13,6 +13,7 @@ import type { FC } from "react";
 import DealGrid from "../components/deals/DealGrid.tsx";
 import AddedLinksList from "../components/links/AddedLinksList.tsx";
 import AddLinkField from "../components/links/AddLinkField.tsx";
+import ReadButtonInstall from "../components/links/ReadButtonInstall.tsx";
 import Icon from "../components/ui/Icon.tsx";
 import { EmptyState } from "../components/ui/States.tsx";
 import type { DealsPage, RefItem } from "../types.ts";
@@ -198,6 +199,7 @@ const HandAddedPage: FC<HandAddedPageProps> = ({
           jamais un prix conseillé, ni un prix auquel le produit revient
           régulièrement.
         </Text>
+        <ReadButtonInstall />
         <AddedLinksList />
       </Stack>
     </Stack>
