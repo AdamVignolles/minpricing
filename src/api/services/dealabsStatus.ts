@@ -373,6 +373,7 @@ export function statusSummaryLine(counts: {
   attached: number;
   changes: number;
   unreadable?: number;
+  deferred?: number;
 }): string {
-  return `Dealabs : ${counts.live} en ligne, ${counts.expired} expiré(s), ${counts.hidden} masqué(s), ${counts.deleted} supprimé(s), ${counts.attached} publié(s) à la main rattaché(s), ${counts.changes} changement(s)${counts.unreadable ? `, ${counts.unreadable} illisible(s) (inchangés)` : ""}`;
+  return `Dealabs : ${counts.live} en ligne, ${counts.expired} expiré(s), ${counts.hidden} masqué(s), ${counts.deleted} supprimé(s), ${counts.attached} publié(s) à la main rattaché(s), ${counts.changes} changement(s)${counts.unreadable ? `, ${counts.unreadable} illisible(s) (inchangés)` : ""}${counts.deferred ? `, ${counts.deferred} reporté(s) au prochain passage` : ""}`;
 }

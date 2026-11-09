@@ -303,8 +303,10 @@ DismissedAt`, migration `20261106090000_add_draft_moderation`). A
   for `hidden`/`deleted`, raises epic 29's moderation alert (banner);
   the moderation inbox calls it too. Run at the end of `runAll()` after
   `refreshTop` (pseudo-source `dealabs-status`, « Statut Dealabs des
-  deals », at most hourly, never fails the run; run-log line
-  `statusSummaryLine`), and from the deal page (`DealabsStatusPanel`:
+  deals », at most hourly, never fails the run; post pages get 90 s per
+  run, the rest « reporté(s) au prochain passage »; run-log line
+  `statusSummaryLine`, counts in the run's `collection-runs.jsonl` line
+  as `dealabsStatus`), and from the deal page (`DealabsStatusPanel`:
   « Sur Dealabs » badge, link, checked when/how, history, « Vérifier sur
   Dealabs » → `POST /deals/:id/dealabs/check`, also a fresh search for
   someone else's live post; `GET /deals/:id/dealabs/status`, MCP

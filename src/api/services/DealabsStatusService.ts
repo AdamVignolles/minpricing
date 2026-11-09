@@ -35,6 +35,11 @@ const HEADERS = {
 const RUN_EVERY_MS = 60 * 60_000;
 /** Post pages read per check (paced), oldest-checked first. */
 const THREADS_PER_RUN = 20;
+/**
+ * Time the post pages may take in one run's check: past it, the rest wait
+ * for the next run (oldest-checked first), so the check never holds a run.
+ */
+const THREAD_BUDGET_MS = 90_000;
 /** Deals considered for a post published by hand. */
 const MANUAL_MATCH_DAYS = 45;
 
@@ -48,6 +53,8 @@ export interface StatusCheckSummary {
   changes: number;
   /** Drafts whose answer was unreadable (status kept). */
   unreadable: number;
+  /** Post pages left for the next run (time budget spent). */
+  deferred?: number;
   /** Why nothing was checked, when that's the case. */
   skipped?: string;
   line: string;
@@ -211,7 +218,13 @@ export class DealabsStatusService {
         (a.dealabsCheckedAt ?? "").localeCompare(b.dealabsCheckedAt ?? ""),
       )
       .slice(0, THREADS_PER_RUN);
+    const threadsStartedAt = Date.now();
+    let deferred = 0;
     for (const draft of toRead) {
+      if (Date.now() - threadsStartedAt > THREAD_BUDGET_MS) {
+        deferred++;
+        continue;
+      }
       const status = await this.readThread(draft);
       if (!status) {
         counts.unreadable++;
@@ -227,10 +240,10 @@ export class DealabsStatusService {
       if (status in counts) counts[status as keyof typeof counts]++;
     }
     const line = posts
-      ? statusSummaryLine(counts)
+      ? statusSummaryLine({ ...counts, deferred })
       : `Dealabs : profil illisible, statuts inchangés (${counts.changes} changement(s) par les pages des posts)`;
     this.log.info(line);
-    return { ...counts, line };
+    return { ...counts, ...(deferred ? { deferred } : {}), line };
   }
 
   /** Profile posts matched to drafts, posts published by hand attached. */

@@ -275,6 +275,23 @@ describe("Dealabs status (epic 32): pure rules", () => {
       "Dealabs : 24 en ligne, 3 expiré(s), 1 masqué(s), 1 supprimé(s), 2 publié(s) à la main rattaché(s), 4 changement(s)",
     );
   });
+
+  test("run-log line names post pages left for the next run", () => {
+    expect(
+      statusSummaryLine({
+        live: 2,
+        expired: 0,
+        hidden: 0,
+        deleted: 0,
+        attached: 0,
+        changes: 0,
+        unreadable: 1,
+        deferred: 5,
+      }),
+    ).toBe(
+      "Dealabs : 2 en ligne, 0 expiré(s), 0 masqué(s), 0 supprimé(s), 0 publié(s) à la main rattaché(s), 0 changement(s), 1 illisible(s) (inchangés), 5 reporté(s) au prochain passage",
+    );
+  });
 });
 
 class Fixtures {
