@@ -5,11 +5,9 @@ import {
   Chip,
   CloseButton,
   Drawer,
-  Grid,
   Group,
   NumberInput,
   Pagination,
-  Paper,
   Radio,
   ScrollArea,
   Select,
@@ -22,7 +20,7 @@ import { useDebouncedValue, useDisclosure } from "@mantine/hooks";
 import { useRouter } from "alepha/react/router";
 import { type FC, useEffect, useMemo, useState } from "react";
 
-import DealGrid from "../components/deals/DealGrid.tsx";
+import DealTable, { type TableSort } from "../components/deals/DealTable.tsx";
 import * as f from "../components/ui/format.ts";
 import Icon from "../components/ui/Icon.tsx";
 import { EmptyState } from "../components/ui/States.tsx";
@@ -335,7 +333,6 @@ const DealsListPage: FC<DealsPageProps> = ({
         <Button
           size="md"
           variant="default"
-          hiddenFrom="md"
           onClick={drawer.open}
           leftSection={<Icon name="filter" size={16} />}
         >
@@ -379,47 +376,63 @@ const DealsListPage: FC<DealsPageProps> = ({
         </Group>
       ) : null}
 
-      <Grid gap="lg">
-        <Grid.Col span={{ base: 12, md: 3 }} visibleFrom="md">
-          <Paper p="md" pos="sticky" top={72}>
-            {filters}
-          </Paper>
-        </Grid.Col>
-        <Grid.Col span={{ base: 12, md: 9 }}>
-          {dealsPage.content.length === 0 ? (
-            <EmptyState
-              icon="search"
-              title="Aucune offre ne correspond"
-              description="Essayez d'élargir la fourchette de prix, de baisser la réduction minimale, ou de retirer un filtre."
-              action={{
-                label: "Réinitialiser les filtres",
-                onClick: () => void router.push("/deals"),
-              }}
-            />
-          ) : (
-            <Stack gap="lg">
-              <DealGrid deals={dealsPage.content} merchants={merchants} />
-              {totalPages > 1 ? (
-                <Group justify="center">
-                  <Pagination
-                    total={totalPages}
-                    value={current}
-                    onChange={(value) =>
-                      void router.push(
-                        buildHref({
-                          ...query,
-                          page: value > 1 ? value - 1 : undefined,
-                        }),
-                      )
-                    }
-                    withEdges
-                  />
-                </Group>
-              ) : null}
-            </Stack>
-          )}
-        </Grid.Col>
-      </Grid>
+      <Group gap={6} wrap="wrap">
+        <Text fz="sm" c="dimmed">
+          Vraie baisse :
+        </Text>
+        {[20, 30, 50].map((step) => (
+          <Chip
+            key={step}
+            size="sm"
+            checked={query.minDiscount === step}
+            onChange={() =>
+              apply({
+                minDiscount: query.minDiscount === step ? undefined : step,
+              })
+            }
+          >
+            ≥ {step} %
+          </Chip>
+        ))}
+      </Group>
+
+      {dealsPage.content.length === 0 ? (
+        <EmptyState
+          icon="search"
+          title="Aucune offre ne correspond"
+          description="Essayez d'élargir la fourchette de prix, de baisser la réduction minimale, ou de retirer un filtre."
+          action={{
+            label: "Réinitialiser les filtres",
+            onClick: () => void router.push("/deals"),
+          }}
+        />
+      ) : (
+        <Stack gap="lg">
+          <DealTable
+            deals={dealsPage.content}
+            merchants={merchants}
+            sortBy={(query.sortBy ?? "newest") as TableSort}
+            onSort={(sortBy) => apply({ sortBy })}
+          />
+          {totalPages > 1 ? (
+            <Group justify="center">
+              <Pagination
+                total={totalPages}
+                value={current}
+                onChange={(value) =>
+                  void router.push(
+                    buildHref({
+                      ...query,
+                      page: value > 1 ? value - 1 : undefined,
+                    }),
+                  )
+                }
+                withEdges
+              />
+            </Group>
+          ) : null}
+        </Stack>
+      )}
 
       <Drawer
         opened={drawerOpened}

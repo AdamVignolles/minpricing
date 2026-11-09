@@ -200,7 +200,14 @@ export class AppRouter {
       if (addedByHand) throw new Redirection("/ajouts");
       const [dealsPage, categories, merchants, sources] = await Promise.all([
         this.deals.list({
-          query: { size: 24, status: "active", hideHandAdded: true, ...rest },
+          query: {
+            size: 24,
+            status: "active",
+            hideHandAdded: true,
+            // The table's « vraie baisse » column (epic 30).
+            withPriceArgument: true,
+            ...rest,
+          },
         }),
         this.catalog.listCategories({}),
         this.catalog.listMerchants({}),
