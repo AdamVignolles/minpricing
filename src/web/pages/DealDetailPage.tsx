@@ -1,12 +1,11 @@
 import { LineChart } from "@mantine/charts";
 import {
+  Accordion,
   ActionIcon,
   Alert,
   Anchor,
   Badge,
-  Box,
   Button,
-  Card,
   Divider,
   Grid,
   Group,
@@ -14,6 +13,7 @@ import {
   Select,
   Stack,
   Table,
+  Tabs,
   Text,
   Textarea,
   TextInput,
@@ -34,6 +34,8 @@ import DealabsStatusPanel from "../components/deals/DealabsStatusPanel.tsx";
 import DealabsTitleDialog from "../components/deals/DealabsTitleDialog.tsx";
 import DealAnalysis from "../components/deals/DealAnalysis.tsx";
 import DealImage from "../components/deals/DealImage.tsx";
+import { ourLivePost } from "../components/deals/dealSignals.ts";
+import DealVerdict from "../components/deals/DealVerdict.tsx";
 import DescriptionEditor from "../components/deals/DescriptionEditor.tsx";
 import KeepaChart from "../components/deals/KeepaChart.tsx";
 import PriceHistoryPanel from "../components/deals/PriceHistoryPanel.tsx";
@@ -182,6 +184,7 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
   const deals = useClient<DealsController>();
   const router = useRouter();
   const [current, setCurrent] = useState(draft);
+  const [tab, setTab] = useState("analyse");
   const [saving, setSaving] = useState(false);
   const [dealabsUrlInput, setDealabsUrlInput] = useState(
     draft?.dealabsUrl ?? "",
@@ -541,8 +544,21 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
     }
   };
 
+  const ourLive = ourLivePost(deal);
+  const publishBlocked: string | undefined = !current
+    ? "Pas de brouillon pour ce deal (note sous 40)."
+    : current.status === "posted" &&
+        (current.dealabsStatus ?? "live") !== "hidden" &&
+        current.dealabsStatus !== "deleted"
+      ? `Déjà publié${current.dealabsStatus === "expired" ? " (post expiré)" : ""} : voir l'onglet Dealabs.`
+      : ourLive
+        ? `Votre post du ${f.date(ourLive.publishedAt)} à ${f.price(ourLive.price, deal.currency)} est en ligne.`
+        : deal.onDealabs && !deal.onDealabs.mine
+          ? `Un autre membre l'a déjà posté à ${f.price(deal.onDealabs.price, deal.currency)}.`
+          : undefined;
+
   return (
-    <Stack gap="lg">
+    <Stack gap="md">
       <Anchor
         component={Link}
         href="/deals"
@@ -556,9 +572,10 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
         </Group>
       </Anchor>
 
-      <Grid gap="xl">
-        <Grid.Col span={{ base: 12, md: 5 }}>
-          <Paper p="md" pos={{ md: "sticky" }} top={72}>
+      {/* Epic 30, design A: the verdict first, then the detail in tabs. */}
+      <Paper p="md">
+        <Grid gap="md" align="flex-start">
+          <Grid.Col span={{ base: 4, sm: 3, md: 2 }}>
             <DealImage
               src={deal.imageUrl}
               alt={deal.title}
@@ -566,128 +583,185 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
               loading="eager"
               fallbackLabel={merchant}
             />
-          </Paper>
-        </Grid.Col>
-
-        <Grid.Col span={{ base: 12, md: 7 }}>
-          <Stack gap="md">
-            <Group gap={6}>
-              <Badge
-                variant="light"
-                color="gray"
-                leftSection={<Icon name="store" size={11} />}
-              >
-                {merchant}
-              </Badge>
-              {category ? (
+          </Grid.Col>
+          <Grid.Col span={{ base: 8, sm: 9, md: 7 }}>
+            <Stack gap={8}>
+              <Group gap={6}>
                 <Badge
                   variant="light"
                   color="gray"
-                  component={Link}
-                  href={`/deals?categoryId=${deal.categoryId}`}
-                  style={{ cursor: "pointer" }}
+                  leftSection={<Icon name="store" size={11} />}
                 >
-                  {category}
+                  {merchant}
                 </Badge>
-              ) : null}
-              <Badge
-                variant="light"
-                color={deal.status === "active" ? "signal" : "gray"}
-              >
-                {deal.status === "active" ? "Offre active" : "Offre expirée"}
-              </Badge>
-              {deal.addedByLink ? (
-                <>
+                {category ? (
                   <Badge
                     variant="light"
                     color="gray"
-                    leftSection={<Icon name="link" size={11} />}
+                    component={Link}
+                    href={`/deals?categoryId=${deal.categoryId}`}
+                    style={{ cursor: "pointer" }}
                   >
-                    Ajouté par lien
+                    {category}
                   </Badge>
-                  <RemoveHandAdded
-                    dealId={deal.id}
-                    title={deal.title}
-                    variant="button"
-                  />
-                </>
-              ) : null}
-            </Group>
+                ) : null}
+                <Badge
+                  variant="light"
+                  color={deal.status === "active" ? "signal" : "gray"}
+                >
+                  {deal.status === "active" ? "Offre active" : "Offre expirée"}
+                </Badge>
+                {deal.addedByLink ? (
+                  <>
+                    <Badge
+                      variant="light"
+                      color="gray"
+                      leftSection={<Icon name="link" size={11} />}
+                    >
+                      Ajouté par lien
+                    </Badge>
+                    <RemoveHandAdded
+                      dealId={deal.id}
+                      title={deal.title}
+                      variant="button"
+                    />
+                  </>
+                ) : null}
+              </Group>
 
-            <Title order={1} fz={{ base: "1.4rem", sm: "1.75rem" }} lh={1.2}>
-              {deal.titleTrimmed && deal.shortTitle
-                ? deal.shortTitle
-                : deal.title}
-            </Title>
-            {deal.titleTrimmed && deal.shortTitle ? (
-              <Text size="sm" c="dimmed">
-                Nom complet : {deal.title}
-              </Text>
-            ) : null}
-
-            <Paper p="md" bg="var(--app-surface-muted)">
-              <Group gap="md" align="baseline" wrap="wrap">
-                <Text fz="2.25rem" fw={700} lh={1} className="tnum">
+              <Title order={1} fz={{ base: "1.15rem", sm: "1.4rem" }} lh={1.25}>
+                {deal.titleTrimmed && deal.shortTitle
+                  ? deal.shortTitle
+                  : deal.title}
+              </Title>
+              <Group gap="sm" align="baseline" wrap="wrap">
+                <Text fz="1.9rem" fw={700} lh={1} c="signal" className="tnum">
                   {f.price(deal.currentPrice, deal.currency)}
                   {deal.billingPeriod === "month" ? (
-                    <Text component="span" fz="lg" fw={500} c="dimmed">
+                    <Text component="span" fz="md" fw={500} c="dimmed">
                       {" "}
                       /mois
                     </Text>
                   ) : null}
                 </Text>
                 {deal.listPrice && deal.listPrice > deal.currentPrice ? (
-                  <Text fz="lg" c="dimmed" td="line-through" className="tnum">
+                  <Text fz="md" c="dimmed" td="line-through" className="tnum">
                     {f.price(deal.listPrice, deal.currency)}
                   </Text>
                 ) : null}
-                {(deal.discountPercentage ?? 0) >= 1 ? (
-                  <Badge
-                    size="lg"
-                    color="signal"
-                    variant="filled"
-                    className="tnum"
-                  >
-                    {f.discount(deal.discountPercentage as number)}
-                  </Badge>
+                {savingAmount !== null ? (
+                  <Text fz="sm" fw={600} c="signal.6" className="tnum">
+                    Économisez {f.price(savingAmount, deal.currency)}
+                  </Text>
                 ) : null}
-                <Badge
-                  size="lg"
-                  variant="light"
-                  color={
-                    CLASSIFICATION[stats.classification].tone === "good"
-                      ? "signal"
-                      : CLASSIFICATION[stats.classification].tone === "warn"
-                        ? "orange"
-                        : "gray"
-                  }
-                >
-                  {CLASSIFICATION[stats.classification].label}
-                </Badge>
               </Group>
-              {savingAmount !== null ? (
-                <Text fz="md" fw={600} c="signal.6" mt={6} className="tnum">
-                  Économisez {f.price(savingAmount, deal.currency)}
+            </Stack>
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 3 }}>
+            <Stack gap={8}>
+              <Tooltip
+                label="Se connecte avec la session Dealabs enregistrée, ouvre Dealabs sur le serveur (visible ici en écran distant), remplit le formulaire et clique sur publier à votre place."
+                multiline
+                w={280}
+              >
+                <Button
+                  fullWidth
+                  size="md"
+                  variant="filled"
+                  color="signal"
+                  loading={publishRunning}
+                  disabled={!!publishBlocked}
+                  rightSection={<Icon name="bolt" size={16} />}
+                  onClick={startAutoPublish}
+                >
+                  Publier sur Dealabs
+                </Button>
+              </Tooltip>
+              {publishBlocked ? (
+                <Text fz="xs" c="dimmed">
+                  {publishBlocked}
                 </Text>
-              ) : (
-                <Text fz="sm" c="dimmed" mt={6}>
-                  Aucun prix de référence relevé chez ce marchand : la réduction
-                  ne peut pas être calculée.
+              ) : titleNeedsRewrite ? (
+                <Text fz="xs" c="orange">
+                  Le titre a été coupé à 140 caractères : vous le relirez avant
+                  l'envoi.
                 </Text>
-              )}
-            </Paper>
+              ) : null}
+              <Button
+                component="a"
+                href={deal.url}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                variant="default"
+                fullWidth
+                rightSection={<Icon name="external" size={14} />}
+              >
+                Voir chez {merchant}
+              </Button>
+            </Stack>
+          </Grid.Col>
+        </Grid>
+        {current ? (
+          <DealabsTitleDialog
+            key={titleDialog ? "open" : "closed"}
+            opened={titleDialog}
+            initial={current.title}
+            fullTitle={deal.title}
+            saving={titleSaving}
+            error={titleError}
+            onCancel={() => setTitleDialog(false)}
+            onValidate={(title) => void validateTitle(title)}
+          />
+        ) : null}
+      </Paper>
 
-            {deal.description ? (
-              <Paper p="md" withBorder>
-                <Text fz="xs" fw={700} c="dimmed" tt="uppercase" mb={4}>
-                  Description du produit
-                </Text>
-                <Text fz="sm" style={{ whiteSpace: "pre-line" }}>
-                  {deal.description}
-                </Text>
-              </Paper>
+      {publishRunning || shownRun?.status === "running" ? (
+        <Paper p="md">
+          <Stack gap="sm">
+            {publishRunning ? (
+              <RemoteScreen hint="Suivez la publication en direct. Si une case « je ne suis pas un robot » apparaît, cliquez dessus dans l'image." />
             ) : null}
+            {shownRun?.status === "running" ? (
+              <StopPublishButton run={shownRun} />
+            ) : null}
+            {shownRun ? <PublishSteps run={shownRun} /> : null}
+          </Stack>
+        </Paper>
+      ) : null}
 
+      {publishAttemptNotice && !publishRunning ? (
+        <Alert
+          variant="light"
+          color="red"
+          icon={<Icon name="alert" size={18} />}
+          title={publishAttemptNotice.title}
+        >
+          {publishAttemptNotice.text}
+        </Alert>
+      ) : null}
+
+      <DealVerdict
+        deal={deal}
+        stats={stats}
+        draft={current}
+        merchants={merchants}
+      />
+
+      <Tabs
+        value={tab}
+        onChange={(value) => setTab(value ?? "analyse")}
+        keepMounted={false}
+      >
+        <Tabs.List style={{ flexWrap: "nowrap", overflowX: "auto" }}>
+          <Tabs.Tab value="analyse">Analyse</Tabs.Tab>
+          <Tabs.Tab value="historique">Historique</Tabs.Tab>
+          <Tabs.Tab value="dealabs">Dealabs</Tabs.Tab>
+          {current ? <Tabs.Tab value="brouillon">Brouillon</Tabs.Tab> : null}
+          <Tabs.Tab value="donnees">Données</Tabs.Tab>
+        </Tabs.List>
+
+        <Tabs.Panel value="analyse" pt="md">
+          <Stack gap="md">
             <Alert
               variant="light"
               color={
@@ -713,24 +787,26 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
             >
               {assessment.text}
             </Alert>
-
-            {publishAttemptNotice ? (
-              <Alert
-                variant="light"
-                color="red"
-                icon={<Icon name="alert" size={18} />}
-                title={publishAttemptNotice.title}
-              >
-                {publishAttemptNotice.text}
-              </Alert>
-            ) : null}
-
             <DealAnalysis
               deal={deal}
               analysis={stats.analysis}
               heat={stats.heat}
             />
+            {deal.description ? (
+              <Paper p="md">
+                <Text fz="xs" fw={700} c="dimmed" tt="uppercase" mb={4}>
+                  Description du produit
+                </Text>
+                <Text fz="sm" style={{ whiteSpace: "pre-line" }}>
+                  {deal.description}
+                </Text>
+              </Paper>
+            ) : null}
+          </Stack>
+        </Tabs.Panel>
 
+        <Tabs.Panel value="historique" pt="md">
+          <Stack gap="md">
             {stats.keepa ? (
               <KeepaChart
                 asin={stats.keepa.asin}
@@ -740,311 +816,212 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
             ) : (
               <StoreHistoryChart deal={deal} />
             )}
-
-            <Group gap="sm">
-              <Button
-                component="a"
-                href={deal.url}
-                target="_blank"
-                rel="noopener noreferrer nofollow"
-                size="md"
-                rightSection={<Icon name="external" size={16} />}
-              >
-                Voir l'offre chez {merchant}
-              </Button>
-            </Group>
-
-            <Table variant="vertical" withTableBorder={false} fz="sm">
-              <Table.Tbody>
-                {stats.referencePrice !== null ? (
-                  <Table.Tr>
-                    <Table.Th>Prix de référence marché</Table.Th>
-                    <Table.Td className="tnum">
-                      {f.price(stats.referencePrice, deal.currency)}
-                      <Text component="span" c="dimmed" fz="xs">
-                        {" "}
-                        (Idealo, tous marchands)
-                      </Text>
-                    </Table.Td>
-                  </Table.Tr>
-                ) : null}
-                <Table.Tr>
-                  <Table.Th w={180}>Disponibilité</Table.Th>
-                  <Table.Td>{f.titleize(deal.availability)}</Table.Td>
-                </Table.Tr>
-                <Table.Tr>
-                  <Table.Th>Première détection</Table.Th>
-                  <Table.Td>{f.dateTime(deal.firstSeenAt)}</Table.Td>
-                </Table.Tr>
-                <Table.Tr>
-                  <Table.Th>Dernière observation</Table.Th>
-                  <Table.Td>
-                    {f.dateTime(deal.lastSeenAt)}
-                    <Text component="span" c="dimmed">
-                      {" "}
-                      ({f.relativeTime(deal.lastSeenAt)})
-                    </Text>
-                  </Table.Td>
-                </Table.Tr>
-                <Table.Tr>
-                  <Table.Th>Source</Table.Th>
-                  <Table.Td>{f.titleize(deal.sourceId)}</Table.Td>
-                </Table.Tr>
-              </Table.Tbody>
-            </Table>
-          </Stack>
-        </Grid.Col>
-      </Grid>
-
-      <Divider />
-
-      <Stack gap="sm">
-        <Group justify="space-between" align="flex-end" wrap="wrap">
-          <Stack gap={2}>
-            <Title order={2} fz="lg">
-              Historique de prix
-            </Title>
-            <Text fz="sm" c="dimmed">
-              Chaque point correspond à un relevé effectué par les collecteurs.
-            </Text>
-          </Stack>
-          {stats.historyPoints > 1 ? (
-            <Group gap="lg">
-              <Box>
-                <Text fz="xs" c="dimmed">
-                  Minimum
-                </Text>
-                <Text fw={600} className="tnum">
-                  {f.price(stats.minPrice, deal.currency)}
-                </Text>
-              </Box>
-              <Box>
-                <Text fz="xs" c="dimmed">
-                  Moyenne
-                </Text>
-                <Text fw={600} className="tnum">
-                  {f.price(stats.avgPrice, deal.currency)}
-                </Text>
-              </Box>
-              <Box>
-                <Text fz="xs" c="dimmed">
-                  Maximum
-                </Text>
-                <Text fw={600} className="tnum">
-                  {f.price(stats.maxPrice, deal.currency)}
-                </Text>
-              </Box>
-              {stats.referencePrice !== null ? (
-                <Box>
-                  <Text fz="xs" c="dimmed">
-                    Marché (Idealo)
-                  </Text>
-                  <Text fw={600} className="tnum">
-                    {f.price(stats.referencePrice, deal.currency)}
-                  </Text>
-                </Box>
-              ) : null}
-            </Group>
-          ) : null}
-        </Group>
-
-        <Paper p="md">
-          {series.length > 1 ? (
-            <LineChart
-              h={260}
-              data={series}
-              dataKey="date"
-              series={[{ name: "Prix", color: "signal.5" }]}
-              curveType="stepAfter"
-              connectNulls
-              gridAxis="y"
-              tickLine="none"
-              withDots={series.length < 30}
-              yAxisProps={{ domain: yAxisDomain }}
-              valueFormatter={(value) => f.price(value, deal.currency)}
-              referenceLines={[
-                {
-                  y: stats.avgPrice,
-                  label: "Moyenne",
-                  color: "var(--mantine-color-dimmed)",
-                },
-                ...(stats.referencePrice !== null
-                  ? [
-                      {
-                        y: stats.referencePrice,
-                        label: "Marché (Idealo)",
-                        color: "var(--mantine-color-orange-6)",
-                      },
-                    ]
-                  : []),
-              ]}
-            />
-          ) : (
-            <EmptyState
-              icon="chart"
-              title="Historique en cours de constitution"
-              description="Un seul relevé pour l'instant. Le graphique apparaîtra dès que l'offre aura été observée plusieurs fois."
-            />
-          )}
-        </Paper>
-
-        <PriceHistoryPanel deal={deal} />
-
-        {deal.idealoUrl ? (
-          <Paper p="md">
-            <Group justify="space-between" mb="sm">
-              <Stack gap={2}>
-                <Title order={5}>Historique de prix Idealo (marché)</Title>
-                <Text fz="sm" c="dimmed">
-                  Relevé en direct sur la fiche Idealo du produit.
-                </Text>
-              </Stack>
-              <Anchor
-                href={deal.idealoUrl}
-                target="_blank"
-                rel="noreferrer"
-                fz="sm"
-              >
-                Voir sur Idealo
-                <Icon name="external" size={14} />
-              </Anchor>
-            </Group>
-            {idealoHistory === undefined ? (
-              <EmptyState
-                icon="chart"
-                title="Chargement du graphique Idealo…"
-                description="Récupération de l'historique directement depuis Idealo."
-              />
-            ) : idealoSeries.length > 1 ? (
-              <LineChart
-                h={220}
-                data={idealoSeries}
-                dataKey="date"
-                series={[{ name: "Prix", color: "orange.6" }]}
-                curveType="stepAfter"
-                connectNulls
-                gridAxis="y"
-                tickLine="none"
-                withDots={idealoSeries.length < 30}
-                valueFormatter={(value) => f.price(value, deal.currency)}
-              />
-            ) : (
-              <EmptyState
-                icon="chart"
-                title="Historique Idealo indisponible"
-                description="Idealo bloque la récupération automatique pour le moment (protection anti-robot) ou ne publie pas d'historique pour ce produit."
-              />
-            )}
-          </Paper>
-        ) : null}
-      </Stack>
-
-      {current ? (
-        <>
-          <Divider />
-          <Stack gap="sm">
-            <Group justify="space-between" align="flex-end" wrap="wrap">
-              <Stack gap={2}>
-                <Title order={2} fz="lg">
-                  Brouillon Dealabs
-                </Title>
-                <Text fz="sm" c="dimmed">
-                  Généré à partir des faits du deal. Un titre ou une description
-                  que vous enregistrez est gardé tel quel jusqu'à « Régénérer ».
-                </Text>
-              </Stack>
-              <Select
-                w={170}
-                value={current.status}
-                data={[
-                  { value: "draft", label: "À relire" },
-                  { value: "posted", label: "Publié" },
-                  { value: "discarded", label: "Écarté" },
-                ]}
-                onChange={(value) =>
-                  value && void save({ status: value as Draft["status"] })
-                }
-                allowDeselect={false}
-                aria-label="Statut du brouillon"
-              />
-            </Group>
-
-            <Card p="md">
-              <Stack gap="sm">
-                <Stack gap={2}>
-                  <Title order={3} fz="sm" fw={600}>
-                    Remplir le formulaire Dealabs
+            {series.length > 1 ? (
+              <Stack gap="xs">
+                <Group justify="space-between" align="flex-end" wrap="wrap">
+                  <Title order={2} fz="md">
+                    Nos relevés
                   </Title>
-                  <Text fz="xs" c="dimmed">
-                    Dans l'ordre où Dealabs les demande : lien, titre, prix
-                    actuel, prix habituel, description, disponibilité. Copiez
-                    chaque champ et collez-le au bon endroit sur Dealabs.
+                  <Text fz="sm" c="dimmed" className="tnum">
+                    Min. {f.price(stats.minPrice, deal.currency)} · moy.{" "}
+                    {f.price(stats.avgPrice, deal.currency)} · max.{" "}
+                    {f.price(stats.maxPrice, deal.currency)}
                   </Text>
-                </Stack>
-                {(
-                  [
-                    { label: "Lien", value: deal.url },
-                    { label: "Titre", value: current.title },
-                    {
-                      label: "Prix actuel",
-                      value: f.price(deal.currentPrice, deal.currency),
-                    },
-                    {
-                      label: "Prix habituel",
-                      value: deal.listPrice
-                        ? f.price(deal.listPrice, deal.currency)
-                        : "",
-                    },
-                    {
-                      label: "Description",
-                      value: current.description ?? "",
-                    },
-                    { label: "Disponibilité", value: availabilityLabel },
-                  ] as const
-                ).map((field) =>
-                  field.value ? (
-                    <Group
-                      key={field.label}
-                      gap="xs"
-                      align="flex-end"
-                      wrap="nowrap"
-                    >
-                      {field.label === "Description" ? (
-                        <Textarea
-                          flex={1}
-                          label={field.label}
-                          value={field.value}
-                          readOnly
-                          autosize
-                          minRows={2}
-                          maxRows={6}
-                        />
-                      ) : (
-                        <TextInput
-                          flex={1}
-                          label={field.label}
-                          value={field.value}
-                          readOnly
-                        />
-                      )}
-                      <Tooltip label={`Copier « ${field.label} »`}>
-                        <ActionIcon
-                          variant="default"
-                          size="lg"
-                          aria-label={`Copier ${field.label}`}
-                          onClick={() =>
-                            void copyField(field.label, field.value)
-                          }
-                        >
-                          <Icon name="copy" size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                    </Group>
-                  ) : null,
+                </Group>
+                <Paper p="md">
+                  {series.length > 1 ? (
+                    <LineChart
+                      h={260}
+                      data={series}
+                      dataKey="date"
+                      series={[{ name: "Prix", color: "signal.5" }]}
+                      curveType="stepAfter"
+                      connectNulls
+                      gridAxis="y"
+                      tickLine="none"
+                      withDots={series.length < 30}
+                      yAxisProps={{ domain: yAxisDomain }}
+                      valueFormatter={(value) => f.price(value, deal.currency)}
+                      referenceLines={[
+                        {
+                          y: stats.avgPrice,
+                          label: "Moyenne",
+                          color: "var(--mantine-color-dimmed)",
+                        },
+                        ...(stats.referencePrice !== null
+                          ? [
+                              {
+                                y: stats.referencePrice,
+                                label: "Marché (Idealo)",
+                                color: "var(--mantine-color-orange-6)",
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
+                  ) : (
+                    <EmptyState
+                      icon="chart"
+                      title="Historique en cours de constitution"
+                      description="Un seul relevé pour l'instant. Le graphique apparaîtra dès que l'offre aura été observée plusieurs fois."
+                    />
+                  )}
+                </Paper>
+              </Stack>
+            ) : null}
+            <PriceHistoryPanel deal={deal} />
+            {deal.idealoUrl ? (
+              <Paper p="md">
+                <Group justify="space-between" mb="sm">
+                  <Stack gap={2}>
+                    <Title order={5}>Historique de prix Idealo (marché)</Title>
+                    <Text fz="sm" c="dimmed">
+                      Relevé en direct sur la fiche Idealo du produit.
+                    </Text>
+                  </Stack>
+                  <Anchor
+                    href={deal.idealoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    fz="sm"
+                  >
+                    Voir sur Idealo
+                    <Icon name="external" size={14} />
+                  </Anchor>
+                </Group>
+                {idealoHistory === undefined ? (
+                  <EmptyState
+                    icon="chart"
+                    title="Chargement du graphique Idealo…"
+                    description="Récupération de l'historique directement depuis Idealo."
+                  />
+                ) : idealoSeries.length > 1 ? (
+                  <LineChart
+                    h={220}
+                    data={idealoSeries}
+                    dataKey="date"
+                    series={[{ name: "Prix", color: "orange.6" }]}
+                    curveType="stepAfter"
+                    connectNulls
+                    gridAxis="y"
+                    tickLine="none"
+                    withDots={idealoSeries.length < 30}
+                    valueFormatter={(value) => f.price(value, deal.currency)}
+                  />
+                ) : (
+                  <EmptyState
+                    icon="chart"
+                    title="Historique Idealo indisponible"
+                    description="Idealo bloque la récupération automatique pour le moment (protection anti-robot) ou ne publie pas d'historique pour ce produit."
+                  />
                 )}
+              </Paper>
+            ) : null}
+          </Stack>
+        </Tabs.Panel>
 
-                <Divider />
+        <Tabs.Panel value="dealabs" pt="md">
+          <Stack gap="md">
+            {current ? (
+              <>
+                <DealabsStatusPanel
+                  dealId={deal.id}
+                  version={current.updatedAt}
+                />
+                <ModerationNotice
+                  status={current.moderationStatus}
+                  reason={current.moderationReason}
+                  message={current.moderationMessage}
+                  at={current.moderationAt}
+                />
+                {current.status !== "posted" ? (
+                  <ReadinessPanel
+                    dealId={deal.id}
+                    version={current.updatedAt}
+                  />
+                ) : null}
+                {shownRun && shownRun.status !== "running" ? (
+                  <PublishSteps run={shownRun} />
+                ) : null}
+                <Paper p="md">
+                  <Stack gap="sm">
+                    <Divider
+                      label="J'ai publié ce deal moi-même (lien du post)"
+                      labelPosition="left"
+                    />
+                    <Group gap="sm" align="flex-end" wrap="wrap">
+                      <TextInput
+                        flex={1}
+                        miw={240}
+                        label="Lien Dealabs du deal publié"
+                        placeholder="https://www.dealabs.com/bons-plans/..."
+                        value={dealabsUrlInput}
+                        onChange={(event) =>
+                          setDealabsUrlInput(event.currentTarget.value)
+                        }
+                      />
+                      <Button
+                        variant="default"
+                        loading={verifying}
+                        disabled={!dealabsUrlInput.trim()}
+                        onClick={() => void verify()}
+                      >
+                        Vérifier
+                      </Button>
+                    </Group>
+                    {current.dealabsUrl && current.status === "posted" ? (
+                      <Text fz="sm" c="signal.6">
+                        Publié et vérifié
+                        {current.verifiedAt
+                          ? ` le ${f.dateTime(current.verifiedAt)}`
+                          : ""}{" "}
+                        —{" "}
+                        <Anchor
+                          href={current.dealabsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          voir sur Dealabs
+                        </Anchor>
+                      </Text>
+                    ) : null}
+                  </Stack>
+                </Paper>
+              </>
+            ) : (
+              <Text fz="sm" c="dimmed">
+                Pas de brouillon Dealabs : la note de ce deal est sous la barre
+                de visibilité.
+              </Text>
+            )}
+          </Stack>
+        </Tabs.Panel>
 
+        {current ? (
+          <Tabs.Panel value="brouillon" pt="md">
+            <Paper p="md">
+              <Stack gap="sm">
+                <Group justify="space-between" align="flex-end" wrap="wrap">
+                  <Text fz="sm" c="dimmed" maw={520}>
+                    Généré à partir des faits du deal. Un titre ou une
+                    description que vous enregistrez est gardé tel quel jusqu'à
+                    « Régénérer ».
+                  </Text>
+                  <Select
+                    w={170}
+                    value={current.status}
+                    data={[
+                      { value: "draft", label: "À relire" },
+                      { value: "posted", label: "Publié" },
+                      { value: "discarded", label: "Écarté" },
+                    ]}
+                    onChange={(value) =>
+                      value && void save({ status: value as Draft["status"] })
+                    }
+                    allowDeselect={false}
+                    aria-label="Statut du brouillon"
+                  />
+                </Group>
                 <TextInput
                   label="Titre"
                   description={`${current.title.length} / 140 caractères (limite Dealabs)`}
@@ -1105,112 +1082,144 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                     rightSection={<Icon name="external" size={16} />}
                     onClick={() => void publish()}
                   >
-                    Publier sur Dealabs
-                  </Button>
-                  <Tooltip
-                    label="Se connecte avec la session Dealabs enregistrée, ouvre Dealabs sur le serveur (visible ici en écran distant), remplit le formulaire et clique sur publier à votre place."
-                    multiline
-                    w={280}
-                  >
-                    <Button
-                      variant="filled"
-                      color="signal"
-                      loading={publishRunning}
-                      disabled={current.status === "posted"}
-                      rightSection={<Icon name="bolt" size={16} />}
-                      onClick={startAutoPublish}
-                    >
-                      Publication automatique
-                    </Button>
-                  </Tooltip>
-                  <DealabsTitleDialog
-                    key={titleDialog ? "open" : "closed"}
-                    opened={titleDialog}
-                    initial={current.title}
-                    fullTitle={deal.title}
-                    saving={titleSaving}
-                    error={titleError}
-                    onCancel={() => setTitleDialog(false)}
-                    onValidate={(title) => void validateTitle(title)}
-                  />
-                </Group>
-
-                <DealabsStatusPanel
-                  dealId={deal.id}
-                  version={current.updatedAt}
-                />
-                <ModerationNotice
-                  status={current.moderationStatus}
-                  reason={current.moderationReason}
-                  message={current.moderationMessage}
-                  at={current.moderationAt}
-                />
-                {current.status !== "posted" ? (
-                  <ReadinessPanel
-                    dealId={deal.id}
-                    version={current.updatedAt}
-                  />
-                ) : null}
-
-                {publishAttemptNotice && !publishRunning ? (
-                  <Text size="xs" c="red">
-                    {publishAttemptNotice.title} — {publishAttemptNotice.text}
-                  </Text>
-                ) : null}
-
-                {publishRunning ? (
-                  <RemoteScreen hint="Suivez la publication en direct. Si une case « je ne suis pas un robot » apparaît, cliquez dessus dans l'image." />
-                ) : null}
-                {shownRun?.status === "running" ? (
-                  <StopPublishButton run={shownRun} />
-                ) : null}
-                {shownRun ? <PublishSteps run={shownRun} /> : null}
-
-                <Divider
-                  label="J'ai publié ce deal moi-même (lien du post)"
-                  labelPosition="left"
-                />
-                <Group gap="sm" align="flex-end" wrap="wrap">
-                  <TextInput
-                    flex={1}
-                    miw={240}
-                    label="Lien Dealabs du deal publié"
-                    placeholder="https://www.dealabs.com/bons-plans/..."
-                    value={dealabsUrlInput}
-                    onChange={(event) =>
-                      setDealabsUrlInput(event.currentTarget.value)
-                    }
-                  />
-                  <Button
-                    variant="default"
-                    loading={verifying}
-                    disabled={!dealabsUrlInput.trim()}
-                    onClick={() => void verify()}
-                  >
-                    Vérifier
+                    Ouvrir Dealabs (à la main)
                   </Button>
                 </Group>
-                {current.dealabsUrl && current.status === "posted" ? (
-                  <Text fz="sm" c="signal.6">
-                    Publié et vérifié
-                    {current.verifiedAt
-                      ? ` le ${f.dateTime(current.verifiedAt)}`
-                      : ""}{" "}
-                    —{" "}
-                    <Anchor
-                      href={current.dealabsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      voir sur Dealabs
-                    </Anchor>
-                  </Text>
-                ) : null}
+
+                <Accordion variant="contained">
+                  <Accordion.Item value="fill">
+                    <Accordion.Control>
+                      Copier champ par champ pour le formulaire Dealabs
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <Stack gap="sm">
+                        <Stack gap={2}>
+                          <Title order={3} fz="sm" fw={600}>
+                            Remplir le formulaire Dealabs
+                          </Title>
+                          <Text fz="xs" c="dimmed">
+                            Dans l'ordre où Dealabs les demande : lien, titre,
+                            prix actuel, prix habituel, description,
+                            disponibilité. Copiez chaque champ et collez-le au
+                            bon endroit sur Dealabs.
+                          </Text>
+                        </Stack>
+                        {(
+                          [
+                            { label: "Lien", value: deal.url },
+                            { label: "Titre", value: current.title },
+                            {
+                              label: "Prix actuel",
+                              value: f.price(deal.currentPrice, deal.currency),
+                            },
+                            {
+                              label: "Prix habituel",
+                              value: deal.listPrice
+                                ? f.price(deal.listPrice, deal.currency)
+                                : "",
+                            },
+                            {
+                              label: "Description",
+                              value: current.description ?? "",
+                            },
+                            {
+                              label: "Disponibilité",
+                              value: availabilityLabel,
+                            },
+                          ] as const
+                        ).map((field) =>
+                          field.value ? (
+                            <Group
+                              key={field.label}
+                              gap="xs"
+                              align="flex-end"
+                              wrap="nowrap"
+                            >
+                              {field.label === "Description" ? (
+                                <Textarea
+                                  flex={1}
+                                  label={field.label}
+                                  value={field.value}
+                                  readOnly
+                                  autosize
+                                  minRows={2}
+                                  maxRows={6}
+                                />
+                              ) : (
+                                <TextInput
+                                  flex={1}
+                                  label={field.label}
+                                  value={field.value}
+                                  readOnly
+                                />
+                              )}
+                              <Tooltip label={`Copier « ${field.label} »`}>
+                                <ActionIcon
+                                  variant="default"
+                                  size="lg"
+                                  aria-label={`Copier ${field.label}`}
+                                  onClick={() =>
+                                    void copyField(field.label, field.value)
+                                  }
+                                >
+                                  <Icon name="copy" size={16} />
+                                </ActionIcon>
+                              </Tooltip>
+                            </Group>
+                          ) : null,
+                        )}
+                      </Stack>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                </Accordion>
               </Stack>
-            </Card>
-          </Stack>
-        </>
-      ) : null}
+            </Paper>
+          </Tabs.Panel>
+        ) : null}
+
+        <Tabs.Panel value="donnees" pt="md">
+          <Paper p="md">
+            <Table variant="vertical" withTableBorder={false} fz="sm">
+              <Table.Tbody>
+                {stats.referencePrice !== null ? (
+                  <Table.Tr>
+                    <Table.Th>Prix de référence marché</Table.Th>
+                    <Table.Td className="tnum">
+                      {f.price(stats.referencePrice, deal.currency)}
+                      <Text component="span" c="dimmed" fz="xs">
+                        {" "}
+                        (Idealo, tous marchands)
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : null}
+                <Table.Tr>
+                  <Table.Th w={180}>Disponibilité</Table.Th>
+                  <Table.Td>{f.titleize(deal.availability)}</Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Th>Première détection</Table.Th>
+                  <Table.Td>{f.dateTime(deal.firstSeenAt)}</Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Th>Dernière observation</Table.Th>
+                  <Table.Td>
+                    {f.dateTime(deal.lastSeenAt)}
+                    <Text component="span" c="dimmed">
+                      {" "}
+                      ({f.relativeTime(deal.lastSeenAt)})
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Th>Source</Table.Th>
+                  <Table.Td>{f.titleize(deal.sourceId)}</Table.Td>
+                </Table.Tr>
+              </Table.Tbody>
+            </Table>
+          </Paper>
+        </Tabs.Panel>
+      </Tabs>
     </Stack>
   );
 };

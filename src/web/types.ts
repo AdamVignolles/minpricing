@@ -114,6 +114,14 @@ export interface Deal {
   };
   /** Added by pasting its link (see `WatchedLink`). */
   addedByLink?: { linkId: string; addedBy: string; watched: boolean };
+  /**
+   * The score's price argument, on « Bons plans » rows only
+   * (`withPriceArgument`, epic 30).
+   */
+  priceArgument?: {
+    reference?: PriceReference & { discountPercentage: number };
+    bestAlternative?: { label: string; price: number };
+  };
 }
 
 /** Live state of a collection run (see `/admin/collect/progress`). */

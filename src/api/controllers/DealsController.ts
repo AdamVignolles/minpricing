@@ -1,4 +1,4 @@
-import { z } from "alepha";
+import { type Infer, z } from "alepha";
 import { $inject, Alepha } from "alepha";
 import { $repository, db, pageQuerySchema } from "alepha/orm";
 import { $action, HttpError } from "alepha/server";
@@ -27,6 +27,7 @@ import { PricingService } from "../services/PricingService.ts";
 import { dropSameListings } from "../services/sameListing.ts";
 import {
   MIN_VISIBLE_SCORE,
+  type PriceReference,
   ScoringService,
 } from "../services/ScoringService.ts";
 import { WatchedLinkService } from "../services/WatchedLinkService.ts";
@@ -41,7 +42,30 @@ interface AddedByLink {
   watched: boolean;
 }
 
+const priceReferenceSchema = z.object({
+  kind: z.enum(["lowest30d", "history", "regular", "rrp", "listed"]),
+  label: z.text(),
+  price: z.number(),
+  trust: z.number(),
+});
+
 const dealResponseSchema = dealEntity.schema.extend({
+  /**
+   * Epic 30: the score's own price argument, for the « Bons plans » table
+   * (`withPriceArgument`): the reference the real drop is measured
+   * against, and the cheapest other shop. The same `evaluate()` as the deal
+   * page, so the two never disagree.
+   */
+  priceArgument: z
+    .object({
+      reference: priceReferenceSchema
+        .extend({ discountPercentage: z.number() })
+        .optional(),
+      bestAlternative: z
+        .object({ label: z.text(), price: z.number() })
+        .optional(),
+    })
+    .optional(),
   onDealabs: z
     .object({
       url: z.text({ size: "rich" }),
@@ -59,13 +83,6 @@ const dealResponseSchema = dealEntity.schema.extend({
       watched: z.boolean(),
     })
     .optional(),
-});
-
-const priceReferenceSchema = z.object({
-  kind: z.enum(["lowest30d", "history", "regular", "rrp", "listed"]),
-  label: z.text(),
-  price: z.number(),
-  trust: z.number(),
 });
 
 /** Wire shape of {@link ScoringService.evaluate}'s result. */
@@ -157,6 +174,11 @@ export class DealsController {
          * dashboard, MCP), they are mixed in as before.
          */
         hideHandAdded: z.boolean().optional(),
+        /**
+         * Add each row's price argument (`priceArgument`): one scoring pass
+         * per row, so only the « Bons plans » table asks for it.
+         */
+        withPriceArgument: z.boolean().optional(),
         sortBy: z
           .enum([
             "relevance",
@@ -187,6 +209,7 @@ export class DealsController {
         search,
         addedByHand,
         hideHandAdded,
+        withPriceArgument,
       } = query;
 
       const conditions: Record<string, unknown>[] = [];
@@ -246,9 +269,14 @@ export class DealsController {
         { count: true },
       );
       // Colour variants of one product, listed side by side: show one.
+      const content = await this.withDealabsStatus(
+        dropSameListings(result.content),
+      );
       return {
         ...result,
-        content: await this.withDealabsStatus(dropSameListings(result.content)),
+        content: withPriceArgument
+          ? await this.withPriceArgument(content)
+          : content,
       };
     },
   });
@@ -270,6 +298,59 @@ export class DealsController {
     if (deals.length === 0) return deals;
     const linked = await this.withLinks(deals);
     return this.withDealabsOnly(linked);
+  }
+
+  /**
+   * Each row's price argument (epic 30): the reference its real drop is
+   * measured against and the cheapest other shop, from the same
+   * `evaluate()` as `/deals/:id/price-stats`. A row that can't be scored
+   * is returned without it.
+   */
+  protected async withPriceArgument<T extends Infer<typeof dealEntity.schema>>(
+    deals: T[],
+  ): Promise<
+    Array<
+      T & {
+        priceArgument?: {
+          reference?: PriceReference & { discountPercentage: number };
+          bestAlternative?: { label: string; price: number };
+        };
+      }
+    >
+  > {
+    const types = new Map(
+      (await this.sources.findMany({})).map((source) => [
+        source.id,
+        source.type,
+      ]),
+    );
+    return Promise.all(
+      deals.map(async (deal) => {
+        try {
+          const stats = await this.pricing.getStats(
+            deal.id,
+            deal.currentPrice,
+            deal.referencePrice,
+          );
+          const analysis = this.scoring.evaluate(
+            deal,
+            stats,
+            types.get(deal.sourceId) ?? "scrape",
+          );
+          return {
+            ...deal,
+            priceArgument: {
+              ...(analysis.reference ? { reference: analysis.reference } : {}),
+              ...(analysis.bestAlternative
+                ? { bestAlternative: analysis.bestAlternative }
+                : {}),
+            },
+          };
+        } catch {
+          return deal;
+        }
+      }),
+    );
   }
 
   /** The « ajouté par lien » flag, from the watched links. */
@@ -474,8 +555,9 @@ export class DealsController {
       params: z.object({ id: z.text() }),
       response: dealResponseSchema,
     },
+    // With `onDealabs` too: the deal page's verdict says where it stands.
     handler: async ({ params }) =>
-      (await this.withLinks([await this.deals.getById(params.id)]))[0],
+      (await this.withDealabsStatus([await this.deals.getById(params.id)]))[0],
   });
 
   /**
