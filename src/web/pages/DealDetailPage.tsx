@@ -30,6 +30,7 @@ import type { DraftsController } from "../../api/controllers/DraftsController.ts
 import type { PublishRun } from "../../api/services/publishSteps.ts";
 import { StopPublishButton } from "../components/agents/PublishControls.tsx";
 import DealabsConnection from "../components/deals/DealabsConnection.tsx";
+import DealabsStatusPanel from "../components/deals/DealabsStatusPanel.tsx";
 import DealabsTitleDialog from "../components/deals/DealabsTitleDialog.tsx";
 import DealAnalysis from "../components/deals/DealAnalysis.tsx";
 import DealImage from "../components/deals/DealImage.tsx";
@@ -39,6 +40,10 @@ import PriceHistoryPanel from "../components/deals/PriceHistoryPanel.tsx";
 import PublishSteps, {
   usePublishProgress,
 } from "../components/deals/PublishSteps.tsx";
+import {
+  ModerationNotice,
+  ReadinessPanel,
+} from "../components/deals/ReadinessPanel.tsx";
 import RemoteScreen from "../components/deals/RemoteScreen.tsx";
 import RemoveHandAdded from "../components/deals/RemoveHandAdded.tsx";
 import StoreHistoryChart from "../components/deals/StoreHistoryChart.tsx";
@@ -1082,7 +1087,10 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                     <Button
                       variant="default"
                       loading={regenerating}
-                      disabled={current.status === "posted"}
+                      disabled={
+                        current.status === "posted" &&
+                        (current.dealabsStatus ?? "live") === "live"
+                      }
                       onClick={() => void regenerate()}
                     >
                       Régénérer
@@ -1127,6 +1135,23 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                   />
                 </Group>
 
+                <DealabsStatusPanel
+                  dealId={deal.id}
+                  version={current.updatedAt}
+                />
+                <ModerationNotice
+                  status={current.moderationStatus}
+                  reason={current.moderationReason}
+                  message={current.moderationMessage}
+                  at={current.moderationAt}
+                />
+                {current.status !== "posted" ? (
+                  <ReadinessPanel
+                    dealId={deal.id}
+                    version={current.updatedAt}
+                  />
+                ) : null}
+
                 {publishAttemptNotice && !publishRunning ? (
                   <Text size="xs" c="red">
                     {publishAttemptNotice.title} — {publishAttemptNotice.text}
@@ -1142,7 +1167,7 @@ const DealDetailPage: FC<DealDetailPageProps> = ({
                 {shownRun ? <PublishSteps run={shownRun} /> : null}
 
                 <Divider
-                  label="Confirmer la publication"
+                  label="J'ai publié ce deal moi-même (lien du post)"
                   labelPosition="left"
                 />
                 <Group gap="sm" align="flex-end" wrap="wrap">

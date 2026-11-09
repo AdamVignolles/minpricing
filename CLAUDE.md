@@ -219,6 +219,117 @@ controllers → React console → Dealabs draft / auto-publish.
   Deals from other shops matched to an Amazon page (`marketPriceUrl`) show
   that product's Amazon chart, labelled as such; only Amazon deals get it
   in the Dealabs description.
+- **Dealabs moderation** (epic 29): six of ~40 posts were hidden or
+  deleted 26/10–04/11 (marketplace sellers, a store-only Screwfix offer
+  without store/stock, no product image, a Swedish listing, a coupon
+  price, title-only text). **Before**: « Prêt pour Dealabs »
+  (`services/dealabsReadiness.ts`, pure), publish step `readiness` right
+  after `draft`, before any browser. Rules, each `ok` / `fix` / `block`
+  with a French reason: seller (marketplace = `soldByMerchant: false` or
+  AliExpress: brand's own store, else ≥ `minSellerRating` and ≥
+  `minSellerSales` (per source: `minSellerSalesBySource`; from Dealabs'
+  `/reglespublication`: 80 % positive, 100 reviews, 500 on AliExpress —
+  we read sales, so ~3×), unknown numbers block; `sellerBlocklist`;
+  « compatible / remplacement pour <Marque> » parts always block), local
+  offer (`localSources` or `storePickupOnly`: block — we don't read store,
+  city and stock yet), image (`imageUrl`), language (title and page start
+  not French: stopword counts, English left alone), availability (out of
+  stock, « plus que N » < `minStock`), price conditions read on the page
+  check's anonymous browser (coupon, Prime, « Prévoyez et économisez »,
+  cart discount → `fix`: « (Via Coupon) »/« [Prime] »… appended to the
+  title and an « À savoir » line, saved on the draft), completeness
+  (≥ 80 characters beyond the title). Thresholds and lists live in
+  `config/moderation.json` (agent config `moderation`: `bounds` and
+  `officialSellerWords` locked, lists only grow — `checkModeration`;
+  `docs/moderation-changelog.md`). Automatic paths (slot, end-of-run
+  batch) throw `DealNotReadyError` (a `DealNotAvailableError`: not a try,
+  the slot moves on); slots and the batch also pre-filter without the
+  page; the schedule's dry run notes the verdict with the page; the
+  owner's button only warns (« À vos risques »). `/admin/agent-report`
+  carries `readiness` and `shortlist` drops `block`
+  (`rejected.pasPretPourDealabs`). `GET /deals/:id/readiness` and MCP
+  `get_readiness` (no page); the deal page shows it (`ReadinessPanel`).
+  The publisher checks the gallery step for a product image
+  (`hasProductImage`) and uploads `imageUrl` (`setInputFiles`) when
+  Dealabs scraped none; automatic publishes stop without one
+  (`requireImage`), step detail « image produit : récupérée par Dealabs /
+  ajoutée / absente ». **After**: `DealabsModerationService`
+  (`ModerationJob`, :07/:27/:47, local only) reads each post of the last
+  21 days anonymously (404 → `hidden`, 410 → `deleted`, 200 after hidden
+  → `ok`) and, with the saved session in a headless browser,
+  `/profile/messages` conversations from « L'équipe Dealabs »
+  (selectors best-effort, unverified on a live inbox); parsing and
+  matching in `services/dealabsModeration.ts` (thread link, else title;
+  reasons `incomplete:location-stock|image|price`, `seller`,
+  `availability`, `deleted`, `other`; deadline « sous 3 heures »). Stored
+  on the draft (`moderationStatus|Reason|Message|At|CheckedAt|
+DismissedAt`, migration `20261106090000_add_draft_moderation`). A
+  rejection teaches `config/moderation.json` (`learnFromRejection`:
+  seller → blocklist, location-stock → local source, availability →
+  `minStock` + 1; audited as agent `moderation-inbox`). Alerts:
+  `ModerationBanner` on every page until « Vu », `ModerationNotice` on
+  the deal page, `GET /dealabs/moderation` (alerts, outcomes, rate by
+  source/category/reason), `POST /dealabs/moderation/:dealId/dismiss`,
+  `POST /dealabs/moderation/check`, MCP `get_moderation`,
+  `dealradar.mjs moderation [days]` (debrief: lesson when a reason
+  repeats on ≥ 2 posts; weekly: rate, target < 5 %). A deleted post no
+  longer counts as « Publié par vous ». **Never replies to a moderator
+  nor edits a post** (owner, 2026-11-04). Push/e-mail alerts: not built
+  (owner's open question). `test/dealabs-moderation.spec.ts`.
+- **Dealabs status of each deal** (epic 32): drafts carry our post's
+  checked status — `dealabsStatus` `not_published` | `live` | `expired` |
+  `hidden` | `deleted` (empty on an unchecked `posted` draft = `live`:
+  `currentDealabsStatus`), `dealabsStatusAt`, `dealabsCheckedAt`,
+  `dealabsStatusSource` (`publish` | `profile` | `thread` | `moderation` |
+  `manual-verify`), `postedBy` (`agent` | `button` | `manual`),
+  `dealabsTemperature`, `dealabsPostPrice`, `dealabsStatusHistory` (last
+  20 changes; migration `20261106120000_add_draft_dealabs_status`, which
+  starts posted drafts as `live`). `DealabsStatusService` (pure rules in
+  `services/dealabsStatus.ts`, labels in `dealabsStatusLabels.ts` for the
+  browser): our profile read fresh (`MyDealabsPostsService.postsFresh`,
+  `undefined` = unreadable → nothing changes) matched to drafts by thread
+  id (`dealabsThreadId`: `…-3445887`, `/share-deal/3446484`), then by
+  product (`isSameProduct` on `ownTitle` — our titles' commas aren't a
+  roundup — plus the same shop, `sameMerchant`, deals seen in 45 days);
+  a post with no draft or an unposted draft = **posted by hand**:
+  attached (`posted`, `postedBy: manual`, link fixed). Posted drafts the
+  profile didn't confirm: their page, anonymous, paced by
+  `DealabsHistoryService.waitForSlot` (20 per check, oldest-checked
+  first): 404/410 or redirect away = `deleted` (`hidden` when a
+  moderator's message said so), « en attente de modération » = `hidden`,
+  first `isExpired` of the page's JSON = `expired`/`live` (checked on
+  live pages 06/11, fixtures `test/fixtures/dealabs/`); Cloudflare,
+  errors, other codes = unchanged. `setStatus` writes the history and,
+  for `hidden`/`deleted`, raises epic 29's moderation alert (banner);
+  the moderation inbox calls it too. Run at the end of `runAll()` after
+  `refreshTop` (pseudo-source `dealabs-status`, « Statut Dealabs des
+  deals », at most hourly, never fails the run; post pages get 90 s per
+  run, the rest « reporté(s) au prochain passage »; run-log line
+  `statusSummaryLine`, counts in the run's `collection-runs.jsonl` line
+  as `dealabsStatus`), and from the deal page (`DealabsStatusPanel`:
+  « Sur Dealabs » badge, link, checked when/how, history, « Vérifier sur
+  Dealabs » → `POST /deals/:id/dealabs/check`, also a fresh search for
+  someone else's live post; `GET /deals/:id/dealabs/status`, MCP
+  `get_dealabs_status`); the old paste-the-URL verify stays as « J'ai
+  publié ce deal moi-même » (status `manual-verify`). Publication sets
+  `live`/`publish`/`postedBy`/post price. **Effects**: cards — « Publié
+  par vous » for `live`/`expired` (« · expiré »), `hidden`/`deleted`
+  red « Masqué/Supprimé par Dealabs », not greyed; **republish rules**
+  (owner, 2026-11-05, `republishVerdict` via
+  `AutoPublishService.republishCheck`): never over our live post or
+  someone else's (`othersLiveOnDealabs`, stored history without `mine`);
+  `hidden`/`deleted` once « Prêt pour Dealabs » passes; `expired` when
+  today's price ≤ our post's price (the normal selection rules apply as
+  for any deal). `publishDeal` refuses a live post (409), refuses an
+  automatic republish the rules forbid, resets the draft to `draft`
+  (history kept) and tells the publisher to ignore our old thread in its
+  duplicate search (`ignoreThreadUrl`); the button may republish any
+  non-live post. `/admin/agent-report` admits republishable posted
+  drafts with `republish` (reason), `shortlist` passes it on; `PUT
+/agent/schedule` drops deals whose post is live, slots skip a
+  forbidden republish without a try; the end-of-run batch never
+  republishes. Stats: `statuses` in `GET /dealabs/moderation` and
+  `dealradar.mjs moderation`. `test/dealabs-status.spec.ts`.
 - **Auto-publish**: `AutoPublishService.publishDeal()` is the single publish
   path (button and run). At the end of `runAll()`, `publishBestDeals()` posts
   deals seen in that run with score ≥ `AUTO_PUBLISH_MIN_SCORE` (65), draft
@@ -229,7 +340,7 @@ controllers → React console → Dealabs draft / auto-publish.
   (`AUTO_PUBLISH=true` turns it on); the per-deal button works either way.
   **Phases**: `publishDeal(dealId, trigger)` reports each step of the
   publication (list in `services/publishSteps.ts`: pre-flight checks,
-  duplicate, merchant page, draft, chart, existing post, browser, Dealabs,
+  duplicate, merchant page, draft, readiness, chart, existing post, browser, Dealabs,
   Cloudflare, login, form steps, submit, session) to
   `PublishProgressService` (`$cache`, one current + one last run; never
   throws, so a progress write can't fail a publish). Cloudflare and login

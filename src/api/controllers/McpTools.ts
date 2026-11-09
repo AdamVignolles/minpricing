@@ -23,6 +23,7 @@ export const CONFIG_FILES = {
   collection: "collection.json",
   desirability: "desirability.json",
   "selection-lessons": "selection-lessons.md",
+  moderation: "moderation.json",
 } as const;
 
 type DealRow = Record<string, unknown>;
@@ -289,7 +290,7 @@ export class McpTools {
   get_config = $tool({
     title: "Configuration",
     description:
-      "Read one of the tuning files the agents own: publish-rules (selection rules), collection (sources schedule, Amazon/Cdiscount pages), desirability (brand/product weights of the heat prediction), selection-lessons (lessons the selector applies).",
+      "Read one of the tuning files the agents own: publish-rules (selection rules), collection (sources schedule, Amazon/Cdiscount pages), desirability (brand/product weights of the heat prediction), selection-lessons (lessons the selector applies), moderation (« Prêt pour Dealabs » thresholds, seller blocklist, local sources).",
     annotations: readOnly,
     schema: {
       params: z.object({
@@ -298,6 +299,7 @@ export class McpTools {
           "collection",
           "desirability",
           "selection-lessons",
+          "moderation",
         ]),
       }),
     },
@@ -331,6 +333,41 @@ export class McpTools {
       "The Dealabs publication running right now (if any) and the last finished one, phase by phase: pre-flight checks, merchant page, browser, Cloudflare, login, form steps, submit. Each step has a status (pending/running/done/skipped/failed), times, a French detail, and needsHuman when someone must act in the remote screen; a failed run names the failed step and why.",
     annotations: readOnly,
     handler: () => this.drafts.publishProgress.run(),
+  });
+
+  get_moderation = $tool({
+    title: "Modération Dealabs",
+    description:
+      "What Dealabs' moderators did with our recent posts (epic 29): alerts (posts hidden or deleted, not yet closed by Adam) with the reason category (incomplete:location-stock, incomplete:image, incomplete:price, seller, availability, deleted, other), what the moderators asked, their message and deadline; every outcome of the last `days` (default 30); and the hidden/deleted rate over `statsDays` (default 7) by source, category and reason. DealRadar never replies to moderators.",
+    annotations: readOnly,
+    schema: {
+      params: z.object({
+        days: z.number().optional(),
+      }),
+    },
+    handler: ({ params }) =>
+      this.drafts.moderationStatus.run({ query: { days: params.days } }),
+  });
+
+  get_dealabs_status = $tool({
+    title: "Statut Dealabs d'un deal",
+    description:
+      "One deal's checked Dealabs status (epic 32): our post not_published / live / expired / hidden / deleted, its link, temperature, price, who posted it (agent, button, manual), when it was checked and the history of changes, plus whether someone else's post for the product is live (stored history). Re-checked every collection run (at most hourly).",
+    annotations: readOnly,
+    schema: { params: z.object({ dealId: z.text() }) },
+    handler: ({ params }) =>
+      this.drafts.dealabsStatusOf.run({ params: { id: params.dealId } }),
+  });
+
+  /** « Prêt pour Dealabs » for one deal (without the merchant page). */
+  get_readiness = $tool({
+    title: "Prêt pour Dealabs",
+    description:
+      "The « Prêt pour Dealabs » checklist for one deal, without opening the merchant page: seller (marketplace thresholds, blocklist, knock-off parts), local offer, product image, language, stock, price conditions (coupon, Prime…), description completeness. Each rule is ok, fix (DealRadar adds it) or block (automatic publishing skips the deal).",
+    annotations: readOnly,
+    schema: { params: z.object({ dealId: z.text() }) },
+    handler: ({ params }) =>
+      this.drafts.readiness.run({ params: { id: params.dealId } }),
   });
 
   get_dealabs_session = $tool({

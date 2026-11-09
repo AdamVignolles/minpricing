@@ -18,6 +18,7 @@ import { SourcesController } from "./controllers/SourcesController.ts";
 import { StatsController } from "./controllers/StatsController.ts";
 import { CollectDealsJob } from "./jobs/CollectDealsJob.ts";
 import { LinkCheckJob } from "./jobs/LinkCheckJob.ts";
+import { ModerationJob } from "./jobs/ModerationJob.ts";
 import { PublishScheduleJob } from "./jobs/PublishScheduleJob.ts";
 import { AgentFilesService } from "./services/AgentFilesService.ts";
 import { AgentsService } from "./services/AgentsService.ts";
@@ -30,6 +31,8 @@ import { CollectionService } from "./services/CollectionService.ts";
 import { DealabsCommentsService } from "./services/DealabsCommentsService.ts";
 import { DealabsDraftService } from "./services/DealabsDraftService.ts";
 import { DealabsHistoryService } from "./services/DealabsHistoryService.ts";
+import { DealabsModerationService } from "./services/DealabsModerationService.ts";
+import { DealabsStatusService } from "./services/DealabsStatusService.ts";
 import { DealPageCheckService } from "./services/DealPageCheckService.ts";
 import { HotWatchlistService } from "./services/HotWatchlistService.ts";
 import { IdealoReferenceService } from "./services/IdealoReferenceService.ts";
@@ -74,6 +77,7 @@ export const ApiModule = $module({
     CollectDealsJob,
     PublishScheduleJob,
     LinkCheckJob,
+    ModerationJob,
     // services
     CollectionService,
     AgentsService,
@@ -95,6 +99,8 @@ export const ApiModule = $module({
     MarketReferenceService,
     DealabsCommentsService,
     DealabsHistoryService,
+    DealabsModerationService,
+    DealabsStatusService,
     DealPageCheckService,
     ItadService,
     SeedService,

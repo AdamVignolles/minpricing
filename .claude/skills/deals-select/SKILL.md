@@ -33,7 +33,22 @@ seller, sold` (sold by the merchant), `dlBest` (best Dealabs
      aspirateur 5000Pa…") — Dealabs votes these down (Lefant: −32°);
    - same product as another kept deal (keep the better one);
    - marketplace seller (`sold` false) with no rating or rating < 4;
-   - `dlLow` known and `price` > `dlLow` (already posted cheaper).
+   - `dlLow` known and `price` > `dlLow` (already posted cheaper);
+   - **« Prêt pour Dealabs »** (epic 29): what the app's checklist would
+     block never reaches the shortlist (`rejected.pasPretPourDealabs`).
+     Veto too what it can't judge without the page but a moderator would
+     hide: a « compatible / remplacement pour <marque> » part, a no-name
+     marketplace seller, a store-only offer (stock per store), a title or
+     listing not in French (imported), « plus que N » in stock. A row with
+     `readiness: "fix"` is fine: the app adds the price condition
+     (« (Via Coupon) », « [Prime] ») to the title and the description
+     itself — don't remove it from your `dealabsTitle` if you write one.
+     A row with `republish` (epic 32) is a deal we already posted: our
+     post expired with the price now back at or under it, or was hidden /
+     deleted and the cause is fixed (owner's rules, 2026-11-05). Keep it
+     like any deal if it deserves it, and start its queue `reason` with
+     that text (« republication : prix revenu à … »). Deals whose post is
+     live never reach the shortlist.
      Never add a deal that isn't in the shortlist.
 4. **Order by desirability** (Dealabs votes on "I want it", not on the
    percentage): put first what a large audience wants at a price they can

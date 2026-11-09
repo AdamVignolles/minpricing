@@ -280,6 +280,11 @@ export interface OnDealabs {
   temperature: number;
   /** Our own post (published draft), not someone else's. */
   mine: boolean;
+  /**
+   * Our post's checked status (epic 32): `live`, `expired` (« Publié par
+   * vous · expiré »), `hidden` or `deleted` (shown as such, not greyed).
+   */
+  status?: "live" | "expired" | "hidden" | "deleted";
 }
 
 /**

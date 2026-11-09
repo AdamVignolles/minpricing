@@ -71,6 +71,10 @@ import {
 } from "./collectionTuning.ts";
 import { DealabsDraftService } from "./DealabsDraftService.ts";
 import { DealabsHistoryService } from "./DealabsHistoryService.ts";
+import {
+  DealabsStatusService,
+  type StatusCheckSummary,
+} from "./DealabsStatusService.ts";
 import { dealabsTitle } from "./dealTitle.ts";
 import { DEFAULT_MERCHANT_BY_SOURCE, type Deal } from "./DealTypes.ts";
 import { describeCuts, type FieldCut, fitFields } from "./fieldCaps.ts";
@@ -132,6 +136,17 @@ export function fitTitle(title: string, max = TITLE_MAX): string {
 
 /** Progress-sidebar id of the publishing step that ends a run. */
 const AUTO_PUBLISH_STEP = "dealabs-publish";
+/** Pseudo-source of the run: our posts' Dealabs status (epic 32). */
+const DEALABS_STATUS_STEP = "dealabs-status";
+
+/**
+ * The Dealabs status check of a run, as the run journal records it
+ * (`collection-runs.jsonl`): its counts, or why it failed. Absent when the
+ * check ran less than an hour before.
+ */
+type DealabsStatusJournal =
+  | Omit<StatusCheckSummary, "line">
+  | { error: string };
 
 /** What `upsertDeal` did with one offer. */
 export type UpsertOutcome =
@@ -195,6 +210,7 @@ export class CollectionService {
   protected idealoReference = $inject(IdealoReferenceService);
   protected marketReference = $inject(MarketReferenceService);
   protected dealabsHistory = $inject(DealabsHistoryService);
+  protected dealabsStatus = $inject(DealabsStatusService);
   protected itad = $inject(ItadService);
   protected priceSeries = $inject(PriceSeriesService);
   protected hotWatchlist = $inject(HotWatchlistService);
@@ -454,6 +470,7 @@ export class CollectionService {
     const runStartedAt = this.dateTime.nowISOString();
     await this.progress.start([
       ...sources.map((source) => ({ id: source.id, name: source.name })),
+      { id: DEALABS_STATUS_STEP, name: "Statut Dealabs des deals" },
       ...(this.autoPublish.enabled
         ? [{ id: AUTO_PUBLISH_STEP, name: "Publication Dealabs" }]
         : []),
@@ -493,14 +510,20 @@ export class CollectionService {
           updated: 0,
         })),
       ]);
+      // Before the journal line (it records the status check), and never
+      // a reason to lose that line.
+      await this.refreshTopOnDealabs(sources).catch((error: unknown) => {
+        this.log.warn("Dealabs top refresh failed", { error });
+      });
+      const dealabsStatus = await this.checkDealabsStatus();
       this.logRun(
         runStartedAt,
         summaries,
         durations,
         switchedOff,
         linksChecked,
+        dealabsStatus,
       );
-      await this.refreshTopOnDealabs(sources);
       if (this.autoPublish.enabled) {
         await this.publishBestDeals(runStartedAt);
       }
@@ -551,6 +574,7 @@ export class CollectionService {
     durations: Map<string, number>,
     switchedOff: string[],
     linksChecked = 0,
+    dealabsStatus?: DealabsStatusJournal,
   ): void {
     const timings = takeTimings();
     try {
@@ -562,6 +586,7 @@ export class CollectionService {
           at: startedAt,
           switchedOff,
           linksChecked,
+          ...(dealabsStatus ? { dealabsStatus } : {}),
           sources: summaries.map((s) => ({
             id: s.sourceId,
             ms: durations.get(s.sourceId),
@@ -643,6 +668,47 @@ export class CollectionService {
         `${ids.length} deal(s) à fort potentiel revérifiés sur Dealabs`,
       );
     }
+  }
+
+  /**
+   * What became of our Dealabs posts (epic 32): live, expired, hidden,
+   * deleted, posted by hand — at most once an hour, paced with the
+   * app-wide Dealabs limit. Never fails the run.
+   */
+  protected async checkDealabsStatus(): Promise<
+    DealabsStatusJournal | undefined
+  > {
+    await this.progress.sourceStarted(DEALABS_STATUS_STEP);
+    this.progress.step(DEALABS_STATUS_STEP, "Statut Dealabs des deals");
+    const summary = await this.dealabsStatus
+      .checkIfDue()
+      .catch((error: unknown) => {
+        this.log.warn("Dealabs status check failed", { error });
+        return { line: "", error: String(error).slice(0, 200) } as const;
+      });
+    if (summary && "error" in summary) {
+      await this.progress.sourceFinished(DEALABS_STATUS_STEP, {
+        collected: 0,
+        created: 0,
+        updated: 0,
+        summary: `Vérification impossible : ${summary.error}`,
+      });
+      return { error: summary.error };
+    }
+    if (summary?.line) {
+      this.progress.note(summary.line, DEALABS_STATUS_STEP);
+    }
+    await this.progress.sourceFinished(DEALABS_STATUS_STEP, {
+      collected: summary ? summary.live + summary.expired : 0,
+      created: summary?.attached ?? 0,
+      updated: summary?.changes ?? 0,
+      summary: summary
+        ? summary.line || `Ignorée : ${summary.skipped ?? "—"}.`
+        : "Déjà vérifié il y a moins d'une heure.",
+    });
+    if (!summary) return undefined;
+    const { line: _line, ...counts } = summary;
+    return counts;
   }
 
   /**

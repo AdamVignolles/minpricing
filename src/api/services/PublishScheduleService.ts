@@ -23,7 +23,9 @@ import {
   DealabsDraftService,
 } from "./DealabsDraftService.ts";
 import { DealabsDuplicateError } from "./DealabsPublisherService.ts";
+import { readinessSummary } from "./dealabsReadiness.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
+import { currentDealabsStatus } from "./dealabsStatus.ts";
 import { DealPageCheckService } from "./DealPageCheckService.ts";
 import { PublishPauseService } from "./PublishPauseService.ts";
 import {
@@ -214,6 +216,18 @@ export class PublishScheduleService {
         dropped.push(candidate.dealId);
         continue;
       }
+      // Epic 32: our post for it is live on Dealabs — never again.
+      const draftRow = await this.drafts
+        .ensureDraftForDeal(deal.id)
+        .catch(() => undefined);
+      if (
+        draftRow &&
+        currentDealabsStatus(draftRow) === "live" &&
+        draftRow.status === "posted"
+      ) {
+        dropped.push(candidate.dealId);
+        continue;
+      }
       if (ranked.some((c) => c.dealId === deal.id)) continue;
       // The agent's own description travels separately (#131).
       // So does its Dealabs title (rename once, epic 28): `dealabsTitle`,
@@ -357,7 +371,7 @@ export class PublishScheduleService {
       reason: input.reason,
       summary: [
         `${times.length} publication(s) : ${times.map(parisTime).join(", ") || "aucune"}`,
-        `${ranked.length} deal(s) classés${dropped.length ? `, ${dropped.length} écarté(s) (inactifs ou ajoutés à la main)` : ""}`,
+        `${ranked.length} deal(s) classés${dropped.length ? `, ${dropped.length} écarté(s) (inactifs, ajoutés à la main ou déjà en ligne sur Dealabs)` : ""}`,
         input.dryRun ? "essai à blanc (aucune publication)" : "",
       ]
         .filter(Boolean)
@@ -658,6 +672,38 @@ export class PublishScheduleService {
         );
         continue;
       }
+      // « Prêt pour Dealabs » (epic 29), what can be judged without the
+      // page (seller, local offer, image, language, text): a post a
+      // moderator would hide is skipped without counting as a try.
+      const draftRow = await this.drafts
+        .ensureDraftForDeal(deal.id)
+        .catch(() => undefined);
+      // Epic 32: a deal we already posted goes out again only under the
+      // owner's rules (expired with the price back, hidden/deleted fixed).
+      if (draftRow && currentDealabsStatus(draftRow) !== "not_published") {
+        const verdict = this.publisher.republishCheck(
+          deal,
+          draftRow,
+          "schedule",
+        );
+        if (!verdict.allowed) {
+          tried.add(deal.id);
+          outcomes.push(
+            `déjà publié sur Dealabs : ${deal.title.slice(0, 80)} (${verdict.reason})`,
+          );
+          continue;
+        }
+      }
+      const early = draftRow
+        ? this.publisher.assessReadiness(deal, draftRow, "schedule")
+        : undefined;
+      if (early?.status === "block") {
+        tried.add(deal.id);
+        outcomes.push(
+          `pas prêt pour Dealabs : ${deal.title.slice(0, 80)} (${readinessSummary(early).slice(0, 200)})`,
+        );
+        continue;
+      }
       attempts++;
       tried.add(deal.id);
 
@@ -671,6 +717,22 @@ export class PublishScheduleService {
         let note = verdict.ok
           ? `essai à blanc : serait publié (${"reason" in verdict ? verdict.reason : "page du marchand OK"})`
           : `essai à blanc : page refusée — ${verdict.reason}`;
+        // The checklist again, with what the page showed (stock,
+        // language, price conditions).
+        const readiness = draftRow
+          ? this.publisher.assessReadiness(deal, draftRow, "schedule", {
+              title:
+                "snapshot" in verdict ? verdict.snapshot?.title : undefined,
+              text: "pageText" in verdict ? verdict.pageText : undefined,
+              availability:
+                "snapshot" in verdict
+                  ? verdict.snapshot?.availability
+                  : undefined,
+            })
+          : undefined;
+        const readinessNote = readiness
+          ? `Prêt pour Dealabs : ${readiness.status === "ok" ? "oui" : readiness.status === "fix" ? "oui, avec correction" : "non"} — ${readinessSummary(readiness)}`
+          : "";
         // A moved price updates the deal even in a dry run (it is only a
         // read of the shop), then says what a real publish would do. A
         // page that shows our price is confirmed with the shop too.
@@ -703,6 +765,11 @@ export class PublishScheduleService {
           note = recheck.go
             ? `essai à blanc : serait publié — ${recheck.detail}`
             : `essai à blanc : ${recheck.reason}`;
+        }
+        if (readiness?.status === "block") {
+          note = `essai à blanc : ne serait pas publié — ${readinessNote}`;
+        } else if (readinessNote) {
+          note = `${note}\n${readinessNote}`;
         }
         return this.finish(entry, {
           status: "done",

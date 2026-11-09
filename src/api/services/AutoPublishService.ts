@@ -12,9 +12,26 @@ import {
   DealabsDuplicateError,
   DealabsPublisherService,
 } from "./DealabsPublisherService.ts";
+import {
+  applyReadinessFixes,
+  assessReadiness,
+  type ModerationConfig,
+  moderationConfig,
+  type Readiness,
+  readinessSummary,
+} from "./dealabsReadiness.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
+import {
+  currentDealabsStatus,
+  type DealabsStatus,
+  othersLiveOnDealabs,
+  republishVerdict,
+  withChange,
+} from "./dealabsStatus.ts";
+import { buildDealFacts } from "./dealFacts.ts";
 import type { DealPageProblem } from "./dealPageCheck.ts";
 import { DealPageCheckService } from "./DealPageCheckService.ts";
+import { dealabsTitle } from "./dealTitle.ts";
 import type { Deal } from "./DealTypes.ts";
 import { keepaChartForDeal } from "./keepa.ts";
 import {
@@ -58,6 +75,21 @@ export class PublishRefusedError extends Error {
   ) {
     super(message);
     this.name = "PublishRefusedError";
+  }
+}
+
+/**
+ * « Prêt pour Dealabs » (epic 29) refused the post on an automatic path:
+ * a moderator would hide it. Like an unavailable deal, it isn't a try —
+ * the evening slot moves on to the next deal.
+ */
+export class DealNotReadyError extends DealNotAvailableError {
+  constructor(
+    message: string,
+    public readonly readiness: Readiness,
+  ) {
+    super(message);
+    this.name = "DealNotReadyError";
   }
 }
 
@@ -296,6 +328,68 @@ export class AutoPublishService {
     return outcome.deal;
   }
 
+  /** `config/moderation.json`, or the defaults when it can't be read. */
+  moderationConfig(): ModerationConfig {
+    try {
+      return moderationConfig(
+        JSON.parse(this.agentFiles.readConfig("moderation")),
+      );
+    } catch {
+      return moderationConfig();
+    }
+  }
+
+  /**
+   * The « Prêt pour Dealabs » checklist for one deal and its draft, with
+   * what the merchant page showed when it was read (see
+   * `dealabsReadiness.ts`). Pure apart from reading the config.
+   */
+  assessReadiness(
+    deal: Deal,
+    draft: { title: string; description?: string | null },
+    trigger: PublishTrigger,
+    page?: { title?: string; text?: string; availability?: string },
+  ): Readiness {
+    return assessReadiness({
+      deal,
+      facts: buildDealFacts(deal),
+      draft,
+      page,
+      trigger,
+      config: this.moderationConfig(),
+    });
+  }
+
+  /**
+   * May this deal go out again (epic 32, owner's decisions 2026-11-05)?
+   * See `republishVerdict`: never over our live post or someone else's,
+   * hidden/deleted once « Prêt pour Dealabs » passes, expired when the
+   * price is back at or under our post's.
+   */
+  republishCheck(
+    deal: Deal,
+    draft: {
+      status: string;
+      title: string;
+      description?: string | null;
+      dealabsStatus?: string | null;
+      dealabsPostPrice?: number | null;
+      moderationReason?: string | null;
+    },
+    trigger: PublishTrigger,
+  ): { allowed: boolean; reason: string; status: DealabsStatus } {
+    const status = currentDealabsStatus(draft);
+    const verdict = republishVerdict({
+      status,
+      currentPrice: deal.currentPrice,
+      postedPrice: draft.dealabsPostPrice ?? undefined,
+      othersLive: othersLiveOnDealabs(deal.dealabsHistory, deal.currentPrice),
+      readiness: this.assessReadiness(deal, draft, trigger).status,
+      moderationReason: draft.moderationReason,
+    });
+    return { ...verdict, status };
+  }
+
   /** One publish at a time: the button and the run share one browser flow. */
   protected busy = false;
 
@@ -338,13 +432,42 @@ export class AutoPublishService {
     }
     // Our own record of having already posted this one — cheap, no browser
     // needed (double click, retry after a flaky run…).
-    if (draft.status === "posted") {
-      throw new PublishRefusedError(
-        draft.dealabsUrl
-          ? `Ce deal est déjà publié sur Dealabs : ${draft.dealabsUrl}`
-          : "Ce deal est déjà marqué comme publié.",
-        409,
-      );
+    // Epic 32: a post that is no longer live (expired, hidden, deleted)
+    // may go out again — the agents only under the owner's rules
+    // (`republishCheck`), the button whenever the owner decides.
+    let republishOf: string | undefined;
+    if (
+      draft.status === "posted" ||
+      (draft.dealabsStatus && draft.dealabsStatus !== "not_published")
+    ) {
+      const status = currentDealabsStatus(draft);
+      if (status === "live" && draft.status === "posted") {
+        throw new PublishRefusedError(
+          draft.dealabsUrl
+            ? `Ce deal est déjà publié sur Dealabs : ${draft.dealabsUrl}`
+            : "Ce deal est déjà marqué comme publié.",
+          409,
+        );
+      }
+      if (status !== "live" && status !== "not_published") {
+        const deal = await this.deals.getById(dealId);
+        const verdict = this.republishCheck(deal, draft, trigger);
+        if (!verdict.allowed && trigger !== "button") {
+          throw new PublishRefusedError(
+            `Pas de republication : ${verdict.reason}`,
+            409,
+          );
+        }
+        republishOf = draft.dealabsUrl ?? undefined;
+        if (draft.status === "posted") {
+          // The old post stays in the status history; the draft is
+          // written again like a new one.
+          draft = (await this.drafts.updateById(draft.id, {
+            status: "draft",
+            moderationDismissedAt: this.dateTime.nowISOString(),
+          })) as typeof draft;
+        }
+      }
     }
     // Rename once (epic 28): a title cut to fit Dealabs' 140 characters
     // is never posted as the machine cut it — written and approved by
@@ -391,9 +514,19 @@ export class AutoPublishService {
 
       // A moderator clicks the link before validating: the merchant page
       // must be up, the product there and still at our price.
+      // What it showed (anonymously: a fresh browser, no shop session)
+      // also feeds « Prêt pour Dealabs » below.
+      let pageRead:
+        | { title?: string; text?: string; availability?: string }
+        | undefined;
       if (this.pageCheck.enabled) {
         await this.progress.begin("merchant-check", deal.url);
         const verdict = await this.pageCheck.check(deal);
+        pageRead = {
+          title: verdict.snapshot?.title,
+          text: verdict.pageText,
+          availability: verdict.snapshot?.availability,
+        };
         if (!verdict.ok && verdict.problem === "price") {
           deal = await this.followPriceChange(deal, verdict, trigger);
         } else if (!verdict.ok) {
@@ -436,6 +569,30 @@ export class AutoPublishService {
             : "Prêt",
       );
 
+      // « Prêt pour Dealabs » (epic 29): would a moderator accept it?
+      // Automatic paths stop on a block (not a try: the slot moves on);
+      // the owner's button shows it as a warning and goes on.
+      await this.progress.begin("readiness");
+      const readiness = this.assessReadiness(deal, draft, trigger, pageRead);
+      const summary = readinessSummary(readiness);
+      if (readiness.status === "block" && !readiness.overridable) {
+        throw new DealNotReadyError(
+          `Pas prêt pour Dealabs : ${summary}`,
+          readiness,
+        );
+      }
+      if (readiness.fixes.titleSuffix || readiness.fixes.descriptionLines) {
+        const fixed = applyReadinessFixes(draft, readiness.fixes, dealabsTitle);
+        await this.drafts.updateById(draft.id, fixed);
+        Object.assign(draft, fixed);
+      }
+      await this.progress.done(
+        "readiness",
+        readiness.status === "block"
+          ? `À vos risques (avertissements) : ${summary}`
+          : summary,
+      );
+
       attempt = {
         publishAttempts: (draft.publishAttempts ?? 0) + 1,
         lastPublishAttemptAt: this.dateTime.nowISOString(),
@@ -455,8 +612,13 @@ export class AutoPublishService {
         await this.progress.skip("chart", "Aucun historique de prix à joindre");
       }
 
-      const { dealabsUrl } = await this.publisher.publish(deal, draft, chart);
+      const { dealabsUrl } = await this.publisher.publish(deal, draft, chart, {
+        requireImage: trigger !== "button",
+        // Our own old post (expired, deleted) is not a duplicate.
+        ignoreThreadUrl: republishOf,
+      });
       await this.progress.finish(dealabsUrl);
+      const postedAt = this.dateTime.nowISOString();
       return await this.drafts.updateById(draft.id, {
         ...attempt,
         lastPublishResult: "success",
@@ -464,7 +626,24 @@ export class AutoPublishService {
         lastPublishSteps: this.trail(),
         status: "posted",
         dealabsUrl,
-        verifiedAt: this.dateTime.nowISOString(),
+        verifiedAt: postedAt,
+        // Epic 32: live from our side; the next status check confirms.
+        dealabsStatus: "live",
+        dealabsStatusAt: postedAt,
+        dealabsStatusSource: "publish",
+        postedBy: trigger === "button" ? "button" : "agent",
+        dealabsPostPrice: deal.currentPrice,
+        dealabsStatusHistory: withChange(draft.dealabsStatusHistory, {
+          at: postedAt,
+          from: draft.dealabsStatus ? currentDealabsStatus(draft) : undefined,
+          to: "live",
+          source: "publish",
+          url: dealabsUrl,
+        }),
+        moderationStatus: null as unknown as undefined,
+        moderationReason: null as unknown as undefined,
+        moderationMessage: null as unknown as undefined,
+        moderationAt: null as unknown as undefined,
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -620,7 +799,9 @@ export class AutoPublishService {
         draft?.status === "draft" &&
         !draft.publishAttempts &&
         // A cut title waits for its rewrite (epic 28): not this batch.
-        !(await this.draftService.titleNeedsRewrite(deal.id))
+        !(await this.draftService.titleNeedsRewrite(deal.id)) &&
+        // A post Dealabs would hide (epic 29): not even opened.
+        this.assessReadiness(deal, draft, "collection").status !== "block"
       ) {
         candidates.push(deal);
         takenKeys.add(key);
