@@ -83,8 +83,11 @@ export class WatchStatusService {
         link.dealId && link.status !== "removed" && link.status !== "ended",
     );
     if (list.length === 0) return [];
+    // The real list, waiting for it after a restart: `posts()` answers
+    // an empty list while the profile is read again in the background,
+    // which would take « Publié » away from what was posted by hand.
     const ourPosts = await this.myPosts
-      .posts()
+      .postsNow()
       .catch(() => [] as DealabsThread[]);
     const changes: WatchStatusChange[] = [];
     for (const link of list) {
@@ -120,7 +123,7 @@ export class WatchStatusService {
       observedAt: new Date(row.observedAt).toISOString(),
     }));
     const now = this.dateTime.nowISOString();
-    const next = watchStatusOf({
+    let next = watchStatusOf({
       onDealabs: dealabsStanding(deal, posted ?? undefined, ourPosts),
       drop: assessRealDrop({
         price: deal.currentPrice,
@@ -137,6 +140,20 @@ export class WatchStatusService {
     const current = await this.links.getById(link.id);
     if (current.status === "removed" || current.status === "ended") {
       return undefined;
+    }
+    // Our profile unreadable (Dealabs down, nothing read yet): a product
+    // « Publié » from it keeps that status rather than losing it on no
+    // evidence. Our own drafts' status (epic 32) is read from the database.
+    if (
+      ourPosts.length === 0 &&
+      !posted &&
+      current.watchStatus === "published" &&
+      next.status !== "published"
+    ) {
+      next = {
+        status: "published",
+        reason: current.watchReason ?? "Publié par vous sur Dealabs",
+      };
     }
     const patch = watchUpdate(current, next, now);
     if (!patch) return undefined;
