@@ -462,7 +462,11 @@ DismissedAt`, migration `20261106090000_add_draft_moderation`). A
   (spaced out or switched off).
   **Price watch** (epic 33): the watch never ends on its own — hourly
   for 14 days (`watchUntil`) and while « Baisse de prix », then daily
-  (`linkDue`); only « Retirer » / « Arrêter » stop it, an expired deal
+  (`linkDue`), at most `LINK_READS_PER_RUN` (6) links per shop and run,
+  never read / « Baisse de prix » / oldest read first (`pickLinkReads`),
+  and Amazon reads them one at a time 3–6 s apart (`linkSpacingMs`) —
+  less traffic for its robot check, never a way around it; only
+  « Retirer » / « Arrêter » stop it, an expired deal
   no longer does (read again, it comes back active). Each link has a
   `watchStatus` (migration `20261109130000_add_link_watch_status`):
   `waiting` « Pas intéressant » (default), `price_drop` « Baisse de
@@ -485,9 +489,10 @@ DismissedAt`, migration `20261106090000_add_draft_moderation`). A
   it; vetoed by our history when the product swings to this level
   (≥ 2 past dips, `pastDips`) or is back to its usual price after a
   rise. Keepa stays a chart only (owner's decision, no paid API). The
-  page filters by status with counts (`GET /deals?addedByHand=true&
-  watchStatus=…`, `GET /deals/hand-added/counts`, `?status=` in the
-  URL) and shows expired deals too; MCP `search_deals` exposes
+  page filters by status with counts
+  (`GET /deals?addedByHand=true&watchStatus=…`,
+  `GET /deals/hand-added/counts`, `?status=` in the URL) and shows
+  expired deals too; MCP `search_deals` exposes
   `watchStatus` / `watchReason`. `test/price-drop.spec.ts`,
   `test/watch-status.spec.ts`, `test/watched-links.spec.ts`.
   « Retirer des ajouts à la main » (card ✕ and detail page,

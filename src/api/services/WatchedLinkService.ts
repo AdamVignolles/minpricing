@@ -23,6 +23,42 @@ export type WatchedLink = Infer<typeof watchedLinkEntity.schema>;
 export const WATCH_DAYS = 14;
 /** Past the hourly phase, a link is read again after this long. */
 export const DAILY_READ_MS = 23 * 3_600_000;
+/**
+ * At most this many links of one shop are read per run, spread over the
+ * day (Amazon answers a burst of product pages with its robot check).
+ * The ones waiting longest go first; a new link is read at once anyway
+ * (`LinkCheckJob`).
+ */
+export const LINK_READS_PER_RUN = 6;
+
+/** Which due links a run reads: never read / pending first, then « Baisse de prix », then the oldest read. Pure. */
+export function pickLinkReads<
+  T extends Pick<
+    WatchedLink,
+    "sourceId" | "status" | "lastCheckedAt" | "watchStatus"
+  >,
+>(due: T[], perShop = LINK_READS_PER_RUN): T[] {
+  const rank = (link: T) =>
+    !link.lastCheckedAt || link.status === "pending"
+      ? 0
+      : link.watchStatus === "price_drop"
+        ? 1
+        : 2;
+  const ordered = [...due].sort(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      String(a.lastCheckedAt ?? "").localeCompare(
+        String(b.lastCheckedAt ?? ""),
+      ),
+  );
+  const perSource = new Map<string, number>();
+  return ordered.filter((link) => {
+    const n = perSource.get(link.sourceId) ?? 0;
+    if (n >= perShop) return false;
+    perSource.set(link.sourceId, n + 1);
+    return true;
+  });
+}
 
 /**
  * Is this link due for a read now? Hourly while new (before
@@ -118,9 +154,11 @@ export class WatchedLinkService {
 
   /**
    * The links a run of this source reads now (every shop's without one):
-   * neither ended nor removed, and due (`linkDue`: hourly for the first
-   * {@link WATCH_DAYS} days or while « Baisse de prix », then daily). The
-   * watch never ends on its own (epic 33).
+   * neither ended nor removed, due (`linkDue`: hourly for the first
+   * {@link WATCH_DAYS} days or while « Baisse de prix », then daily), and
+   * at most {@link LINK_READS_PER_RUN} per shop (`pickLinkReads`, oldest
+   * read first) so the reads are spread over the day. The watch never
+   * ends on its own (epic 33).
    */
   async active(sourceId?: string): Promise<WatchedLink[]> {
     const now = new Date(this.dateTime.nowISOString());
@@ -132,7 +170,7 @@ export class WatchedLinkService {
         ? { and: [{ sourceId: { eq: sourceId } }, watched] }
         : watched,
     });
-    return links.filter((link) => linkDue(link, now));
+    return pickLinkReads(links.filter((link) => linkDue(link, now)));
   }
 
   /**
