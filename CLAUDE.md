@@ -485,9 +485,10 @@ DismissedAt`, migration `20261106090000_add_draft_moderation`). A
   it; vetoed by our history when the product swings to this level
   (≥ 2 past dips, `pastDips`) or is back to its usual price after a
   rise. Keepa stays a chart only (owner's decision, no paid API). The
-  page filters by status with counts (`GET /deals?addedByHand=true&
-  watchStatus=…`, `GET /deals/hand-added/counts`, `?status=` in the
-  URL) and shows expired deals too; MCP `search_deals` exposes
+  page filters by status with counts
+  (`GET /deals?addedByHand=true&watchStatus=…`,
+  `GET /deals/hand-added/counts`, `?status=` in the URL) and shows
+  expired deals too; MCP `search_deals` exposes
   `watchStatus` / `watchReason`. `test/price-drop.spec.ts`,
   `test/watch-status.spec.ts`, `test/watched-links.spec.ts`.
   « Retirer des ajouts à la main » (card ✕ and detail page,
