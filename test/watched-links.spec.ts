@@ -48,6 +48,7 @@ import { MyDealabsPostsService } from "../src/api/services/MyDealabsPostsService
 import { PriceSeriesService } from "../src/api/services/PriceSeriesService.ts";
 import { SeedService } from "../src/api/services/SeedService.ts";
 import { WatchedLinkService } from "../src/api/services/WatchedLinkService.ts";
+import { WatchStatusService } from "../src/api/services/WatchStatusService.ts";
 
 const NOW = "2026-10-29T15:00:00.000Z";
 const TOKEN = "l".repeat(64);
@@ -968,6 +969,39 @@ describe("watched links", () => {
       expect(recheck).toHaveBeenLastCalledWith([]);
     } finally {
       recheck.mockRestore();
+    }
+  });
+
+  test("epic 33: posted by hand on Dealabs — « Publié » kept while our profile can't be read", async () => {
+    const link = await add("https://www.amazon.fr/dp/B0BXYCS74H");
+    amazon.offers.set("B0BXYCS74H", goodOffer("B0BXYCS74H"));
+    await collection.runOne("amazon");
+    const posts = alepha.inject(MyDealabsPostsService);
+    const ourPost = {
+      id: "3400002",
+      title: "Casque Sony WH-1000XM5 B0BXYCS74H",
+      price: 249,
+      publishedAt: new Date(NOW).toISOString(),
+      temperature: 150,
+      isHot: true,
+      isExpired: false,
+      url: "https://www.dealabs.com/bons-plans/casque-3400002",
+    } as any;
+    const watch = alepha.inject(WatchStatusService);
+    const spy = vi.spyOn(posts, "postsNow").mockResolvedValue([ourPost]);
+    try {
+      await watch.refresh();
+      expect((await links.get(link.id)).watchStatus).toBe("published");
+      // Profile unreadable (empty right after a restart): kept.
+      spy.mockResolvedValue([]);
+      await watch.refresh();
+      expect((await links.get(link.id)).watchStatus).toBe("published");
+      // Read again, our post expired: back in the running.
+      spy.mockResolvedValue([{ ...ourPost, isExpired: true }]);
+      await watch.refresh();
+      expect((await links.get(link.id)).watchStatus).toBe("price_drop");
+    } finally {
+      spy.mockResolvedValue([]);
     }
   });
 
