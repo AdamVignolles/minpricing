@@ -18,6 +18,7 @@ import type { FC, ReactNode } from "react";
 import type { Deal, RefItem } from "../../types.ts";
 import * as f from "../ui/format.ts";
 import Icon from "../ui/Icon.tsx";
+import { useNow } from "../ui/useNow.ts";
 import {
   dealabsSignal,
   dropSignal,
@@ -179,10 +180,38 @@ const PriceCell: FC<{ deal: Deal; align?: "left" | "right" }> = ({
   </Stack>
 );
 
-const fresh = (deal: Deal) =>
-  deal.freshReason === "price-drop"
-    ? `Prix en baisse${deal.droppedFrom ? ` · était ${f.price(deal.droppedFrom, deal.currency)}` : ""}`
-    : null;
+/**
+ * When the deal was added, or when its price last really dropped
+ * (`freshAt`, see freshness.ts), with the exact dates in the tooltip.
+ * Nothing on the server render (`now` is 0 until hydration).
+ */
+const When: FC<{ deal: Deal; now: number }> = ({ deal, now }) => {
+  const at = deal.freshAt ?? deal.firstSeenAt;
+  const ago = now ? f.relativeTime(at, now) : null;
+  if (!ago) return null;
+  const dropped = deal.freshReason === "price-drop";
+  const recent = now - new Date(at).getTime() < 86_400_000;
+  return (
+    <Tooltip
+      label={`${dropped ? "Prix en baisse" : "Ajouté"} le ${f.dateTime(at)} · dernière lecture ${f.dateTime(deal.lastSeenAt)}`}
+      withArrow
+    >
+      <Group gap={4} wrap="nowrap" style={{ minWidth: 0 }}>
+        <Icon name="clock" size={12} aria-hidden />
+        <Text
+          fz="xs"
+          fw={recent ? 600 : 400}
+          c={recent ? undefined : "dimmed"}
+          truncate
+        >
+          {dropped
+            ? `Prix baissé ${ago}${deal.droppedFrom ? ` · était ${f.price(deal.droppedFrom, deal.currency)}` : ""}`
+            : `Ajouté ${ago}`}
+        </Text>
+      </Group>
+    </Tooltip>
+  );
+};
 
 /**
  * « Bons plans », design A of epic 30 (« Lire vite »): one row per deal
@@ -196,6 +225,7 @@ const DealTable: FC<DealTableProps> = ({
   sortBy,
   onSort,
 }) => {
+  const now = useNow();
   const header = (label: string, sorts: TableSort[], first: TableSort) => {
     const active = sorts.includes(sortBy);
     const next =
@@ -248,8 +278,10 @@ const DealTable: FC<DealTableProps> = ({
         >
           <Table.Thead bg="var(--app-surface-muted)">
             <Table.Tr>
-              <Table.Th w={64} />
-              <Table.Th>{plain("Produit")}</Table.Th>
+              <Table.Th w={92} />
+              <Table.Th>
+                {header("Produit · ajouté", ["newest"], "newest")}
+              </Table.Th>
               <Table.Th w={100}>
                 {header("Prix", ["price-asc", "price-desc"], "price-asc")}
               </Table.Th>
@@ -260,7 +292,7 @@ const DealTable: FC<DealTableProps> = ({
                 {header("Note", ["relevance"], "relevance")}
               </Table.Th>
               <Table.Th w={116}>{header("Potentiel", ["hot"], "hot")}</Table.Th>
-              <Table.Th w={160}>{plain("Vendeur · avis")}</Table.Th>
+              <Table.Th w={150}>{plain("Vendeur · avis")}</Table.Th>
               <Table.Th w={150}>{plain("Dealabs")}</Table.Th>
               <Table.Th w={44} />
             </Table.Tr>
@@ -275,7 +307,7 @@ const DealTable: FC<DealTableProps> = ({
                   style={dealabs.posted ? { opacity: 0.55 } : undefined}
                 >
                   <Table.Td>
-                    <Thumb deal={deal} size={48} />
+                    <Thumb deal={deal} size={72} />
                   </Table.Td>
                   <Table.Td>
                     <Anchor
@@ -293,8 +325,8 @@ const DealTable: FC<DealTableProps> = ({
                     <Text fz="xs" c="dimmed" truncate>
                       {merchantName(deal, merchants)}
                       {deal.addedByLink ? " · ajouté par lien" : ""}
-                      {fresh(deal) ? ` · ${fresh(deal)}` : ""}
                     </Text>
+                    <When deal={deal} now={now} />
                   </Table.Td>
                   <Table.Td>
                     <PriceCell deal={deal} />
@@ -372,7 +404,7 @@ const DealTable: FC<DealTableProps> = ({
               }}
             >
               <Group gap="sm" align="flex-start" wrap="nowrap">
-                <Thumb deal={deal} size={56} />
+                <Thumb deal={deal} size={72} />
                 <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
                   <Group
                     gap="xs"
@@ -412,6 +444,7 @@ const DealTable: FC<DealTableProps> = ({
                     {merchantName(deal, merchants)} ·{" "}
                     {sellerLine(deal, merchants)} · {reviewsLine(deal)}
                   </Text>
+                  <When deal={deal} now={now} />
                 </Stack>
               </Group>
             </Paper>
