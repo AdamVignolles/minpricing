@@ -196,10 +196,36 @@ describe("collect(products) reads one product by id", () => {
     expect(deals).toEqual([]);
     expect(blocked).toHaveLength(4);
     expect(blocked[0]).toContain("vérification anti-robot d'Amazon");
-    // Pages read 3 at a time: at most the first batch asked Amazon.
-    expect(fetchSpy.mock.calls.length).toBeLessThanOrEqual(3);
+    // Read one at a time: only the first page asked Amazon.
+    expect(fetchSpy.mock.calls).toHaveLength(1);
     // No browser retry around the check.
     expect(visited).toEqual([]);
+  }, 60_000);
+
+  it("links are read one at a time, 3 to 6 s apart", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 404 })),
+    );
+    const collector = new AmazonCollector([]);
+    collector.setFetchFirst(true);
+    const pauses: number[] = [];
+    collector.sleep = async (ms: number) => {
+      pauses.push(ms);
+    };
+    (collector as any).fetchPrice = async () => undefined;
+    await collector.collect(
+      ["B0AAAAAAA1", "B0AAAAAAA2", "B0AAAAAAA3"].map((asin) => ({
+        id: asin,
+        url: `https://www.amazon.fr/dp/${asin}`,
+        externalId: asin,
+      })),
+    );
+    expect(pauses).toHaveLength(2);
+    for (const ms of pauses) {
+      expect(ms).toBeGreaterThanOrEqual(3_000);
+      expect(ms).toBeLessThanOrEqual(6_000);
+    }
   }, 60_000);
 
   it("a page that fails is skipped, not thrown", async () => {

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { linkDue } from "../src/api/services/WatchedLinkService.ts";
+import {
+  linkDue,
+  pickLinkReads,
+} from "../src/api/services/WatchedLinkService.ts";
 import {
   dealabsStanding,
   watchStatusOf,
@@ -150,5 +153,39 @@ describe("linkDue", () => {
     );
     expect(linkDue(link({ status: "ended" }) as any, now)).toBe(false);
     expect(linkDue(link({ status: "removed" }) as any, now)).toBe(false);
+  });
+});
+
+describe("pickLinkReads (reads spread over the day)", () => {
+  const link = (id: string, over: Record<string, unknown> = {}) =>
+    ({
+      id,
+      sourceId: "amazon",
+      status: "ok",
+      lastCheckedAt: hoursAgo(1),
+      watchStatus: "waiting",
+      ...over,
+    }) as any;
+
+  test("at most 6 per shop: new ones, then « Baisse de prix », then the oldest read", () => {
+    const due = [
+      ...Array.from({ length: 8 }, (_, i) =>
+        link(`old${i}`, { lastCheckedAt: hoursAgo(10 - i) }),
+      ),
+      link("drop", { watchStatus: "price_drop" }),
+      link("new", { lastCheckedAt: undefined, status: "pending" }),
+      link("steam", { sourceId: "steam" }),
+    ];
+    const picked = pickLinkReads(due).map((l: any) => l.id);
+    expect(picked.filter((id: string) => id !== "steam")).toEqual([
+      "new",
+      "drop",
+      "old0",
+      "old1",
+      "old2",
+      "old3",
+    ]);
+    // Another shop has its own budget.
+    expect(picked).toContain("steam");
   });
 });

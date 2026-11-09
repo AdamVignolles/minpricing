@@ -129,6 +129,15 @@ export class AmazonCollector implements DealSource {
   protected fetchFirst = true;
 
   /**
+   * Pasted links are read one at a time, this far apart (ms, random in
+   * the range): a burst of product pages trips Amazon's robot check, a
+   * few spaced reads don't. Less traffic, never a way around the check.
+   */
+  linkSpacingMs: [number, number] = [3_000, 6_000];
+  sleep = (ms: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  /**
    * Watched links (see `WatchedLink`): each ASIN's product page, read
    * with the same {@link fetchPrice} as collected deals.
    */
@@ -143,6 +152,7 @@ export class AmazonCollector implements DealSource {
     // the remaining products wait for the next run (never retried around).
     let robotCheck = false;
     const ROBOT = "vérification anti-robot d'Amazon";
+    let read = 0;
     return readProductPages(
       asins,
       async (page, product): Promise<RawDeal | undefined> => {
@@ -150,6 +160,15 @@ export class AmazonCollector implements DealSource {
         if (robotCheck) {
           context?.blocked?.(asin, ROBOT);
           return undefined;
+        }
+        // Spaced out, one at a time (`linkSpacingMs`).
+        if (read++ > 0) {
+          const [min, max] = this.linkSpacingMs;
+          await this.sleep(min + Math.random() * (max - min));
+          if (robotCheck) {
+            context?.blocked?.(asin, ROBOT);
+            return undefined;
+          }
         }
         const url = `https://www.amazon.fr/dp/${asin}`;
         // Same order as a run: a plain request first, the browser after.
@@ -189,7 +208,8 @@ export class AmazonCollector implements DealSource {
         };
       },
       {
-        concurrency: PAGE_CONCURRENCY,
+        // One at a time: the spacing above only means something then.
+        concurrency: 1,
         cloudflareBinding: this.getCloudflareBinding?.(),
         context,
       },
