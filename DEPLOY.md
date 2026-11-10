@@ -160,3 +160,81 @@ freeze whatever `cloudflare.env` looked like the one time the singleton
 was first constructed (often `undefined`, before any request had bound
 `env`), and every collection run afterwards would silently fall back to
 the (non-existent-on-Workers) `playwright` path forever.
+
+# Deploying to the OVH VPS (Bay)
+
+Environment `ovh` in `alepha.config.ts`. Bay (Alepha's self-hosted app
+server: reverse proxy, TLS, releases, rollback) runs on the VPS; deploys go
+over SSH. Reference: https://alepha.dev/bay/docs/guides-installation.md
+
+## One-time setup
+
+1. **SSH alias** on the deploying machine, `~/.ssh/config`:
+
+   ```
+   Host minpricing-ovh
+       HostName <VPS IP>
+       User ubuntu
+       IdentityFile ~/.ssh/ovh
+   ```
+
+2. **On the VPS** (`ssh minpricing-ovh`): install Bay (also installs Docker),
+   then check the host.
+
+   ```bash
+   curl -sSL https://alepha.dev/bay/install.sh | sudo sh
+   sudo bay doctor
+   ```
+
+3. **systemd unit** `/etc/systemd/system/bay.service` — replace `<VPS IP>`
+   and the e-mail (Let's Encrypt). Never add `PrivateTmp=yes` (secrets are
+   staged in `/tmp`).
+
+   ```ini
+   [Unit]
+   Description=Bay - Alepha application server
+   After=network-online.target docker.service
+   Wants=network-online.target
+
+   [Service]
+   Type=simple
+   Restart=always
+   RestartSec=2
+   WorkingDirectory=/opt/bay
+   RuntimeDirectory=bay
+   RuntimeDirectoryMode=0755
+   ExecStart=/opt/bay/bin/bay serve \
+     --root /opt/bay/data \
+     --base-domain <VPS IP>.sslip.io \
+     --addr :80 \
+     --tls --tls-addr :443 \
+     --acme-email <you@example.com> \
+     --control-socket /run/bay/control.sock
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+   ```bash
+   sudo systemctl daemon-reload && sudo systemctl enable --now bay
+   sudo usermod -aG bay-control ubuntu   # then log out and back in
+   sudo bay status
+   ```
+
+   Firewall, if `ufw` is on: `sudo ufw allow OpenSSH && sudo ufw allow 80 && sudo ufw allow 443`.
+
+4. **Secrets** on the deploying machine: `.env.ovh` at the project root
+   (gitignored), same variables as production (`ADMIN_USERNAME`,
+   `ADMIN_PASSWORD`, `AGENT_TOKEN`, `DEALABS_USERNAME`…). `APP_SECRET` and
+   `DATABASE_URL` are Bay's own — don't set them.
+
+## Deploy
+
+```bash
+npx alepha platform login --env ovh    # checks SSH, the group and Bay's socket
+npm run build
+npx alepha platform deploy --env ovh
+```
+
+Served at `https://minpricing-ovh.<VPS IP>.sslip.io`. The database starts
+empty: data from the AWS VM is not copied.

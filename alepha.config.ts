@@ -70,6 +70,13 @@ export default defineConfig({
           domain: "dealradar.vmh1.alepha.dev",
           socket: "/run/bay/control.sock",
         }),
+        // OVH VPS running Bay (DEPLOY.md, « VPS OVH »). "minpricing-ovh" is
+        // an alias in ~/.ssh/config. No domain: Bay serves it under its
+        // --base-domain as minpricing-ovh.<base-domain>.
+        ovh: bay({
+          host: "minpricing-ovh",
+          socket: "/run/bay/control.sock",
+        }),
       },
     }),
   ],
