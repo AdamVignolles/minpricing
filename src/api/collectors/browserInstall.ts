@@ -52,6 +52,18 @@ export function useReachableBrowsersPath(
     mkdirSync(path, { recursive: true }),
   fallback: () => string = () => join(appDir(), "browsers"),
 ): string | undefined {
+  useReachableTmpDir(env, create);
+  // The runtime image's own builds win over any configured folder: a value
+  // left over from the old process-based Bay (its `browsers/` path) would
+  // otherwise send Playwright looking for builds that aren't there.
+  const shipped =
+    env.DEALRADAR_BROWSERS_PREINSTALLED === "1"
+      ? env.DEALRADAR_BROWSERS_PATH
+      : undefined;
+  if (shipped) {
+    env.PLAYWRIGHT_BROWSERS_PATH = shipped;
+    return shipped;
+  }
   const configured = env.PLAYWRIGHT_BROWSERS_PATH;
   if (!configured || configured === "0" || configured === movedTo) {
     return configured;
@@ -67,6 +79,29 @@ export function useReachableBrowsersPath(
   env.PLAYWRIGHT_BROWSERS_PATH = movedTo;
   return env.PLAYWRIGHT_BROWSERS_PATH;
 }
+/**
+ * Playwright makes its launch folder under `os.tmpdir()`. A `TMPDIR` left
+ * over from the old process-based Bay (`…/scratch/.tmp`, 2026-11-10) does
+ * not exist in the container and every launch failed with « ENOENT …
+ * mkdtemp ». When it can't be created, the variables go and the system
+ * `/tmp` is used.
+ */
+export function useReachableTmpDir(
+  env: NodeJS.ProcessEnv = process.env,
+  create: (path: string) => void = (path) =>
+    mkdirSync(path, { recursive: true }),
+): void {
+  for (const key of ["TMPDIR", "TMP", "TEMP"]) {
+    const dir = env[key];
+    if (!dir) continue;
+    try {
+      create(dir);
+    } catch {
+      delete env[key];
+    }
+  }
+}
+
 let pending: Promise<BrowserState> | undefined;
 
 export const browserState = (): BrowserState => ({
