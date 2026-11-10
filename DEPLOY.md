@@ -242,8 +242,10 @@ npx alepha platform login --env ovh    # checks SSH, the group and Bay's socket
 npm run deploy:ovh                     # npm run build + alepha platform deploy --env ovh
 ```
 
-Served at `https://minpricing-ovh.<VPS IP>.sslip.io`. The database starts
-empty: data from the AWS VM is not copied.
+Production (Lore copy `minpricing/production`, estate `ovh-adam`) is served at
+`https://minpricing.141.227.150.42.sslip.io`; deploy it with
+`npx lore deploy -p minpricing -e production` (Lore keeps its secrets). The
+`ovh` environment above is only for a deploy over SSH without Lore.
 
 ## Runtime image (Playwright + Chromium)
 
