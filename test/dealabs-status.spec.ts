@@ -502,6 +502,74 @@ describe("DealabsStatusService and its effects (integration)", () => {
     send.mockRestore();
   });
 
+  test("drafts put back to « draft » that still say « live » are re-read and fixed", async () => {
+    // Seen in production on 09/11: draft status with a stale « live ».
+    const stale = (title: string, url: string) =>
+      makeDeal(
+        { title, currentPrice: 39.99 },
+        { status: "draft", dealabsStatus: "live", dealabsUrl: url },
+      );
+    const gone = await stale(
+      "Souris Redragon M916 Pro sans fil",
+      "https://www.dealabs.com/bons-plans/souris-redragon-m916-pro-3447334",
+    );
+    const online = await stale(
+      "Enceinte Bluetooth JBL Go 4",
+      "https://www.dealabs.com/bons-plans/enceinte-bluetooth-portable-go-4-noir-jbl-3446230",
+    );
+    const unreadable = await stale(
+      "Jouet Hot Wheels Aston Martin",
+      "https://www.dealabs.com/bons-plans/hot-wheels-aston-martin-3446999",
+    );
+    // A draft that never claimed a post is not read at all.
+    const never = await makeDeal({ title: "Lampe LED placard" });
+    vi.spyOn(
+      alepha.inject(MyDealabsPostsService),
+      "postsFresh",
+    ).mockResolvedValue([]);
+    const asked: string[] = [];
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: any) => {
+        const url = String(input);
+        asked.push(url);
+        if (url.includes("3447334")) return new Response("", { status: 410 });
+        if (url.includes("3446230")) {
+          return new Response(fixture("thread-live-3446230.html"), {
+            status: 200,
+          });
+        }
+        throw new Error("network down");
+      });
+    try {
+      await service.checkAll();
+    } finally {
+      fetchMock.mockRestore();
+    }
+    const read = (id: string) => fx.drafts.getById(id);
+
+    // Gone from Dealabs: no longer « live »; still a draft, republishable.
+    const g = await read(gone.draft.id);
+    expect(g.status).toBe("draft");
+    expect(g.dealabsStatus).toBe("deleted");
+    expect(g.dealabsStatusSource).toBe("thread");
+
+    // Its own post still online: posted again, so never published twice.
+    const o = await read(online.draft.id);
+    expect(o.status).toBe("posted");
+    expect(o.dealabsStatus).toBe("live");
+
+    // Unreadable: left as it was.
+    const u = await read(unreadable.draft.id);
+    expect(u.status).toBe("draft");
+    expect(u.dealabsStatus).toBe("live");
+
+    expect(asked.some((url) => url.includes(never.deal.id))).toBe(false);
+    for (const id of ["3447334", "3446230", "3446999"]) {
+      expect(asked.some((url) => url.includes(id))).toBe(true);
+    }
+  });
+
   test("expired post with a higher price today: not republished by the agents", async () => {
     const { deal } = await makeDeal(
       { title: "Clavier Glorious GMMK 3 HE", currentPrice: 179.99 },

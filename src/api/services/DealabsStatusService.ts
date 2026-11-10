@@ -9,6 +9,7 @@ import { DealabsDraftService } from "./DealabsDraftService.ts";
 import { DealabsHistoryService } from "./DealabsHistoryService.ts";
 import type { DealabsThread } from "./dealabsSearch.ts";
 import {
+  claimsCurrentPost,
   currentDealabsStatus,
   type DealabsStatus,
   type DealabsStatusChange,
@@ -209,9 +210,11 @@ export class DealabsStatusService {
     }
 
     // Posted drafts the profile didn't confirm: their own page decides.
-    const fresh = await this.drafts.findMany({
-      where: { status: { eq: "posted" } },
-    });
+    // So do drafts put back to `draft` that still claim a current post
+    // (`claimsCurrentPost`): nothing else would ever correct them.
+    const fresh = (await this.drafts.findMany({})).filter(
+      (draft) => draft.status === "posted" || claimsCurrentPost(draft),
+    );
     const toRead = fresh
       .filter((draft) => !touched.has(draft.id))
       .sort((a, b) =>
@@ -230,7 +233,17 @@ export class DealabsStatusService {
         counts.unreadable++;
         continue;
       }
-      if (await this.setStatus(draft, status, "thread")) counts.changes++;
+      let current: typeof draft = draft;
+      if (draft.status !== "posted" && status === "live") {
+        // Its own post, still online: the draft is posted again, so the
+        // agents never publish it twice and the cards say so.
+        current = (await this.drafts.updateById(draft.id, {
+          status: "posted",
+          verifiedAt: this.dateTime.nowISOString(),
+        })) as typeof draft;
+        counts.changes++;
+      }
+      if (await this.setStatus(current, status, "thread")) counts.changes++;
     }
 
     for (const draft of await this.drafts.findMany({

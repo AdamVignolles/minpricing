@@ -293,7 +293,10 @@ DismissedAt`, migration `20261106090000_add_draft_moderation`). A
   roundup — plus the same shop, `sameMerchant`, deals seen in 45 days);
   a post with no draft or an unposted draft = **posted by hand**:
   attached (`posted`, `postedBy: manual`, link fixed). Posted drafts the
-  profile didn't confirm: their page, anonymous, paced by
+  profile didn't confirm — and drafts put back to `draft` that still
+  claim a current post (`claimsCurrentPost`: `live`/`hidden` with a post
+  link; found stale on 09/11, nothing re-read them) — : their page
+  (a stale draft whose post is still online is `posted` again), anonymous, paced by
   `DealabsHistoryService.waitForSlot` (20 per check, oldest-checked
   first): 404/410 or redirect away = `deleted` (`hidden` when a
   moderator's message said so), « en attente de modération » = `hidden`,
