@@ -155,6 +155,24 @@ describe("useReachableBrowsersPath", () => {
     expect(env.PLAYWRIGHT_BROWSERS_PATH).toBe("/ms-playwright");
   });
 
+  test("runtime image built before DEALRADAR_BROWSERS_PATH: its /ms-playwright, not Bay's folder", () => {
+    const env: NodeJS.ProcessEnv = {
+      PLAYWRIGHT_BROWSERS_PATH:
+        "/opt/bay/data/apps/minpricing-production/browsers",
+      DEALRADAR_BROWSERS_PREINSTALLED: "1",
+    };
+    expect(
+      useReachableBrowsersPath(
+        env,
+        () => {
+          throw new Error("ENOENT");
+        },
+        () => "/opt/bay/data/apps/minpricing-production/data/browsers",
+      ),
+    ).toBe("/ms-playwright");
+    expect(env.PLAYWRIGHT_BROWSERS_PATH).toBe("/ms-playwright");
+  });
+
   test("no variable: Playwright's default cache, untouched", () => {
     const env: NodeJS.ProcessEnv = {};
     expect(useReachableBrowsersPath(env, () => {})).toBeUndefined();
@@ -188,6 +206,21 @@ describe("useReachableTmpDir", () => {
     expect(made).toEqual([
       "/opt/bay/data/apps/minpricing-production/data/.tmp",
     ]);
+  });
+
+  test("Bay's unreachable scratch TMPDIR: the app's files folder instead", () => {
+    const env: NodeJS.ProcessEnv = {
+      DEALRADAR_BROWSERS_PREINSTALLED: "1",
+      DATA_DIR: "/opt/bay/data/apps/minpricing-production/scratch",
+      APP_FILES_DIR: "/opt/bay/data/apps/minpricing-production/data",
+      TMPDIR: "/opt/bay/data/apps/minpricing-production/scratch/.tmp",
+    };
+    useReachableTmpDir(env, (path) => {
+      if (path.includes("scratch")) throw new Error("ENOENT");
+    });
+    expect(env.TMPDIR).toBe(
+      "/opt/bay/data/apps/minpricing-production/data/.tmp",
+    );
   });
 
   test("an explicit TMPDIR is never replaced", () => {

@@ -32,6 +32,9 @@ export class BrowserUnavailableError extends Error {
 }
 
 /** The Chromium builds collection (headless) and Dealabs (visible) use. */
+/** Where `docker/runtime` installs the builds. */
+export const IMAGE_BROWSERS_PATH = "/ms-playwright";
+
 export const BROWSER_BUILDS = ["chromium", "chromium-headless-shell"];
 
 let current: BrowserState = { state: "unknown" };
@@ -56,9 +59,12 @@ export function useReachableBrowsersPath(
   // The runtime image's own builds win over any configured folder: a value
   // left over from the old process-based Bay (its `browsers/` path) would
   // otherwise send Playwright looking for builds that aren't there.
+  // Bay sets PLAYWRIGHT_BROWSERS_PATH itself at every start (…/browsers),
+  // so an image built before DEALRADAR_BROWSERS_PATH existed falls back to
+  // where docker/runtime puts them.
   const shipped =
     env.DEALRADAR_BROWSERS_PREINSTALLED === "1"
-      ? env.DEALRADAR_BROWSERS_PATH
+      ? env.DEALRADAR_BROWSERS_PATH || IMAGE_BROWSERS_PATH
       : undefined;
   if (shipped) {
     env.PLAYWRIGHT_BROWSERS_PATH = shipped;
@@ -105,12 +111,11 @@ export function useReachableTmpDir(
   // the temp folder: a heavy page (an Amazon product page) fills it and the
   // renderer dies — « Page crashed », 12 of 13 product pages on 2026-11-10.
   // In the runtime image, with no temp folder set, use one on the data disk.
-  if (
-    env.DEALRADAR_BROWSERS_PREINSTALLED === "1" &&
-    env.DATA_DIR &&
-    !env.TMPDIR
-  ) {
-    const dir = join(env.DATA_DIR, ".tmp");
+  // The app's persistent files first: Bay's DATA_DIR is its `scratch/`
+  // folder, which a container may not see (« ENOENT … scratch/.tmp »).
+  const base = env.APP_FILES_DIR || env.DATA_DIR;
+  if (env.DEALRADAR_BROWSERS_PREINSTALLED === "1" && base && !env.TMPDIR) {
+    const dir = join(base, ".tmp");
     try {
       create(dir);
       env.TMPDIR = dir;
