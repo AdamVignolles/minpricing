@@ -88,8 +88,29 @@ const short = (error: unknown) =>
     .trim()
     .slice(0, 500);
 
+/**
+ * The runtime image (`docker/runtime`) ships Chromium and says so with
+ * `DEALRADAR_BROWSERS_PREINSTALLED=1`. Bay runs it on a read-only root
+ * filesystem, where Playwright's installer hangs on its lock file instead
+ * of finding the builds already there — and every launch waits for that
+ * install. So with the flag, « install » only checks the executable.
+ */
+async function checkPreinstalledBrowsers(): Promise<void> {
+  const { existsSync } = await import("node:fs");
+  const { chromium } = await import("playwright");
+  const executable = chromium.executablePath();
+  if (!existsSync(executable)) {
+    throw new Error(
+      `Chromium absent de l'image d'exécution (attendu : ${executable})`,
+    );
+  }
+}
+
 /** Runs `playwright install chromium chromium-headless-shell`. */
 async function runPlaywrightInstall(): Promise<void> {
+  if (process.env.DEALRADAR_BROWSERS_PREINSTALLED === "1") {
+    return checkPreinstalledBrowsers();
+  }
   const { spawn } = await import("node:child_process");
   const { createRequire } = await import("node:module");
   const require = createRequire(import.meta.url);

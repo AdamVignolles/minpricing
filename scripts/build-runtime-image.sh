@@ -42,4 +42,4 @@ echo
 echo "Pushed: ${DIGEST}"
 echo "On the VPS:"
 echo "  sudo bay runtimes set minpricing/production ${DIGEST}"
-echo "  sudo bay restart minpricing/production"
+echo "  sudo bay harden minpricing/production --memory 1g   # restarts the app on the new image"

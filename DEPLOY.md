@@ -259,8 +259,14 @@ VPS (Docker is there), pushed to ghcr.io, then given to the app:
 echo <token with write:packages> | docker login ghcr.io -u <github user> --password-stdin
 bash scripts/build-runtime-image.sh <github user>   # prints the line below with the digest
 sudo bay runtimes set minpricing/production ghcr.io/<user>/dealradar-runtime:…@sha256:…
-sudo bay restart minpricing/production
+sudo bay harden minpricing/production --memory 1g   # restarts the app on the new image
 ```
+
+There is no `bay restart`: `bay stop` then `bay start` restarts an app. Bay's
+512 MB default is short for the app plus Chromium (the old VM gave it 900 MB),
+hence `--memory 1g`. The image sets `DEALRADAR_BROWSERS_PREINSTALLED=1`: on
+Bay's read-only root filesystem Playwright's installer hangs on its lock, so
+the app only checks that Chromium is there.
 
 Make the ghcr package public once (Bay pulls without credentials). Rebuild
 and set again when Playwright's pin or the build's Node major changes.

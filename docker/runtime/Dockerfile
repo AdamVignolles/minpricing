@@ -8,8 +8,9 @@
 #   - `playwright` in /opt/playwright, linked as /node_modules: Node resolves it from /app/server/… by
 #     walking up the tree, so the app needs no NODE_PATH.
 #   - Chromium + headless shell at /ms-playwright with their system libraries
-#     (`--with-deps`); writable by the app's user, so the app's own
-#     `playwright install` at startup is a no-op instead of an EACCES.
+#     (`--with-deps`). DEALRADAR_BROWSERS_PREINSTALLED=1 tells the app to
+#     only check them: Bay's read-only root filesystem makes Playwright's own
+#     installer hang on its lock file, and launches wait for it.
 #   - Xvfb on DISPLAY=:99 for the visible Dealabs browser, started by the
 #     entrypoint before the app.
 #
@@ -20,6 +21,7 @@ FROM node:${NODE_MAJOR}-bookworm-slim
 
 ARG PLAYWRIGHT_VERSION=1.63.0
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    DEALRADAR_BROWSERS_PREINSTALLED=1 \
     DISPLAY=:99
 
 RUN set -eux; \
