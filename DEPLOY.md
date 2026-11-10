@@ -244,3 +244,23 @@ npm run deploy:ovh                     # npm run build + alepha platform deploy 
 
 Served at `https://minpricing-ovh.<VPS IP>.sslip.io`. The database starts
 empty: data from the AWS VM is not copied.
+
+## Runtime image (Playwright + Chromium)
+
+The container-based Bay runs the app in `node:22-slim` and installs nothing,
+so `playwright` (the build's one external dependency) and Chromium are
+missing: « Browsers: install failed — Cannot find module
+'playwright/package.json' ». `docker/runtime/` is that base plus Playwright
+(pinned to package.json), Chromium + headless shell with their libraries,
+and Xvfb on `:99` for the visible Dealabs browser. Built and checked on the
+VPS (Docker is there), pushed to ghcr.io, then given to the app:
+
+```bash
+echo <token with write:packages> | docker login ghcr.io -u <github user> --password-stdin
+bash scripts/build-runtime-image.sh <github user>   # prints the line below with the digest
+sudo bay runtimes set minpricing/production ghcr.io/<user>/dealradar-runtime:…@sha256:…
+sudo bay restart minpricing/production
+```
+
+Make the ghcr package public once (Bay pulls without credentials). Rebuild
+and set again when Playwright's pin or the build's Node major changes.
