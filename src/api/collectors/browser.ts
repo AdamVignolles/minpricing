@@ -192,6 +192,33 @@ function isRateLimitError(error: unknown): boolean {
  * back-to-back. A fresh context per page makes every request look like an
  * independent first-time visitor, which reliably avoids it.
  */
+/**
+ * Gives up on `work` after `ms`: its promise is left to settle on its own
+ * (the browser closes at the end of the run), the caller goes on. Every
+ * page step has its own timeout, but a browser call itself (a context
+ * opening or closing, a page whose renderer just died) can hang for good,
+ * and one such page held a whole run on 2026-11-10 (Amazon at 298/300).
+ */
+export function withDeadline<T>(
+  work: Promise<T>,
+  ms: number,
+  what: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `Timeout: ${what} sans réponse après ${Math.round(ms / 1000)} s`,
+          ),
+        ),
+      ms,
+    );
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
 export async function withPage<T>(
   handle: DealsBrowserHandle,
   fn: (page: DealsPage) => Promise<T>,

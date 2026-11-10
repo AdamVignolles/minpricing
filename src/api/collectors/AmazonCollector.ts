@@ -14,6 +14,7 @@ import {
   readProductPages,
   scrollAndCollect,
   withBrowser,
+  withDeadline,
   withPage,
 } from "./browser.ts";
 import type {
@@ -27,6 +28,13 @@ import { currentLoad, noteTiming, percentile } from "./runTimings.ts";
 
 /** Cards announcing less than this ("-12 %") aren't worth opening. */
 const MIN_BADGE_PERCENT = 20;
+/**
+ * Overall limits per page, above the steps' own timeouts (goto 25 s, price
+ * 12 s; a listing scrolls 10 rounds): past them the page is given up so one
+ * hung browser call can't hold the run (`withDeadline`).
+ */
+const PRODUCT_PAGE_DEADLINE_MS = 90_000;
+const LISTING_PAGE_DEADLINE_MS = 180_000;
 
 /** Listing pages read at the same time. */
 const LISTING_CONCURRENCY = 2;
@@ -282,65 +290,71 @@ export class AmazonCollector implements DealSource {
           )?.[1];
           const categoryHint = collection ? `amazon:${collection}` : undefined;
           try {
-            const cards = await withPage(browser, async (page) => {
-              const response = await page.goto(dealsUrl, {
-                waitUntil: "domcontentloaded",
-                timeout: 20_000,
-              });
-              if (!response || !response.ok()) {
-                throw new Error(
-                  `Amazon deals page returned ${response?.status() ?? "no response"}`,
-                );
-              }
-
-              await page
-                .waitForSelector('[data-testid="product-card"]', {
-                  timeout: 10_000,
-                })
-                .catch(() => {
-                  // No card showed up in time: the extract() below just
-                  // finds none, and this URL simply contributes 0 cards.
+            const cards = await withDeadline(
+              withPage(browser, async (page) => {
+                const response = await page.goto(dealsUrl, {
+                  waitUntil: "domcontentloaded",
+                  timeout: 20_000,
                 });
+                if (!response || !response.ok()) {
+                  throw new Error(
+                    `Amazon deals page returned ${response?.status() ?? "no response"}`,
+                  );
+                }
 
-              // Collected across every scroll step, not read once at the
-              // end: see `scrollAndCollect`'s doc — Amazon's grid is
-              // virtualized, so a single read only ever sees whichever
-              // batch happened to be mounted at the final scroll position.
-              return scrollAndCollect(
-                page,
-                () =>
-                  page.evaluate(() =>
-                    Array.from(
-                      document.querySelectorAll('[data-testid="product-card"]'),
-                    ).map((el) => {
-                      const link = el.querySelector(
-                        'a[data-testid="product-card-link"]',
-                      ) as HTMLAnchorElement | null;
-                      const img = el.querySelector(
-                        "img",
-                      ) as HTMLImageElement | null;
-                      const badge = (el as HTMLElement).innerText.match(
-                        /-\s?(\d{1,2})\s?%/,
-                      );
-                      return {
-                        asin: el.getAttribute("data-asin"),
-                        url: link?.href ?? null,
-                        title: img?.alt || null,
-                        imageUrl: img?.src || null,
-                        badgePercent: badge ? Number(badge[1]) : null,
-                        priceText:
-                          (el as HTMLElement).innerText.match(
-                            /Prix[^:\n]*:\s*([\d\s.]+,\d{2})\s?€/,
-                          )?.[1] ?? null,
-                      };
-                    }),
-                  ),
-                (card) => card.asin,
-                // Deep enough for a 200-page cap shared across ~15
-                // collections once the "-20 %" card filter has run.
-                { rounds: 10 },
-              );
-            });
+                await page
+                  .waitForSelector('[data-testid="product-card"]', {
+                    timeout: 10_000,
+                  })
+                  .catch(() => {
+                    // No card showed up in time: the extract() below just
+                    // finds none, and this URL simply contributes 0 cards.
+                  });
+
+                // Collected across every scroll step, not read once at the
+                // end: see `scrollAndCollect`'s doc — Amazon's grid is
+                // virtualized, so a single read only ever sees whichever
+                // batch happened to be mounted at the final scroll position.
+                return scrollAndCollect(
+                  page,
+                  () =>
+                    page.evaluate(() =>
+                      Array.from(
+                        document.querySelectorAll(
+                          '[data-testid="product-card"]',
+                        ),
+                      ).map((el) => {
+                        const link = el.querySelector(
+                          'a[data-testid="product-card-link"]',
+                        ) as HTMLAnchorElement | null;
+                        const img = el.querySelector(
+                          "img",
+                        ) as HTMLImageElement | null;
+                        const badge = (el as HTMLElement).innerText.match(
+                          /-\s?(\d{1,2})\s?%/,
+                        );
+                        return {
+                          asin: el.getAttribute("data-asin"),
+                          url: link?.href ?? null,
+                          title: img?.alt || null,
+                          imageUrl: img?.src || null,
+                          badgePercent: badge ? Number(badge[1]) : null,
+                          priceText:
+                            (el as HTMLElement).innerText.match(
+                              /Prix[^:\n]*:\s*([\d\s.]+,\d{2})\s?€/,
+                            )?.[1] ?? null,
+                        };
+                      }),
+                    ),
+                  (card) => card.asin,
+                  // Deep enough for a 200-page cap shared across ~15
+                  // collections once the "-20 %" card filter has run.
+                  { rounds: 10 },
+                );
+              }),
+              LISTING_PAGE_DEADLINE_MS,
+              "page bons plans",
+            );
 
             return cards
               .filter((card) => card.asin && card.url && card.title)
@@ -424,8 +438,10 @@ export class AmazonCollector implements DealSource {
             if (priced) {
               byFetch++;
             } else {
-              priced = await withPage(browser, (page) =>
-                this.fetchPrice(page, card.url),
+              priced = await withDeadline(
+                withPage(browser, (page) => this.fetchPrice(page, card.url)),
+                PRODUCT_PAGE_DEADLINE_MS,
+                "fiche produit",
               );
             }
             if (!priced) {
