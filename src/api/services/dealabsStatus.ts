@@ -258,6 +258,25 @@ export function readHistory(
 }
 
 /**
+ * A draft that is not `posted` but still says our post is current
+ * (`live`, or `hidden` waiting for a moderator) with a post link: put back
+ * to `draft` by a « J'ai publié ce deal moi-même » that didn't match, an
+ * owner edit or an older path, its status went stale — nothing re-read it.
+ * The status check re-reads these by their post's own page. Pure.
+ */
+export function claimsCurrentPost(draft: {
+  status: string;
+  dealabsStatus?: string | null;
+  dealabsUrl?: string | null;
+}): boolean {
+  return (
+    draft.status !== "posted" &&
+    (draft.dealabsStatus === "live" || draft.dealabsStatus === "hidden") &&
+    !!dealabsThreadId(draft.dealabsUrl)
+  );
+}
+
+/**
  * The status a draft stands at: the checked one, else what `posted`
  * implies (drafts posted before epic 32 count as live until checked).
  */
