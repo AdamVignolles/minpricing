@@ -178,8 +178,15 @@ over SSH. Reference: https://alepha.dev/bay/docs/guides-installation.md
        IdentityFile ~/.ssh/ovh
    ```
 
-2. **On the VPS** (`ssh minpricing-ovh`): install Bay (also installs Docker),
-   then check the host.
+2. **Bay on the VPS — one command from the project** (steps 2–3 below,
+   done by `scripts/setup-ovh-vps.sh`; safe to run again):
+
+   ```bash
+   ssh minpricing-ovh 'bash -s' -- <you@example.com> < scripts/setup-ovh-vps.sh
+   ```
+
+   Then reconnect once (the new group is read at login). By hand instead:
+   install Bay (also installs Docker), then check the host.
 
    ```bash
    curl -sSL https://alepha.dev/bay/install.sh | sudo sh
@@ -232,8 +239,7 @@ over SSH. Reference: https://alepha.dev/bay/docs/guides-installation.md
 
 ```bash
 npx alepha platform login --env ovh    # checks SSH, the group and Bay's socket
-npm run build
-npx alepha platform deploy --env ovh
+npm run deploy:ovh                     # npm run build + alepha platform deploy --env ovh
 ```
 
 Served at `https://minpricing-ovh.<VPS IP>.sslip.io`. The database starts
