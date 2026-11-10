@@ -41,5 +41,7 @@ RUN set -eux; \
 COPY entrypoint.sh /usr/local/bin/dealradar-entrypoint
 RUN chmod 0755 /usr/local/bin/dealradar-entrypoint
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/dealradar-entrypoint"]
+# -s: Bay runs the container with its own init as PID 1, so tini must
+# register as subreaper to reap the Chromium processes it inherits.
+ENTRYPOINT ["/usr/bin/tini", "-s", "--", "/usr/local/bin/dealradar-entrypoint"]
 CMD ["node"]
