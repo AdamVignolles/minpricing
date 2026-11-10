@@ -173,6 +173,33 @@ describe("useReachableTmpDir", () => {
     expect(env.TMPDIR).toBeUndefined();
   });
 
+  test("runtime image without a temp folder: one on the data disk, not Bay's 64 MB /tmp", () => {
+    const env: NodeJS.ProcessEnv = {
+      DEALRADAR_BROWSERS_PREINSTALLED: "1",
+      DATA_DIR: "/opt/bay/data/apps/minpricing-production/data",
+    };
+    const made: string[] = [];
+    useReachableTmpDir(env, (path) => {
+      made.push(path);
+    });
+    expect(env.TMPDIR).toBe(
+      "/opt/bay/data/apps/minpricing-production/data/.tmp",
+    );
+    expect(made).toEqual([
+      "/opt/bay/data/apps/minpricing-production/data/.tmp",
+    ]);
+  });
+
+  test("an explicit TMPDIR is never replaced", () => {
+    const env: NodeJS.ProcessEnv = {
+      DEALRADAR_BROWSERS_PREINSTALLED: "1",
+      DATA_DIR: "/data",
+      TMPDIR: "/elsewhere",
+    };
+    useReachableTmpDir(env, () => {});
+    expect(env.TMPDIR).toBe("/elsewhere");
+  });
+
   test("a TMPDIR that exists or can be made is kept", () => {
     const env: NodeJS.ProcessEnv = { TMPDIR: "/data/tmp" };
     useReachableTmpDir(env, () => {});

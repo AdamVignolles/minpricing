@@ -258,6 +258,12 @@ export class AmazonCollector implements DealSource {
       // gets its share of `limit` (see `interleave`).
       const cardsPerPage: Card[][] = [];
 
+      // Why a listing or product page gave nothing, noted once per run:
+      // these failures are skipped on purpose, and were silent (2026-11-10,
+      // 12 of 13 product pages « Page crashed » with nothing in the log).
+      const failures = new Map<string, number>();
+      const countFailure = (reason: string) =>
+        failures.set(reason, (failures.get(reason) ?? 0) + 1);
       // Listing pages a few at a time too (each in its own context).
       let pagesRead = 0;
       const perPage = await mapWithConcurrency(
@@ -349,9 +355,10 @@ export class AmazonCollector implements DealSource {
                   ? parsePriceFr(card.priceText)
                   : undefined,
               }));
-          } catch {
+          } catch (error) {
             // One listing page failing (challenge, layout change, timeout)
             // must not block the other entry points from contributing cards.
+            countFailure(`liste : ${failureReason(error)}`);
             return [];
           }
         },
@@ -422,6 +429,7 @@ export class AmazonCollector implements DealSource {
               );
             }
             if (!priced) {
+              countFailure("fiche : prix introuvable");
               return undefined;
             }
 
@@ -447,9 +455,10 @@ export class AmazonCollector implements DealSource {
               // extra request, so always fresh (no DiscoverContext needed).
               details: priced.details,
             };
-          } catch {
+          } catch (error) {
             // One product page failing (challenge, layout change, timeout)
             // must not block the rest of the deals found this run.
+            countFailure(`fiche : ${failureReason(error)}`);
             return undefined;
           } finally {
             pageTimes.push(Date.now() - pageStartedAt);
@@ -462,6 +471,19 @@ export class AmazonCollector implements DealSource {
         },
       );
       deals.push(...found.filter((deal): deal is RawDeal => !!deal));
+      const emptyListings = perPage.filter(
+        (cards) => cards.length === 0,
+      ).length;
+      if (failures.size > 0 || emptyListings > 0) {
+        context?.note?.(
+          formatAmazonFailures({
+            listings: this.dealsUrls.length,
+            emptyListings,
+            candidates: candidates.length,
+            failures,
+          }),
+        );
+      }
 
       noteTiming(this.id, {
         listingMs,
@@ -681,4 +703,37 @@ export async function readAmazonBullets(
     .join("\n");
 
   return text.length > 600 ? `${text.slice(0, 600)}…` : text;
+}
+
+/** A page failure in a few French words, for the run's note. */
+export function failureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/Page crashed|Target crashed/i.test(message)) return "page plantée";
+  if (/captcha|robot/i.test(message)) return "vérification anti-robot";
+  if (/Timeout|timed out/i.test(message)) return "délai dépassé";
+  const status = message.match(/returned (\d{3})/)?.[1];
+  if (status) return `réponse ${status}`;
+  return message.replace(/\s+/g, " ").trim().slice(0, 60) || "erreur";
+}
+
+/** « Amazon : 13 listes (2 vides), 12 fiche(s) sans résultat sur 13 — … » */
+export function formatAmazonFailures(run: {
+  listings: number;
+  emptyListings: number;
+  candidates: number;
+  failures: Map<string, number>;
+}): string {
+  const product = [...run.failures.entries()].filter(([reason]) =>
+    reason.startsWith("fiche"),
+  );
+  const failedProducts = product.reduce((sum, [, n]) => sum + n, 0);
+  const reasons = [...run.failures.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, n]) => `${reason} ×${n}`)
+    .join(", ");
+  return (
+    `Amazon : ${run.listings} liste(s) (${run.emptyListings} vide(s)), ` +
+    `${failedProducts} fiche(s) sans résultat sur ${run.candidates}` +
+    (reasons ? ` — ${reasons}` : "")
+  );
 }

@@ -100,6 +100,24 @@ export function useReachableTmpDir(
       delete env[key];
     }
   }
+  // Bay gives the container a 64 MB tmpfs `/tmp`, and Playwright starts
+  // Chromium with `--disable-dev-shm-usage`, so its shared memory goes to
+  // the temp folder: a heavy page (an Amazon product page) fills it and the
+  // renderer dies — « Page crashed », 12 of 13 product pages on 2026-11-10.
+  // In the runtime image, with no temp folder set, use one on the data disk.
+  if (
+    env.DEALRADAR_BROWSERS_PREINSTALLED === "1" &&
+    env.DATA_DIR &&
+    !env.TMPDIR
+  ) {
+    const dir = join(env.DATA_DIR, ".tmp");
+    try {
+      create(dir);
+      env.TMPDIR = dir;
+    } catch {
+      // Keep the system /tmp.
+    }
+  }
 }
 
 let pending: Promise<BrowserState> | undefined;
