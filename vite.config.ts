@@ -35,7 +35,12 @@ export default defineConfig({
   // must stay a real `require`/`import` at runtime instead of being
   // inlined into the server bundle.
   ssr: {
-    external: ["playwright", "playwright-core"],
+    external: [
+      "playwright",
+      "playwright-core",
+      "playwright-extra",
+      "puppeteer-extra-plugin-stealth",
+    ],
   },
   test: {
     root: ".",

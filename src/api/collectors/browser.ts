@@ -1,5 +1,6 @@
 import { launchWithInstall } from "./browserInstall.ts";
 import type { DiscoverContext, RawDeal } from "./DealSource.ts";
+import { getStealthChromium, withProxy } from "./stealthChromium.ts";
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -101,11 +102,11 @@ export async function withBrowser<T>(
   // module... [code: 10021]"), even though this branch never runs there.
   // A dynamic `import()` is only resolved if actually awaited, so it never
   // trips that check on the `cloudflareBinding` path above.
-  const { chromium } = await import("playwright");
+  const chromium = await getStealthChromium();
   // Installs a missing Chromium build once instead of failing every run
   // (see browserInstall.ts).
   const browser = await launchWithInstall(() =>
-    chromium.launch({ headless: true }),
+    chromium.launch(withProxy({ headless: true })),
   );
   try {
     return await fn({ engine: "playwright", browser });

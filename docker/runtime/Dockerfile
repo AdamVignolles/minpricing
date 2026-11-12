@@ -20,6 +20,8 @@ ARG NODE_MAJOR=22
 FROM node:${NODE_MAJOR}-bookworm-slim
 
 ARG PLAYWRIGHT_VERSION=1.63.0
+ARG PLAYWRIGHT_EXTRA_VERSION=4.3.6
+ARG STEALTH_PLUGIN_VERSION=2.11.2
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     DEALRADAR_BROWSERS_PATH=/ms-playwright \
     DEALRADAR_BROWSERS_PREINSTALLED=1 \
@@ -29,7 +31,9 @@ RUN set -eux; \
     mkdir -p /opt/playwright && cd /opt/playwright; \
     echo '{"private":true}' > package.json; \
     npm install --no-audit --no-fund --omit=dev \
-      "playwright@${PLAYWRIGHT_VERSION}" "playwright-core@${PLAYWRIGHT_VERSION}"; \
+      "playwright@${PLAYWRIGHT_VERSION}" "playwright-core@${PLAYWRIGHT_VERSION}" \
+      "playwright-extra@${PLAYWRIGHT_EXTRA_VERSION}" \
+      "puppeteer-extra-plugin-stealth@${STEALTH_PLUGIN_VERSION}"; \
     ln -s /opt/playwright/node_modules /node_modules; \
     node /node_modules/playwright/cli.js install --with-deps chromium chromium-headless-shell; \
     apt-get update; \
