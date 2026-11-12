@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { appDir } from "./appDir.ts";
@@ -96,24 +96,37 @@ export function sourceProblem(source: CatalogSource): string | undefined {
   return undefined;
 }
 
-/** Usable sources of the file; a bad entry is left out, never fatal. */
-export function loadCatalogConfig(
-  file = join(appDir(), "config", "watch-sources.json"),
-): CatalogConfig {
-  try {
-    const raw = JSON.parse(readFileSync(file, "utf8")) as CatalogConfig;
-    const seen = new Set<string>();
-    const sources = (Array.isArray(raw.sources) ? raw.sources : []).filter(
-      (source) => {
-        if (sourceProblem(source) || seen.has(source.id)) return false;
-        seen.add(source.id);
-        return true;
-      },
-    );
-    return { activeHours: raw.activeHours, sources };
-  } catch {
-    return { sources: [] };
+/**
+ * Usable sources of the file; a bad entry is left out, never fatal. Like
+ * the agents' configs, the file under `appDir()` (Bay's persistent
+ * folder, where an edit survives a deploy) wins; without one, the copy
+ * shipped with the release is read.
+ */
+export function loadCatalogConfig(file?: string): CatalogConfig {
+  const candidates = file
+    ? [file]
+    : [
+        join(appDir(), "config", "watch-sources.json"),
+        join(process.cwd(), "config", "watch-sources.json"),
+      ];
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    try {
+      const raw = JSON.parse(readFileSync(candidate, "utf8")) as CatalogConfig;
+      const seen = new Set<string>();
+      const sources = (Array.isArray(raw.sources) ? raw.sources : []).filter(
+        (source) => {
+          if (sourceProblem(source) || seen.has(source.id)) return false;
+          seen.add(source.id);
+          return true;
+        },
+      );
+      return { activeHours: raw.activeHours, sources };
+    } catch {
+      // Unreadable: try the next one.
+    }
   }
+  return { sources: [] };
 }
 
 export const perRunOf = (source: CatalogSource) =>
