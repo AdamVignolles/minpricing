@@ -5,9 +5,11 @@ import { AdminController } from "./controllers/AdminController.ts";
 import { AgentApiController } from "./controllers/AgentApiController.ts";
 import { AgentsController } from "./controllers/AgentsController.ts";
 import { AuthController } from "./controllers/AuthController.ts";
+import { CatalogAdminController } from "./controllers/CatalogAdminController.ts";
 import { CatalogController } from "./controllers/CatalogController.ts";
 import { DealsController } from "./controllers/DealsController.ts";
 import { DraftsController } from "./controllers/DraftsController.ts";
+import { FeedController } from "./controllers/FeedController.ts";
 import { KeepaController } from "./controllers/KeepaController.ts";
 import { LinksController } from "./controllers/LinksController.ts";
 import { McpOAuthController } from "./controllers/McpOAuthController.ts";
@@ -16,6 +18,7 @@ import { ProductsController } from "./controllers/ProductsController.ts";
 import { PublishScheduleController } from "./controllers/PublishScheduleController.ts";
 import { SourcesController } from "./controllers/SourcesController.ts";
 import { StatsController } from "./controllers/StatsController.ts";
+import { CatalogJob } from "./jobs/CatalogJob.ts";
 import { CollectDealsJob } from "./jobs/CollectDealsJob.ts";
 import { LinkCheckJob } from "./jobs/LinkCheckJob.ts";
 import { ModerationJob } from "./jobs/ModerationJob.ts";
@@ -25,6 +28,7 @@ import { AgentsService } from "./services/AgentsService.ts";
 import { AmazonWatchService } from "./services/AmazonWatchService.ts";
 import { AutoPublishService } from "./services/AutoPublishService.ts";
 import { BrowserInstallService } from "./services/BrowserInstallService.ts";
+import { CatalogService } from "./services/CatalogService.ts";
 import { CategorizationService } from "./services/CategorizationService.ts";
 import { CollectionProgressService } from "./services/CollectionProgressService.ts";
 import { CollectionService } from "./services/CollectionService.ts";
@@ -74,6 +78,11 @@ export const ApiModule = $module({
     // agent write API (AGENT_TOKEN): bounded configs, reports, plan
     AgentApiController,
     PublishScheduleController,
+    // read-only feed for an outside app (FEED_TOKEN) and the catalogue reader
+    FeedController,
+    CatalogAdminController,
+    CatalogJob,
+    CatalogService,
     // jobs
     CollectDealsJob,
     PublishScheduleJob,
