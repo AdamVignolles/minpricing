@@ -193,7 +193,11 @@ controllers → React console → Dealabs draft / auto-publish.
   window on the Dealabs login (button « Se connecter à Dealabs » on the deal
   page), detects the logged-in state and saves `.dealabs-session.json`
   itself — local server only, like auto-publish. On the Bay VM the browser
-  runs on a virtual display (`DISPLAY=:99`) and the console shows it as an
+  runs on a virtual display (`DISPLAY=:99`); with no display (Linux, no
+  `DISPLAY` — the OVH VPS, 11/11: every publish died at « Ouverture du
+  navigateur ») `launchVisibleBrowser` starts it headless and gives Chrome
+  a writable home (`browserHome`), so publishing with the saved session
+  works and only the robot check / login need the display and the console shows it as an
   « écran distant » (`RemoteScreenService`, `/dealabs/screen`); if the
   session is missing or expired, auto-publish opens the login in that same
   window and continues once you've logged in. Local files (session, `config/`,

@@ -21,6 +21,7 @@ import {
 } from "./PublishProgressService.ts";
 import type { PublishStepId } from "./publishSteps.ts";
 import {
+  isAttended,
   launchVisibleBrowser,
   RemoteScreenService,
   SCREEN_VIEWPORT,
@@ -28,9 +29,6 @@ import {
 } from "./RemoteScreenService.ts";
 
 const LOGIN_WAIT_MS = 10 * 60_000;
-
-/** A person can see the browser (local desktop, or the server's virtual display). */
-const isAttended = () => process.platform !== "linux" || !!process.env.DISPLAY;
 
 export const SESSION_PATH = join(appDir(), ".dealabs-session.json");
 const DEBUG_DIR = join(appDir(), ".dealabs-debug");
