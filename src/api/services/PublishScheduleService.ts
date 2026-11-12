@@ -22,7 +22,10 @@ import {
   checkDealabsTitle,
   DealabsDraftService,
 } from "./DealabsDraftService.ts";
-import { DealabsDuplicateError } from "./DealabsPublisherService.ts";
+import {
+  DealabsDuplicateError,
+  DealabsRobotCheckError,
+} from "./DealabsPublisherService.ts";
 import { readinessSummary } from "./dealabsReadiness.ts";
 import { DealabsSessionService } from "./DealabsSessionService.ts";
 import { currentDealabsStatus } from "./dealabsStatus.ts";
@@ -794,6 +797,18 @@ export class PublishScheduleService {
         if (thrown instanceof PublishCancelledError) {
           return this.finish(entry, {
             status: "cancelled",
+            dealId: deal.id,
+            title: deal.title,
+            note: [...outcomes, thrown.message].join("\n"),
+          });
+        }
+        // Dealabs' robot check, nobody there to tick it: the next deals
+        // would wait at the same door. No ledger line — the deal wasn't
+        // tried, a later slot can take it.
+        if (thrown instanceof DealabsRobotCheckError) {
+          return this.finish(entry, {
+            status: "failed",
+            result: "failed",
             dealId: deal.id,
             title: deal.title,
             note: [...outcomes, thrown.message].join("\n"),

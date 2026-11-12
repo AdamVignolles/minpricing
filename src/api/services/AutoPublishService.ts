@@ -10,6 +10,7 @@ import { DealabsDraftService } from "./DealabsDraftService.ts";
 import { DealabsHistoryService } from "./DealabsHistoryService.ts";
 import {
   DealabsDuplicateError,
+  DealabsRobotCheckError,
   DealabsPublisherService,
 } from "./DealabsPublisherService.ts";
 import {
@@ -656,7 +657,9 @@ export class AutoPublishService {
         .updateById(draft.id, {
           ...(attempt && !stopped
             ? {
-                ...attempt,
+                // The robot check is Dealabs' door, not this deal: the
+                // error is kept, the attempt isn't counted.
+                ...(error instanceof DealabsRobotCheckError ? {} : attempt),
                 lastPublishResult:
                   error instanceof DealabsDuplicateError
                     ? ("duplicate" as const)
@@ -822,8 +825,14 @@ export class AutoPublishService {
         const reason = error instanceof Error ? error.message : String(error);
         this.log.warn(`Auto-publish failed for "${deal.title}": ${reason}`);
         outcome.failed.push({ title: deal.title, score: deal.score, reason });
-        // Someone stopped it: the rest of the batch doesn't start either.
-        if (error instanceof PublishCancelledError) break;
+        // Someone stopped it, or Dealabs' robot check is waiting for a
+        // person: the rest of the batch doesn't start either.
+        if (
+          error instanceof PublishCancelledError ||
+          error instanceof DealabsRobotCheckError
+        ) {
+          break;
+        }
       }
     }
     return outcome;

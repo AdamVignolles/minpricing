@@ -213,6 +213,28 @@ export class DealabsDuplicateError extends Error {
 }
 
 /**
+ * Dealabs' robot check (Cloudflare) stood in the way and nobody ticked it.
+ * Nothing to do with the deal: it isn't counted as an attempt, and a
+ * scheduled slot stops there instead of running the next deals into the
+ * same wall. Ticked once in the « écran distant », the clearance is saved
+ * with the session and the following publications go through on their own.
+ */
+export class DealabsRobotCheckError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DealabsRobotCheckError";
+  }
+}
+
+const isDealabsUrl = (url: string): boolean => {
+  try {
+    return /(^|\.)dealabs\.com$/.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Drives a real, logged-in browser to submit a deal to Dealabs on your
  * behalf — login + fill + submit, no manual click.
  *
@@ -359,6 +381,10 @@ export class DealabsPublisherService {
           throw error;
         }
         const debugPath = await this.captureDebug(page, deal.id);
+        if (error instanceof DealabsRobotCheckError) {
+          error.message += ` (debug snapshot: ${debugPath})`;
+          throw error;
+        }
         throw new Error(
           `${error instanceof Error ? error.message : String(error)} (debug snapshot: ${debugPath})`,
         );
@@ -438,11 +464,11 @@ export class DealabsPublisherService {
     if (!isAttended()) {
       await page.waitForTimeout(10_000);
       if (!(await isChallenge())) {
-        await this.cloudflareCleared(resume);
+        await this.cloudflareCleared(page, resume);
         return true;
       }
-      throw new Error(
-        "Dealabs demande une vérification anti-robot (Cloudflare) que le serveur ne peut pas valider : publiez depuis un poste local (npm run dev + « Se connecter à Dealabs ») ou copiez le brouillon à la main.",
+      throw new DealabsRobotCheckError(
+        "Dealabs demande une vérification anti-robot (Cloudflare) et le serveur n'a pas d'écran pour la cocher : démarrez l'écran virtuel (Xvfb, DISPLAY=:99) puis cochez-la une fois dans l'écran distant.",
       );
     }
 
@@ -450,24 +476,52 @@ export class DealabsPublisherService {
       "cloudflare",
       "Cochez « Je ne suis pas un robot » dans l'écran distant",
     );
+    // A click beside the box can follow the page's « Cloudflare » link:
+    // come back to the check instead of losing the run (2026-11-12).
+    const checkUrl = page.url();
+    const pending = async () => {
+      if (!isDealabsUrl(page.url())) {
+        await page
+          .goto(checkUrl, { waitUntil: "domcontentloaded", timeout: 30_000 })
+          .catch(() => undefined);
+        return true;
+      }
+      return isChallenge();
+    };
     const deadline = Date.now() + 240_000;
-    while ((await isChallenge()) && Date.now() < deadline) {
+    while ((await pending()) && Date.now() < deadline) {
       await page.waitForTimeout(1_000);
       await this.progress.touch();
     }
 
-    if (await isChallenge()) {
-      throw new Error(
-        "Cloudflare challenge was not cleared in time — resolve it in the browser window and try again.",
+    if (await pending()) {
+      throw new DealabsRobotCheckError(
+        "Vérification anti-robot de Dealabs (Cloudflare) non cochée dans le délai de 4 minutes : cochez-la une fois dans l'écran distant (« Se connecter à Dealabs » l'ouvre sans publier), elle est ensuite gardée avec la session.",
       );
     }
-    await this.cloudflareCleared(resume);
+    await this.cloudflareCleared(page, resume);
     return true;
   }
 
-  /** The challenge is gone: back to the step it interrupted, if any. */
-  protected async cloudflareCleared(resume?: PublishStepId): Promise<void> {
-    await this.progress.done("cloudflare", "Vérification passée");
+  /**
+   * The challenge is gone: keep its clearance cookie with the session right
+   * away — a run that fails further on must not ask for the check again —
+   * then go back to the step it interrupted, if any.
+   */
+  protected async cloudflareCleared(
+    page: import("playwright").Page,
+    resume?: PublishStepId,
+  ): Promise<void> {
+    if (existsSync(SESSION_PATH)) {
+      await page
+        .context()
+        .storageState({ path: SESSION_PATH })
+        .catch(() => undefined);
+    }
+    await this.progress.done(
+      "cloudflare",
+      "Vérification passée, gardée avec la session",
+    );
     if (resume) await this.progress.begin(resume);
   }
 

@@ -24,7 +24,10 @@ import {
   DealNotAvailableError,
 } from "../src/api/services/AutoPublishService.ts";
 import { DealabsDraftService } from "../src/api/services/DealabsDraftService.ts";
-import { DealabsDuplicateError } from "../src/api/services/DealabsPublisherService.ts";
+import {
+  DealabsDuplicateError,
+  DealabsRobotCheckError,
+} from "../src/api/services/DealabsPublisherService.ts";
 import { DealabsSessionService } from "../src/api/services/DealabsSessionService.ts";
 import { DealPageCheckService } from "../src/api/services/DealPageCheckService.ts";
 import { PublishPauseService } from "../src/api/services/PublishPauseService.ts";
@@ -384,6 +387,27 @@ describe("publishing plan", () => {
     expect(entry.status).toBe("cancelled");
     expect(entry.note).toContain("arrêtée par vous");
     // One deal tried, no other one started, nothing in the ledger.
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(ledger()).toEqual([]);
+    publish.mockRestore();
+  });
+
+  test("Dealabs' robot check left unticked: the slot stops, the deal isn't used up", async () => {
+    const publish = vi
+      .spyOn(publisher, "publishDeal")
+      .mockRejectedValue(
+        new DealabsRobotCheckError("Vérification anti-robot non cochée"),
+      );
+    await call("PUT", "/agent/schedule", {
+      ranked: ranked(),
+      times: ["17:40"],
+      agent: "deals-select",
+    });
+    setNow("2026-10-28T16:41:00.000Z");
+    const [entry] = await schedule.runDue();
+    expect(entry.status).toBe("failed");
+    expect(entry.note).toContain("anti-robot");
+    // The next deals would wait at the same check: one try, no ledger line.
     expect(publish).toHaveBeenCalledTimes(1);
     expect(ledger()).toEqual([]);
     publish.mockRestore();

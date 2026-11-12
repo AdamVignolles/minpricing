@@ -200,7 +200,15 @@ controllers → React console → Dealabs draft / auto-publish.
   works and only the robot check / login need the display and the console shows it as an
   « écran distant » (`RemoteScreenService`, `/dealabs/screen`); if the
   session is missing or expired, auto-publish opens the login in that same
-  window and continues once you've logged in. Local files (session, `config/`,
+  window and continues once you've logged in. **Robot check** (Cloudflare
+  checkbox, asked again whenever the server's IP changes — the clearance
+  cookie is tied to it; OVH move, 12/11): never ticked by code. A person
+  ticks it once in the « écran distant »; the clearance is saved with the
+  session right then (`cloudflareCleared`), so later runs pass alone. A
+  click that leaves Dealabs is brought back to the check. Left unticked
+  (4 min) it throws `DealabsRobotCheckError`: no attempt counted on the
+  draft, and a scheduled slot or end-of-run batch stops there (no ledger
+  line) instead of trying the next deals. Local files (session, `config/`,
   `data/agents`) live under `appDir()` (Bay's `APP_FILES_DIR`). Auto-publish attempts are
   recorded on the draft (`publishAttempts`, `lastPublishResult`,
   `lastPublishError`); a "Vérifier" that doesn't confirm puts the draft back
