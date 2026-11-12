@@ -49,13 +49,13 @@ let movedTo: string | undefined;
  * (`appDir()`) instead. Must run before the first `import("playwright")`,
  * which reads the variable once.
  */
-export function useReachableBrowsersPath(
+export function ensureReachableBrowsersPath(
   env: NodeJS.ProcessEnv = process.env,
   create: (path: string) => void = (path) =>
     mkdirSync(path, { recursive: true }),
   fallback: () => string = () => join(appDir(), "browsers"),
 ): string | undefined {
-  useReachableTmpDir(env, create);
+  ensureReachableTmpDir(env, create);
   // The runtime image's own builds win over any configured folder: a value
   // left over from the old process-based Bay (its `browsers/` path) would
   // otherwise send Playwright looking for builds that aren't there.
@@ -92,7 +92,7 @@ export function useReachableBrowsersPath(
  * mkdtemp ». When it can't be created, the variables go and the system
  * `/tmp` is used.
  */
-export function useReachableTmpDir(
+export function ensureReachableTmpDir(
   env: NodeJS.ProcessEnv = process.env,
   create: (path: string) => void = (path) =>
     mkdirSync(path, { recursive: true }),
@@ -214,7 +214,7 @@ async function runPlaywrightInstall(): Promise<void> {
 export function ensureBrowsers(
   install: () => Promise<void> = runPlaywrightInstall,
 ): Promise<BrowserState> {
-  useReachableBrowsersPath();
+  ensureReachableBrowsersPath();
   pending ??= (async () => {
     current = { state: "installing", checkedAt: new Date().toISOString() };
     try {
@@ -243,7 +243,7 @@ export async function launchWithInstall<T>(
   launch: () => Promise<T>,
   install: () => Promise<BrowserState> = () => ensureBrowsers(),
 ): Promise<T> {
-  useReachableBrowsersPath();
+  ensureReachableBrowsersPath();
   if (pending) await pending;
   try {
     const browser = await launch();
