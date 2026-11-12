@@ -3,7 +3,11 @@ import { existsSync, statSync, unlinkSync } from "node:fs";
 import { $inject, Alepha } from "alepha";
 import { $logger } from "alepha/logger";
 
-import { isDealabsLoggedOut, SESSION_PATH } from "./DealabsPublisherService.ts";
+import {
+  isDealabsLoggedOut,
+  isDealabsRobotCheck,
+  SESSION_PATH,
+} from "./DealabsPublisherService.ts";
 import {
   launchVisibleBrowser,
   RemoteScreenService,
@@ -45,6 +49,14 @@ export interface DealabsSessionStatus {
  * browser isolates them per site), so a login made in your own tab can't
  * be handed over to the server. Same local-only constraint as auto-publish.
  */
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+};
+
 export class DealabsSessionService {
   protected log = $logger();
   protected alepha = $inject(Alepha);
@@ -154,6 +166,24 @@ export class DealabsSessionService {
           return;
         }
         await page.waitForTimeout(POLL_MS);
+        // The robot check has no login button either: it is not "logged
+        // in" — the window stays open until someone has ticked it, and a
+        // click on the check's « Cloudflare » link comes back to it (the
+        // « Se connecter avec » providers are left alone).
+        if (/(^|\.)cloudflare\.com$/.test(hostOf(page.url()))) {
+          await page
+            .goto("https://www.dealabs.com/", {
+              waitUntil: "domcontentloaded",
+              timeout: 30_000,
+            })
+            .catch(() => undefined);
+          loggedInChecks = 0;
+          continue;
+        }
+        if (await isDealabsRobotCheck(page).catch(() => true)) {
+          loggedInChecks = 0;
+          continue;
+        }
         const loggedOut = await isDealabsLoggedOut(page).catch(() => true);
         const ready = await page
           .evaluate(() => document.readyState === "complete")

@@ -448,10 +448,7 @@ export class DealabsPublisherService {
     page: import("playwright").Page,
     resume?: PublishStepId,
   ): Promise<boolean> {
-    const isChallenge = async () =>
-      (await page
-        .getByText(/vérification que vous n'êtes pas un robot/i)
-        .count()) > 0;
+    const isChallenge = () => isDealabsRobotCheck(page);
 
     if (!(await isChallenge())) {
       return false;
@@ -1257,6 +1254,17 @@ export class DealabsPublisherService {
 }
 
 /** Dealabs shows "Connexion ou inscription" only to logged-out visitors. */
+/** Dealabs' robot check (Cloudflare checkbox) is what the page shows. */
+export async function isDealabsRobotCheck(
+  page: import("playwright").Page,
+): Promise<boolean> {
+  return (
+    (await page
+      .getByText(/vérification que vous n'êtes pas un robot/i)
+      .count()) > 0
+  );
+}
+
 export async function isDealabsLoggedOut(
   page: import("playwright").Page,
 ): Promise<boolean> {
