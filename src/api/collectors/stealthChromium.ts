@@ -1,5 +1,3 @@
-import { connect } from "node:net";
-
 type LaunchOptions = NonNullable<
   Parameters<import("playwright").BrowserType["launch"]>[0]
 >;
@@ -56,10 +54,21 @@ export function dealabsProxyFromEnv(): ProxyOption | undefined {
   );
 }
 
-/** Launch options plus the optional proxy from the environment. */
+/**
+ * Proxy for reads of hand-added links (`LINKS_PROXY_URL`, else
+ * `BROWSER_PROXY_URL`), so those pages are fetched from the owner's own
+ * connection while the scheduled collection keeps the server's.
+ */
+export function linksProxyFromEnv(): ProxyOption | undefined {
+  return (
+    browserProxyFromEnv(process.env.LINKS_PROXY_URL) ?? browserProxyFromEnv()
+  );
+}
+
+/** Launch options plus the given proxy, if any. */
 export function withProxy(
-  options: LaunchOptions = {},
-  proxy = browserProxyFromEnv(),
+  options: LaunchOptions,
+  proxy: ProxyOption | undefined,
 ): LaunchOptions {
   return proxy ? { ...options, proxy } : options;
 }
@@ -70,10 +79,11 @@ export function withProxy(
  * Used to go direct (the status quo) instead of failing when the tunnel to
  * the owner's machine is down, e.g. it went to sleep.
  */
-export function proxyReachable(
+export async function proxyReachable(
   proxy: ProxyOption,
   timeoutMs = 2000,
 ): Promise<boolean> {
+  const { connect } = await import("node:net");
   return new Promise((resolve) => {
     let url: URL;
     try {
@@ -103,5 +113,11 @@ export async function reachableDealabsProxy(): Promise<
   ProxyOption | undefined
 > {
   const proxy = dealabsProxyFromEnv();
+  return proxy && (await proxyReachable(proxy)) ? proxy : undefined;
+}
+
+/** The hand-added links proxy when it answers, else none (direct). */
+export async function reachableLinksProxy(): Promise<ProxyOption | undefined> {
+  const proxy = linksProxyFromEnv();
   return proxy && (await proxyReachable(proxy)) ? proxy : undefined;
 }

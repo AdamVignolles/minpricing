@@ -1,6 +1,11 @@
 import { launchWithInstall } from "./browserInstall.ts";
 import type { DiscoverContext, RawDeal } from "./DealSource.ts";
-import { getStealthChromium, withProxy } from "./stealthChromium.ts";
+import {
+  browserProxyFromEnv,
+  getStealthChromium,
+  reachableLinksProxy,
+  withProxy,
+} from "./stealthChromium.ts";
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -84,6 +89,7 @@ export type CloudflareBrowserBinding =
 export async function withBrowser<T>(
   fn: (browser: DealsBrowserHandle) => Promise<T>,
   cloudflareBinding?: CloudflareBrowserBinding,
+  options: { viaLinksProxy?: boolean } = {},
 ): Promise<T> {
   if (cloudflareBinding) {
     const { default: puppeteer } = await import("@cloudflare/puppeteer");
@@ -105,8 +111,11 @@ export async function withBrowser<T>(
   const chromium = await getStealthChromium();
   // Installs a missing Chromium build once instead of failing every run
   // (see browserInstall.ts).
+  const proxy = options.viaLinksProxy
+    ? await reachableLinksProxy()
+    : browserProxyFromEnv();
   const browser = await launchWithInstall(() =>
-    chromium.launch(withProxy({ headless: true })),
+    chromium.launch(withProxy({ headless: true }, proxy)),
   );
   try {
     return await fn({ engine: "playwright", browser });
@@ -437,24 +446,28 @@ export async function readProductPages<T>(
 ): Promise<RawDeal[]> {
   if (products.length === 0) return [];
   let done = 0;
-  return withBrowser(async (browser) => {
-    const found = await mapWithConcurrency(
-      products,
-      options.concurrency,
-      async (product) => {
-        try {
-          return await withPage(browser, (page) => read(page, product));
-        } catch {
-          return undefined;
-        } finally {
-          options.context?.progress?.(
-            "Liens ajoutés (fiches produits)",
-            ++done,
-            products.length,
-          );
-        }
-      },
-    );
-    return found.filter((deal): deal is RawDeal => !!deal);
-  }, options.cloudflareBinding);
+  return withBrowser(
+    async (browser) => {
+      const found = await mapWithConcurrency(
+        products,
+        options.concurrency,
+        async (product) => {
+          try {
+            return await withPage(browser, (page) => read(page, product));
+          } catch {
+            return undefined;
+          } finally {
+            options.context?.progress?.(
+              "Liens ajoutés (fiches produits)",
+              ++done,
+              products.length,
+            );
+          }
+        },
+      );
+      return found.filter((deal): deal is RawDeal => !!deal);
+    },
+    options.cloudflareBinding,
+    { viaLinksProxy: options.context?.viaProxy },
+  );
 }

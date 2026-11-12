@@ -847,15 +847,18 @@ export class CollectionService {
         this.progress.step(source.id, label, done, total);
       const found: RawDeal[] = [];
       if (collector.collect) {
-        found.push(
-          ...(await collector.collect(
-            [
-              ...products,
-              ...links.map((link) => this.watchedLinks.toRef(link)),
-            ],
-            context,
-          )),
-        );
+        // Hand-added links are read through the owner's own connection.
+        if (products.length > 0) {
+          found.push(...(await collector.collect(products, context)));
+        }
+        if (links.length > 0) {
+          found.push(
+            ...(await collector.collect(
+              links.map((link) => this.watchedLinks.toRef(link)),
+              { ...context, viaProxy: true },
+            )),
+          );
+        }
       }
       if (collector.discover) {
         found.push(...(await collector.discover(context)));
@@ -1324,7 +1327,10 @@ export class CollectionService {
       ? { ...sentRaw, productId: link.id }
       : (
           await collector
-            .collect([this.watchedLinks.toRef(link)], context)
+            .collect([this.watchedLinks.toRef(link)], {
+              ...context,
+              viaProxy: true,
+            })
             .catch((error: unknown) => {
               if (
                 error instanceof BrowserUnavailableError ||

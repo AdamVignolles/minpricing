@@ -230,6 +230,8 @@ export interface DiscoverContext {
    * worked around. Says why on a pasted link's verdict.
    */
   blocked?(externalId: string, reason: string): void;
+  /** Read through the hand-added links proxy (`LINKS_PROXY_URL`). */
+  viaProxy?: boolean;
 }
 
 /**
