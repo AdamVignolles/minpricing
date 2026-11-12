@@ -459,8 +459,8 @@ export class DraftsController {
   });
 
   /**
-   * Your input on that window: a click (window pixels), a scroll, some
-   * text, or one key. The text goes straight to the page, never logged.
+   * Your input on that window: a click (window pixels, with the pointer's
+   * trail when the console recorded it), a scroll, some text, or one key. The text goes straight to the page, never logged.
    */
   dealabsScreenInput = $action({
     method: "POST",
@@ -469,6 +469,17 @@ export class DraftsController {
     schema: {
       body: z.object({
         click: z.object({ x: z.number(), y: z.number() }).optional(),
+        // A click with the pointer's real trail before it (« écran distant »).
+        gesture: z
+          .object({
+            trail: z
+              .array(z.object({ x: z.number(), y: z.number(), dt: z.number() }))
+              .max(400),
+            x: z.number(),
+            y: z.number(),
+            hold: z.number(),
+          })
+          .optional(),
         scroll: z.number().optional(),
         text: z.text({ size: "long", trim: false }).optional(),
         key: z.enum(REMOTE_KEYS).optional(),
@@ -478,6 +489,7 @@ export class DraftsController {
     handler: async ({ body }) => {
       try {
         if (body.click) await this.screen.click(body.click.x, body.click.y);
+        if (body.gesture) await this.screen.gesture(body.gesture);
         if (body.scroll) await this.screen.scroll(body.scroll);
         if (body.text) await this.screen.type(body.text);
         if (body.key) await this.screen.press(body.key);

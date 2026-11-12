@@ -71,7 +71,12 @@ const RemoteScreen: FC<{ hint?: string }> = ({ hint }) => {
   }, [drafts]);
 
   const send = async (body: {
-    click?: { x: number; y: number };
+    gesture?: {
+      trail: { x: number; y: number; dt: number }[];
+      x: number;
+      y: number;
+      hold: number;
+    };
     scroll?: number;
     text?: string;
     key?: Key;
@@ -88,13 +93,49 @@ const RemoteScreen: FC<{ hint?: string }> = ({ hint }) => {
     }
   };
 
+  // Your pointer's recent path over the picture and when the button went
+  // down: sent with the click, so the server's window sees the gesture you
+  // made rather than a pointer that jumps onto the target.
+  const trail = useRef<{ x: number; y: number; at: number }[]>([]);
+  const pressedAt = useRef<number | null>(null);
+
+  const toWindow = (event: MouseEvent<HTMLImageElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    return {
+      x: ((event.clientX - box.left) / box.width) * (screen?.width ?? 0),
+      y: ((event.clientY - box.top) / box.height) * (screen?.height ?? 0),
+    };
+  };
+
+  const onMove = (event: MouseEvent<HTMLImageElement>) => {
+    const now = performance.now();
+    trail.current.push({ ...toWindow(event), at: now });
+    // Three seconds of path is plenty.
+    while (trail.current.length > 1 && now - trail.current[0].at > 3_000) {
+      trail.current.shift();
+    }
+  };
+
+  const onDown = () => {
+    pressedAt.current = performance.now();
+  };
+
   const onClick = (event: MouseEvent<HTMLImageElement>) => {
     if (!screen) return;
-    const box = event.currentTarget.getBoundingClientRect();
+    const now = performance.now();
+    const points = trail.current;
+    trail.current = [];
+    const hold = pressedAt.current === null ? 0 : now - pressedAt.current;
+    pressedAt.current = null;
     void send({
-      click: {
-        x: ((event.clientX - box.left) / box.width) * screen.width,
-        y: ((event.clientY - box.top) / box.height) * screen.height,
+      gesture: {
+        trail: points.map((point, index) => ({
+          x: point.x,
+          y: point.y,
+          dt: index === 0 ? 0 : point.at - points[index - 1].at,
+        })),
+        ...toWindow(event),
+        hold,
       },
     });
   };
@@ -150,6 +191,8 @@ const RemoteScreen: FC<{ hint?: string }> = ({ hint }) => {
               src={screen.image}
               alt="Fenêtre Dealabs du serveur"
               onClick={onClick}
+              onMouseMove={onMove}
+              onMouseDown={onDown}
               onWheel={onWheel}
               draggable={false}
               style={{ width: "100%", height: "100%", display: "block" }}

@@ -177,6 +177,23 @@ export class RemoteScreenService {
     );
   }
 
+  /**
+   * Replays the gesture you really made on the picture: where your pointer
+   * went before the click, at your pace, and how long you held the button.
+   * Nothing is invented — with no trail it is a plain click. A page (and
+   * Dealabs' robot check) then sees the pointer of the person who is there,
+   * not one that jumps onto the target.
+   */
+  async gesture(gesture: PointerGesture): Promise<void> {
+    const page = this.requirePage();
+    for (const step of replayPlan(gesture)) {
+      if (step.wait) await page.waitForTimeout(step.wait);
+      if (step.kind === "move") await page.mouse.move(step.x, step.y);
+      else if (step.kind === "down") await page.mouse.down();
+      else await page.mouse.up();
+    }
+  }
+
   async scroll(deltaY: number): Promise<void> {
     await this.requirePage().mouse.wheel(0, clamp(deltaY, -2000, 2000));
   }
@@ -203,6 +220,60 @@ export class RemoteScreenService {
     }
     return page;
   }
+}
+
+/** A click as it was made: the pointer's trail (window pixels), then the press. */
+export interface PointerGesture {
+  /** Pointer positions before the click, `dt` ms after the previous one. */
+  trail: { x: number; y: number; dt: number }[];
+  /** Where the button went down. */
+  x: number;
+  y: number;
+  /** How long the button was held, ms. */
+  hold: number;
+}
+
+export type ReplayStep =
+  | { kind: "move"; x: number; y: number; wait: number }
+  | { kind: "down" | "up"; wait: number };
+
+/** A gesture never takes longer than this to replay. */
+const MAX_TRAIL_MS = 3_000;
+const MAX_TRAIL_POINTS = 120;
+
+/**
+ * The steps to replay a recorded gesture: its last points (3 s, 120 points
+ * at most), timings as recorded, coordinates kept inside the window.
+ */
+export function replayPlan(gesture: PointerGesture): ReplayStep[] {
+  const steps: ReplayStep[] = [];
+  const trail = gesture.trail.slice(-MAX_TRAIL_POINTS);
+  let budget = MAX_TRAIL_MS;
+  const kept: typeof trail = [];
+  for (const point of trail.toReversed()) {
+    const dt = clamp(point.dt, 0, 500);
+    if (budget - dt < 0) break;
+    budget -= dt;
+    kept.unshift({ ...point, dt });
+  }
+  kept.forEach((point, index) => {
+    steps.push({
+      kind: "move",
+      x: clamp(point.x, 0, SCREEN_VIEWPORT.width - 1),
+      y: clamp(point.y, 0, SCREEN_VIEWPORT.height - 1),
+      // The first point only places the pointer.
+      wait: index === 0 ? 0 : point.dt,
+    });
+  });
+  steps.push({
+    kind: "move",
+    x: clamp(gesture.x, 0, SCREEN_VIEWPORT.width - 1),
+    y: clamp(gesture.y, 0, SCREEN_VIEWPORT.height - 1),
+    wait: 0,
+  });
+  steps.push({ kind: "down", wait: 0 });
+  steps.push({ kind: "up", wait: clamp(gesture.hold, 0, 1_500) });
+  return steps;
 }
 
 export const REMOTE_KEYS = [
