@@ -1,3 +1,5 @@
+import { connect } from "node:net";
+
 type LaunchOptions = NonNullable<
   Parameters<import("playwright").BrowserType["launch"]>[0]
 >;
@@ -60,4 +62,46 @@ export function withProxy(
   proxy = browserProxyFromEnv(),
 ): LaunchOptions {
   return proxy ? { ...options, proxy } : options;
+}
+
+/**
+ * Whether the proxy answers. A SOCKS proxy must complete its greeting: a
+ * relay in front of a closed SSH tunnel accepts the connection and drops it.
+ * Used to go direct (the status quo) instead of failing when the tunnel to
+ * the owner's machine is down, e.g. it went to sleep.
+ */
+export function proxyReachable(
+  proxy: ProxyOption,
+  timeoutMs = 2000,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    let url: URL;
+    try {
+      url = new URL(proxy.server);
+    } catch {
+      return resolve(false);
+    }
+    const socks = url.protocol.startsWith("socks");
+    const socket = connect({ host: url.hostname, port: Number(url.port) });
+    const done = (ok: boolean) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(timeoutMs, () => done(false));
+    socket.once("error", () => done(false));
+    socket.once("connect", () => {
+      if (socks) socket.write(Buffer.from([5, 1, 0]));
+      else done(true);
+    });
+    socket.once("data", (data) => done(data[0] === 5 && data[1] === 0));
+    socket.once("close", () => done(false));
+  });
+}
+
+/** The Dealabs proxy when it answers, else none (direct connection). */
+export async function reachableDealabsProxy(): Promise<
+  ProxyOption | undefined
+> {
+  const proxy = dealabsProxyFromEnv();
+  return proxy && (await proxyReachable(proxy)) ? proxy : undefined;
 }

@@ -6,8 +6,8 @@ import { $logger } from "alepha/logger";
 
 import { launchWithInstall } from "../collectors/browserInstall.ts";
 import {
-  dealabsProxyFromEnv,
   getStealthChromium,
+  reachableDealabsProxy,
   withProxy,
 } from "../collectors/stealthChromium.ts";
 
@@ -62,6 +62,7 @@ export function browserHome(env: NodeJS.ProcessEnv = process.env): string {
 export async function launchVisibleBrowser(): Promise<Browser> {
   const chromium = await getStealthChromium();
   const home = browserHome();
+  const proxy = await reachableDealabsProxy();
   return launchWithInstall(() =>
     chromium.launch(
       withProxy(
@@ -86,7 +87,7 @@ export async function launchVisibleBrowser(): Promise<Browser> {
             "--disable-breakpad",
           ],
         },
-        dealabsProxyFromEnv(),
+        proxy,
       ),
     ),
   );

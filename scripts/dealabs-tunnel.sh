@@ -9,9 +9,18 @@
 # (dealabs-socks-relay) exposes it to the app's container at
 # 172.17.0.1:1080, which is DEALABS_PROXY_URL=socks5://172.17.0.1:1080.
 # Only the Dealabs window uses it; collectors keep the VPS connection.
-# Tunnel down = Dealabs window can't load (publishing waits); stop it
-# and unset DEALABS_PROXY_URL to go back to the direct connection.
+# Tunnel down (e.g. this machine slept): the app notices (SOCKS greeting
+# check) and the Dealabs window goes out directly, as before. Unset
+# DEALABS_PROXY_URL (`bay env`) to stop using it altogether.
+#
+# While it runs, the machine is kept from suspending, lid closed included
+# (systemd-inhibit), otherwise the tunnel would die with it.
 set -euo pipefail
+if [ -z "${DEALABS_TUNNEL_INHIBITED:-}" ] && command -v systemd-inhibit >/dev/null; then
+  export DEALABS_TUNNEL_INHIBITED=1
+  exec systemd-inhibit --what=sleep:handle-lid-switch --who=dealabs-tunnel \
+    --why="SSH tunnel for the DealRadar Dealabs browser" bash "$0" "$@"
+fi
 HOST="${DEALRADAR_VPS_HOST:-ovh-adam}"
 while true; do
   ssh -N -R 127.0.0.1:1080 \
