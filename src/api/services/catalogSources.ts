@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import shipped from "../../../config/watch-sources.json" with { type: "json" };
 import { appDir } from "./appDir.ts";
 
 /**
@@ -97,36 +98,34 @@ export function sourceProblem(source: CatalogSource): string | undefined {
 }
 
 /**
- * Usable sources of the file; a bad entry is left out, never fatal. Like
- * the agents' configs, the file under `appDir()` (Bay's persistent
- * folder, where an edit survives a deploy) wins; without one, the copy
- * shipped with the release is read.
+ * Usable sources of the file; a bad entry is left out, never fatal. The
+ * file under `appDir()` (Bay's persistent folder, where an edit survives
+ * a deploy) wins; without one, the copy compiled into the release.
  */
 export function loadCatalogConfig(file?: string): CatalogConfig {
-  const candidates = file
-    ? [file]
-    : [
-        join(appDir(), "config", "watch-sources.json"),
-        join(process.cwd(), "config", "watch-sources.json"),
-      ];
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) continue;
+  const usable = (raw: CatalogConfig): CatalogConfig => {
+    const seen = new Set<string>();
+    const sources = (Array.isArray(raw.sources) ? raw.sources : []).filter(
+      (source) => {
+        if (sourceProblem(source) || seen.has(source.id)) return false;
+        seen.add(source.id);
+        return true;
+      },
+    );
+    return { activeHours: raw.activeHours, sources };
+  };
+  const path = file ?? join(appDir(), "config", "watch-sources.json");
+  if (existsSync(path)) {
     try {
-      const raw = JSON.parse(readFileSync(candidate, "utf8")) as CatalogConfig;
-      const seen = new Set<string>();
-      const sources = (Array.isArray(raw.sources) ? raw.sources : []).filter(
-        (source) => {
-          if (sourceProblem(source) || seen.has(source.id)) return false;
-          seen.add(source.id);
-          return true;
-        },
-      );
-      return { activeHours: raw.activeHours, sources };
+      return usable(JSON.parse(readFileSync(path, "utf8")) as CatalogConfig);
     } catch {
-      // Unreadable: try the next one.
+      return { sources: [] };
     }
   }
-  return { sources: [] };
+  // An explicit file that is missing is empty; the default location
+  // falls back to the copy compiled into the release (a Bay release
+  // doesn't carry `config/` next to it).
+  return file ? { sources: [] } : usable(shipped as CatalogConfig);
 }
 
 export const perRunOf = (source: CatalogSource) =>
