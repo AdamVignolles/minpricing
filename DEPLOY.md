@@ -163,22 +163,101 @@ the (non-existent-on-Workers) `playwright` path forever.
 
 # Deploying to the OVH VPS (Bay)
 
-**Everything in one command**, from the project on your machine:
+## Everything in one command
+
+From the project, on your machine:
 
 ```bash
-npm run deploy:vps                      # check the VPS, verify, deploy, check again
-npm run deploy:vps -- --check           # only the checks, nothing deployed
+npm run deploy:vps                      # check, image, verify, deploy, check again
+npm run deploy:vps -- --check           # only the checks, nothing changed
 npm run deploy:vps -- --skip-verify     # without lint/types/tests
+npm run deploy:vps -- --image           # rebuild the runtime image even if current
 npm run deploy:vps -- --setup you@mail  # also installs Bay on a fresh VPS
 ```
 
-`scripts/deploy-vps.sh` works over SSH (alias `ovh-adam`, `--host` to
-change): Bay running, the runtime image set, memory raised; `npm run verify`;
-`npx lore deploy`; then the release answers, the virtual display is up,
-Chromium starts headless and visible, the Dealabs session is there, and how
-Dealabs answers the server's address (information: its robot check is never
-worked around). It reads no secret. The sections below are what it runs,
-step by step.
+`scripts/deploy-vps.sh` does everything over SSH and stops at the first
+failure; each line it prints is `ok`, `warn` (deploy went on) or `fail`.
+
+**What it needs**
+
+|           |                                                                                                                               |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| SSH alias | `ovh-adam` in `~/.ssh/config` (`--host` or `DEALRADAR_VPS_HOST` for another), a user with passwordless `sudo`                 |
+| Lore      | `npx lore login` done once on this machine (it holds the app's secrets)                                                       |
+| Registry  | the VPS's root logged in to `ghcr.io` — or, once, `GHCR_TOKEN=<GitHub token with write:packages> npm run deploy:vps`          |
+| Options   | `--env` (default `production`), `--owner` (ghcr.io namespace, default: the image already set, else the GitHub remote's owner) |
+
+**What it does, in order**
+
+1. **This machine** — SSH answers; prints the branch and commit about to be
+   deployed; warns about uncommitted changes (they are part of the build).
+2. **Bay** — `bay` installed and its service active. If not: with
+   `--setup <e-mail>` it runs `scripts/setup-ovh-vps.sh` on the VPS (Bay and
+   Docker, the systemd unit with `<IP>.sslip.io`, ports 80/443, the deploy
+   group); without it, it stops and says so.
+3. **Runtime image** — Bay runs the app in a bare `node:<major>-slim`, with
+   no `playwright` module, no Chromium and no display. `docker/runtime/` adds
+   exactly that. The script:
+   - computes what the image must be: a hash of `Dockerfile` +
+     `entrypoint.sh` + Playwright's pin in `package.json` + this machine's
+     Node major (the one the build records in `manifest.json`);
+   - reads the label `dealradar.runtime.hash` of the image set on the app;
+     same hash → nothing to do. Different, missing or `--image` → rebuild;
+   - checks the `ghcr.io` login first (no point building 1.8 GB that can't
+     be pushed);
+   - sends `docker/runtime/` to the VPS and builds there:
+     `docker build --build-arg NODE_MAJOR=… --build-arg PLAYWRIGHT_VERSION=…
+--label dealradar.runtime.hash=… -t ghcr.io/<owner>/dealradar-runtime:node<major>-pw<version>-<hash>`;
+   - **tries it as Bay will run it** (uid 20000, read-only root, `/tmp` as
+     tmpfs): Chromium must start headless and visible. If not, nothing is
+     pushed and the app keeps its current image;
+   - pushes it, reads its digest, checks ghcr.io serves it without
+     credentials (Bay pulls anonymously — warns if the package is private);
+   - `bay runtimes set minpricing/production <image>@sha256:…` (used from
+     the app's next start, i.e. the deploy below);
+   - `bay harden … --memory 2g --pids 2048` if the app still has Bay's
+     512 MiB default — too little for the app plus Chromium.
+     On a VPS where the app doesn't exist yet, this step runs right after the
+     deploy that creates it, and the app is restarted on the image.
+4. **Verify** — `npm run verify` (lint, types, tests, migration check,
+   build). A failure stops here: nothing is deployed. Log in
+   `/tmp/dealradar-verify.log`.
+5. **Deploy** — `npx lore deploy -p minpricing -e production`: builds,
+   packs, uploads, Bay swaps the release in (migrations run at start). The
+   app's secrets stay in Lore; the script never reads them.
+6. **After** — the site answers 200 (up to a minute); the release name; the
+   container runs the image set on it, with the Node major and Playwright
+   version the build wants; the virtual display socket exists; Chromium
+   starts headless and visible inside the running container; the Dealabs
+   session file is there and from when.
+7. **Dealabs, from this server** — one plain request to Dealabs from the
+   VPS: 200, or 403 when Dealabs answers the server's address with its robot
+   check. Information only: the check is passed by a person in the « écran
+   distant », never worked around (CLAUDE.md, « Robot check »).
+
+**What the image contains** (`docker/runtime/Dockerfile`)
+
+- `node:<major>-bookworm-slim`, the major the build targets.
+- `playwright` + `playwright-core` at the pinned version in `/opt/playwright`,
+  linked as `/node_modules` so the app in `/app` resolves it with no
+  `NODE_PATH`.
+- Chromium and the headless shell in `/ms-playwright`, with their system
+  libraries (`playwright install --with-deps`), readable by any user.
+- `xvfb`, `xauth`, Liberation and Noto emoji fonts, `tini`.
+- Environment: `PLAYWRIGHT_BROWSERS_PATH` and `DEALRADAR_BROWSERS_PATH`
+  `=/ms-playwright`, `DEALRADAR_BROWSERS_PREINSTALLED=1` (the app only checks
+  the browsers: on Bay's read-only root Playwright's own installer hangs),
+  `DISPLAY=:99`.
+- Entrypoint: `tini -s` (subreaper, Bay's init is PID 1) → `entrypoint.sh`
+  starts `Xvfb :99 -screen 0 1280x800x24` when no display socket exists,
+  then runs the app. A display that fails to start never stops the app.
+
+**Going back**: `ssh ovh-adam sudo bay runtimes set minpricing/production
+<previous digest>` then `sudo bay stop … && sudo bay start …`; the previous
+images stay on the VPS (`sudo docker images --digests`). A release:
+`bay rollback` (Bay keeps the last two).
+
+The sections below are the same steps by hand.
 
 Environment `ovh` in `alepha.config.ts`. Bay (Alepha's self-hosted app
 server: reverse proxy, TLS, releases, rollback) runs on the VPS; deploys go

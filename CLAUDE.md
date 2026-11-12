@@ -29,7 +29,7 @@ npm run verify       # clean + lint + typecheck + test + migration check + build
 npm run test -- test/admin-auth.spec.ts   # single spec
 npm run test -- -t "test name"            # single case
 npm run deploy:cloudflare                 # build → patch browser binding → D1 migrate → deploy
-npm run deploy:vps                        # OVH VPS in one go: checks, verify, lore deploy, checks (scripts/deploy-vps.sh)
+npm run deploy:vps                        # OVH VPS in one go: runtime image (built/pushed/set when out of date), verify, lore deploy, checks — scripts/deploy-vps.sh, DEPLOY.md
 npm run deploy:ovh                        # build → Bay on the OVH VPS (setup: scripts/setup-ovh-vps.sh, DEPLOY.md)
 ```
 

@@ -170,7 +170,7 @@ ensure_image() {
 
   # Bay pulls without credentials: the package must be public.
   local token code
-  token="$(curl -fsS -m 15 "https://ghcr.io/token?scope=repository:${OWNER}/dealradar-runtime:pull" | sed -E 's/.*"token":"([^"]+)".*/\1/' || true)"
+  token="$(curl -s -m 15 "https://ghcr.io/token?service=ghcr.io&scope=repository:${OWNER}/dealradar-runtime:pull" | sed -E 's/.*"token":"([^"]+)".*/\1/' || true)"
   code="$(curl -s -o /dev/null -m 15 -w '%{http_code}' -H "Authorization: Bearer $token" \
     -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' \
     "https://ghcr.io/v2/${OWNER}/dealradar-runtime/manifests/${digest##*@}" || true)"
