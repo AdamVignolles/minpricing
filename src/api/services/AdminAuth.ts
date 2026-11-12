@@ -172,3 +172,43 @@ export function $agentAuth(): Middleware {
     },
   });
 }
+
+/**
+ * `FEED_TOKEN`: the bearer token of an outside application reading the
+ * collected offers (`/feed/*`, the watch site). Read-only and limited to
+ * those routes: it opens nothing of the console, unlike `AGENT_TOKEN`.
+ * Unset or shorter than 32 characters = feed closed.
+ */
+export function $feedTokenEnv() {
+  return $env(
+    z.object({
+      FEED_TOKEN: z.text({ default: "" }),
+    }),
+  );
+}
+
+/** Gate of `/feed/*`: the feed token, or the admin session. */
+export function $feedAuth(): Middleware {
+  const session = $adminSessionCookie();
+  const alepha = $inject(Alepha);
+  const env = $feedTokenEnv();
+
+  return createMiddleware({
+    name: "$feedAuth",
+    handler: ({ next }) => {
+      return async (...args: unknown[]) => {
+        const request = alepha.store.get("alepha.http.request");
+        const allowed =
+          request?.method === "GET" &&
+          hasAgentToken(request?.headers?.authorization, env.FEED_TOKEN);
+        if (!allowed && !session.get()) {
+          throw new HttpError({
+            status: 401,
+            message: "Feed token required",
+          });
+        }
+        return next(...args);
+      };
+    },
+  });
+}

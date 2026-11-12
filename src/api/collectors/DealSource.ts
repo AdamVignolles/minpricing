@@ -184,6 +184,8 @@ export interface StoredFacts {
   colors?: string[];
   /** Mobile plans and boxes: commitment, price after the promo… */
   planTerms?: string[];
+  /** Watch shops: the product page was read for its EAN (found or not). */
+  eanChecked?: boolean;
 }
 
 /**
