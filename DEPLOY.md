@@ -163,6 +163,23 @@ the (non-existent-on-Workers) `playwright` path forever.
 
 # Deploying to the OVH VPS (Bay)
 
+**Everything in one command**, from the project on your machine:
+
+```bash
+npm run deploy:vps                      # check the VPS, verify, deploy, check again
+npm run deploy:vps -- --check           # only the checks, nothing deployed
+npm run deploy:vps -- --skip-verify     # without lint/types/tests
+npm run deploy:vps -- --setup you@mail  # also installs Bay on a fresh VPS
+```
+
+`scripts/deploy-vps.sh` works over SSH (alias `ovh-adam`, `--host` to
+change): Bay running, the runtime image set, memory raised; `npm run verify`;
+`npx lore deploy`; then the release answers, the virtual display is up,
+Chromium starts headless and visible, the Dealabs session is there, and how
+Dealabs answers the server's address (information: its robot check is never
+worked around). It reads no secret. The sections below are what it runs,
+step by step.
+
 Environment `ovh` in `alepha.config.ts`. Bay (Alepha's self-hosted app
 server: reverse proxy, TLS, releases, rollback) runs on the VPS; deploys go
 over SSH. Reference: https://alepha.dev/bay/docs/guides-installation.md
