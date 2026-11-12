@@ -1,0 +1,37 @@
+{
+  "$comment": "Shops whose whole catalogue is read by CatalogService (rows in catalog_offers, served by /feed/catalog — never in deals). One entry per shop, no code. A source is read only when `verified` (its probe passed: POST /admin/catalog/<id>/probe) AND `enabled`. `include`/`exclude` are regexes on the sitemap's URLs, `titleMustMatch`/`titleExclude` on the product's name. `perRun` pages per pass (max 400), `pauseSeconds` between requests (min 1), `everyHours` before a page is read again. Passes run at `activeHours` (Paris), when the radar is quiet.",
+  "activeHours": [0, 1, 2, 3, 4, 5, 6],
+  "sources": [
+    {
+      "id": "ocarat-catalogue",
+      "name": "Ocarat (catalogue montres)",
+      "reader": "sitemap-jsonld",
+      "origin": "https://ocarat.com",
+      "sitemaps": ["https://ocarat.com/sitemap_fr.xml"],
+      "include": "/montre-[^/]+-\\d+\\.html$",
+      "titleMustMatch": "^montre",
+      "titleExclude": "bracelet de montre|coffret|écrin|remontoir",
+      "perRun": 400,
+      "pauseSeconds": 1.5,
+      "everyHours": 24,
+      "verified": true,
+      "enabled": true,
+      "note": "Sonde du 12/11/2026 : 5 fiches sur 5 avec produit, prix et EAN. 8 501 fiches montres : à 400 pages par passage et 7 passages par nuit, premier tour en 3 à 4 nuits."
+    },
+    {
+      "id": "bijourama",
+      "name": "Bijourama (catalogue montres)",
+      "reader": "sitemap-jsonld",
+      "origin": "https://www.bijourama.com",
+      "include": "/p-montre-",
+      "titleMustMatch": "montre",
+      "titleExclude": "bracelet de montre|coffret|écrin",
+      "perRun": 150,
+      "pauseSeconds": 1.5,
+      "everyHours": 24,
+      "verified": true,
+      "enabled": false,
+      "note": "Sonde du 12/11/2026 : 5 fiches sur 5 avec produit, prix et EAN. 169 fiches. Laissée éteinte tant que la charge d'Ocarat n'est pas mesurée sur le VPS."
+    }
+  ]
+}
