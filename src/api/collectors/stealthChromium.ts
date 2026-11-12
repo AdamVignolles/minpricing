@@ -43,8 +43,21 @@ export function getStealthChromium(): Promise<
   return stealthChromium;
 }
 
+/**
+ * Proxy of the Dealabs window only (`DEALABS_PROXY_URL`, else
+ * `BROWSER_PROXY_URL`): lets Dealabs see another address than the server's
+ * while the shop collectors keep their direct connection.
+ */
+export function dealabsProxyFromEnv(): ProxyOption | undefined {
+  return (
+    browserProxyFromEnv(process.env.DEALABS_PROXY_URL) ?? browserProxyFromEnv()
+  );
+}
+
 /** Launch options plus the optional proxy from the environment. */
-export function withProxy(options: LaunchOptions = {}): LaunchOptions {
-  const proxy = browserProxyFromEnv();
+export function withProxy(
+  options: LaunchOptions = {},
+  proxy = browserProxyFromEnv(),
+): LaunchOptions {
   return proxy ? { ...options, proxy } : options;
 }

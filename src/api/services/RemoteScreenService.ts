@@ -6,6 +6,7 @@ import { $logger } from "alepha/logger";
 
 import { launchWithInstall } from "../collectors/browserInstall.ts";
 import {
+  dealabsProxyFromEnv,
   getStealthChromium,
   withProxy,
 } from "../collectors/stealthChromium.ts";
@@ -63,27 +64,30 @@ export async function launchVisibleBrowser(): Promise<Browser> {
   const home = browserHome();
   return launchWithInstall(() =>
     chromium.launch(
-      withProxy({
-        // No display (no Xvfb on the server): a visible Chrome can't start,
-        // so publish headless with the saved session; the robot check and
-        // the login then stop with their « pas d'écran » message.
-        headless: !isAttended(),
-        env: {
-          ...process.env,
-          HOME: home,
-          XDG_CONFIG_HOME: join(home, ".config"),
-          XDG_CACHE_HOME: join(home, ".cache"),
+      withProxy(
+        {
+          // No display (no Xvfb on the server): a visible Chrome can't start,
+          // so publish headless with the saved session; the robot check and
+          // the login then stop with their « pas d'écran » message.
+          headless: !isAttended(),
+          env: {
+            ...process.env,
+            HOME: home,
+            XDG_CONFIG_HOME: join(home, ".config"),
+            XDG_CACHE_HOME: join(home, ".cache"),
+          },
+          // Keep cross-site frames in the page's process: the Bay app's task and
+          // memory caps on the VM can't afford one ~100 MB renderer per frame.
+          args: [
+            "--renderer-process-limit=2",
+            "--disable-site-isolation-trials",
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--disable-crash-reporter",
+            "--disable-breakpad",
+          ],
         },
-        // Keep cross-site frames in the page's process: the Bay app's task and
-        // memory caps on the VM can't afford one ~100 MB renderer per frame.
-        args: [
-          "--renderer-process-limit=2",
-          "--disable-site-isolation-trials",
-          "--disable-features=IsolateOrigins,site-per-process",
-          "--disable-crash-reporter",
-          "--disable-breakpad",
-        ],
-      }),
+        dealabsProxyFromEnv(),
+      ),
     ),
   );
 }
