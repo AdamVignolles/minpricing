@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { $logger } from "alepha/logger";
 
 import { launchWithInstall } from "../collectors/browserInstall.ts";
+import {
+  getStealthChromium,
+  withProxy,
+} from "../collectors/stealthChromium.ts";
 
 type Page = import("playwright").Page;
 type Browser = import("playwright").Browser;
@@ -29,24 +33,26 @@ export interface RemoteScreenSnapshot {
  * doesn't have — without one it dies on launch.
  */
 export async function launchVisibleBrowser(): Promise<Browser> {
-  const { chromium } = await import("playwright");
+  const chromium = await getStealthChromium();
   const home =
     process.env.HOME && existsSync(process.env.HOME)
       ? process.env.HOME
       : join(tmpdir(), "dealradar-browser-home");
   mkdirSync(home, { recursive: true });
   return launchWithInstall(() =>
-    chromium.launch({
-      headless: false,
-      env: { ...process.env, HOME: home },
-      // Keep cross-site frames in the page's process: the Bay app's task and
-      // memory caps on the VM can't afford one ~100 MB renderer per frame.
-      args: [
-        "--renderer-process-limit=2",
-        "--disable-site-isolation-trials",
-        "--disable-features=IsolateOrigins,site-per-process",
-      ],
-    }),
+    chromium.launch(
+      withProxy({
+        headless: false,
+        env: { ...process.env, HOME: home },
+        // Keep cross-site frames in the page's process: the Bay app's task and
+        // memory caps on the VM can't afford one ~100 MB renderer per frame.
+        args: [
+          "--renderer-process-limit=2",
+          "--disable-site-isolation-trials",
+          "--disable-features=IsolateOrigins,site-per-process",
+        ],
+      }),
+    ),
   );
 }
 
