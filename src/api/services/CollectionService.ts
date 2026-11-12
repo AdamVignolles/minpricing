@@ -8,6 +8,7 @@ import { $repository } from "alepha/orm";
 
 import { AliExpressCollector } from "../collectors/AliExpressCollector.ts";
 import { AmazonCollector } from "../collectors/AmazonCollector.ts";
+import { isAmazonRobotCheck } from "../collectors/amazonProductHtml.ts";
 import { AmazonWatchCollector } from "../collectors/AmazonWatchCollector.ts";
 import {
   type CloudflareBrowserBinding,
@@ -95,6 +96,12 @@ import { readSentPage } from "./pageRead.ts";
 import { PriceSeriesService } from "./PriceSeriesService.ts";
 import { PricingService } from "./PricingService.ts";
 import { qualityIssue } from "./qualityGate.ts";
+import {
+  RemoteScreenService,
+  SCREEN_VIEWPORT,
+  isAttended,
+  launchVisibleBrowser,
+} from "./RemoteScreenService.ts";
 import { sameListingKey } from "./sameListing.ts";
 import {
   MIN_VISIBLE_SCORE,
@@ -221,6 +228,7 @@ export class CollectionService {
   protected progress = $inject(CollectionProgressService);
   protected autoPublish = $inject(AutoPublishService);
   protected watchedLinks = $inject(WatchedLinkService);
+  protected screen = $inject(RemoteScreenService);
   protected watchStatus = $inject(WatchStatusService);
 
   /**
@@ -1266,6 +1274,49 @@ export class CollectionService {
     return { ok: true, link: await run };
   }
 
+  /**
+   * The product page in a visible window (shown by `RemoteScreen`) when the
+   * automatic read met Amazon's robot check: the owner ticks the check
+   * themselves, then the page is read with the same parser. Gives up after
+   * 5 minutes, or when there is no screen to show it on.
+   */
+  protected async readInVisibleWindow(link: {
+    externalId: string;
+    url?: string | null;
+    sourceId: string;
+  }): Promise<RawDeal | undefined> {
+    if (this.alepha.isTest() || !isAttended()) return undefined;
+    const url = `https://www.amazon.fr/dp/${link.externalId}`;
+    let browser: Awaited<ReturnType<typeof launchVisibleBrowser>> | undefined;
+    try {
+      browser = await launchVisibleBrowser("links");
+      const context = await browser.newContext({
+        locale: "fr-FR",
+        viewport: SCREEN_VIEWPORT,
+      });
+      const page = await context.newPage();
+      this.screen.attach(page, "Amazon.fr : vérification anti-robot");
+      await page
+        .goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 })
+        .catch(() => undefined);
+      const deadline = Date.now() + 5 * 60_000;
+      while (Date.now() < deadline && !page.isClosed()) {
+        const html = await page.content().catch(() => "");
+        if (html && !isAmazonRobotCheck(html)) {
+          const read = readSentPage(link, url, html);
+          if (read.ok) return read.raw;
+        }
+        await page.waitForTimeout(2_000).catch(() => undefined);
+      }
+      return undefined;
+    } catch (error) {
+      this.log.warn("Visible read failed", { error });
+      return undefined;
+    } finally {
+      await browser?.close().catch(() => undefined);
+    }
+  }
+
   protected async runLinkCheck(
     link: WatchedLink,
     /** Read by the owner's browser (« Lire dans DealRadar »). */
@@ -1323,7 +1374,7 @@ export class CollectionService {
     const context = await this.discoverContext(source.id, undefined, blocked);
     // A browser that can't start is not the page's fault: say so.
     let browserDown: string | undefined;
-    const raw = sentRaw
+    let raw = sentRaw
       ? { ...sentRaw, productId: link.id }
       : (
           await collector
@@ -1344,9 +1395,29 @@ export class CollectionService {
               return [] as RawDeal[];
             })
         ).find((deal) => deal.externalId === link.externalId);
-    const byBrowser = sentRaw
-      ? `Lu depuis votre navigateur le ${parisDateTime(this.dateTime.nowISOString())}. `
-      : "";
+    // Robot check on Amazon: show the window in the console so the owner
+    // ticks it themselves (nothing is solved or bypassed by the server).
+    let byWindow = false;
+    if (
+      !raw &&
+      !sentRaw &&
+      !browserDown &&
+      link.sourceId === "amazon" &&
+      blocked.has(link.externalId)
+    ) {
+      await set(
+        "page",
+        "running",
+        "Vérification anti-robot : ouvrez l'écran distant en haut de « Mes ajouts » et validez-la.",
+      );
+      raw = await this.readInVisibleWindow(link);
+      byWindow = !!raw;
+    }
+    const byBrowser = byWindow
+      ? "Lu dans la fenêtre ouverte après votre validation. "
+      : sentRaw
+        ? `Lu depuis votre navigateur le ${parisDateTime(this.dateTime.nowISOString())}. `
+        : "";
     let outcome: UpsertOutcome;
     let listedAt: string | undefined;
     if (raw) {

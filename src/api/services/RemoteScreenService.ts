@@ -8,6 +8,7 @@ import { launchWithInstall } from "../collectors/browserInstall.ts";
 import {
   getStealthChromium,
   reachableDealabsProxy,
+  reachableLinksProxy,
   withProxy,
 } from "../collectors/stealthChromium.ts";
 
@@ -59,10 +60,15 @@ export function browserHome(env: NodeJS.ProcessEnv = process.env): string {
   return home;
 }
 
-export async function launchVisibleBrowser(): Promise<Browser> {
+export async function launchVisibleBrowser(
+  via: "dealabs" | "links" = "dealabs",
+): Promise<Browser> {
   const chromium = await getStealthChromium();
   const home = browserHome();
-  const proxy = await reachableDealabsProxy();
+  const proxy =
+    via === "links"
+      ? await reachableLinksProxy()
+      : await reachableDealabsProxy();
   return launchWithInstall(() =>
     chromium.launch(
       withProxy(

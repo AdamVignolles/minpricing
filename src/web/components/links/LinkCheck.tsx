@@ -17,6 +17,7 @@ import type {
   LinkView,
   LinksController,
 } from "../../../api/controllers/LinksController.ts";
+import RemoteScreen from "../deals/RemoteScreen.tsx";
 import * as f from "../ui/format.ts";
 import Icon, { type IconName } from "../ui/Icon.tsx";
 
@@ -91,6 +92,14 @@ export const LinkSteps: FC<{ link: LinkView }> = ({ link }) => (
         </Group>
       );
     })}
+    {link.steps.some(
+      (step) =>
+        step.id === "page" &&
+        step.status === "running" &&
+        step.detail?.includes("anti-robot"),
+    ) ? (
+      <RemoteScreen hint="Amazon demande une vérification anti-robot : cliquez dessus dans l'image, la lecture reprend toute seule." />
+    ) : null}
   </Stack>
 );
 
