@@ -64,10 +64,19 @@ export default defineConfig({
           domain: "13.38.216.109.sslip.io",
           socket: "/run/bay/control.sock",
         }),
-        // The copy Lore created for the same VM (what dealradar.vmh1 serves).
+        // The copy Lore created for the same VM (what dealradar.vmh1 served until
+        // 2026-11-10; production now runs on the OVH VPS through Lore, estate
+        // ovh-adam: `npx lore deploy -p minpricing -e production`).
         production: bay({
           host: "minpricing-aws",
           domain: "dealradar.vmh1.alepha.dev",
+          socket: "/run/bay/control.sock",
+        }),
+        // OVH VPS running Bay (DEPLOY.md, « VPS OVH »). "minpricing-ovh" is
+        // an alias in ~/.ssh/config. No domain: Bay serves it under its
+        // --base-domain as minpricing-ovh.<base-domain>.
+        ovh: bay({
+          host: "minpricing-ovh",
           socket: "/run/bay/control.sock",
         }),
       },

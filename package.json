@@ -10,6 +10,7 @@
     "typecheck": "alepha typecheck",
     "verify": "alepha verify",
     "deploy:cloudflare": "alepha platform build --env cloudflare && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform db migrate --env cloudflare && alepha platform deploy --env cloudflare",
+    "deploy:ovh": "npm run build && alepha platform deploy --env ovh",
     "build:cloudflare": "alepha platform build --env cloudflare && node scripts/patch-cloudflare-browser-binding.mjs && alepha platform db migrate --env cloudflare",
     "dealabs:login": "node scripts/dealabs-login.mjs"
   },
