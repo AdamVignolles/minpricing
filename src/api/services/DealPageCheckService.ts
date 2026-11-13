@@ -1,6 +1,7 @@
 import { $env, z } from "alepha";
 import { $logger } from "alepha/logger";
 
+import { parseAmazonProductHtml } from "../collectors/amazonProductHtml.ts";
 import { withBrowser, withPage } from "../collectors/browser.ts";
 import {
   assessDealPage,
@@ -8,6 +9,14 @@ import {
   type DealPageVerdict,
   euroAmounts,
 } from "./dealPageCheck.ts";
+
+const isAmazonUrl = (url: string) => {
+  try {
+    return /(^|\.)amazon\.fr$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
 
 /**
  * Opens the merchant page in the local browser right before a publish and
@@ -231,12 +240,24 @@ export class DealPageCheckService {
               await pause(4_000);
               return readPage();
             });
+            // Amazon states no JSON-LD offer: its buy-box price is the
+            // product's own, read with the collection's parser. Without it
+            // a moved price can't be applied when Amazon's reader is
+            // blocked (Belkin, 13/11: 81,06 € → 79,99 €).
+            const amazonPrice =
+              isAmazonUrl(deal.url) && page.content
+                ? await page
+                    .content()
+                    .then((html) => parseAmazonProductHtml(html)?.price)
+                    .catch(() => undefined)
+                : undefined;
             return {
               status: response?.status() ?? 0,
               title: read.title,
               text: read.text,
               prices: [...read.structuredPrices, ...euroAmounts(read.text)],
-              statedPrices: read.offerPrices,
+              statedPrices:
+                amazonPrice !== undefined ? [amazonPrice] : read.offerPrices,
               availability: read.availability,
             };
           }),

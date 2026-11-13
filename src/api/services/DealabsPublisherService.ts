@@ -40,18 +40,25 @@ export interface FormImage {
   width: number;
   height: number;
   alt?: string;
+  /**
+   * Inside Dealabs' `[data-t="imageGallery"]`: a picture Dealabs holds for
+   * the post, whatever its size here — Amazon-hosted ones don't load in
+   * our window (third-party requests blocked) and render as a 16 px broken
+   * icon, yet Dealabs posts them (13/11: three publishes stopped).
+   */
+  inGallery?: boolean;
 }
 
 /**
  * Does the form's gallery show a product image (the one Dealabs scraped
  * from the link, or ours)? Icons, avatars, logos and placeholders don't
- * count: a real picture is at least 60 px each way and isn't a sprite.
+ * count: a real picture is at least 60 px each way and isn't a sprite —
+ * unless it sits in the gallery itself.
  */
 export function hasProductImage(images: FormImage[]): boolean {
   return images.some(
     (image) =>
-      image.width >= 60 &&
-      image.height >= 60 &&
+      (image.inGallery || (image.width >= 60 && image.height >= 60)) &&
       /^(https?:|blob:|data:image\/)/.test(image.src) &&
       !/avatar|\/users\/|logo|placeholder|sprite|icon|emoji|\.svg(\?|$)/i.test(
         `${image.src} ${image.alt ?? ""}`,
@@ -879,7 +886,21 @@ export class DealabsPublisherService {
           width: number;
           height: number;
           alt?: string;
+          inGallery?: boolean;
         }> = [];
+        for (const img of Array.from(
+          document.querySelectorAll('[data-t="imageGallery"] img'),
+        ) as HTMLImageElement[]) {
+          const src = img.currentSrc || img.src || img.getAttribute("src");
+          if (!src) continue;
+          out.push({
+            src: new URL(src, location.href).href,
+            width: Math.round(img.getBoundingClientRect().width),
+            height: Math.round(img.getBoundingClientRect().height),
+            alt: img.alt,
+            inGallery: true,
+          });
+        }
         const outside = (el: Element) =>
           !el.closest("header, nav, footer, [role=banner], [role=navigation]");
         const visible = (el: Element) => {
@@ -944,16 +965,29 @@ export class DealabsPublisherService {
       return "récupérée par Dealabs";
     }
     if (!deal.imageUrl) return "absente";
+    if (await this.uploadImageFile(page, deal)) return "ajoutée";
+    if (await this.uploadImageByUrl(page, deal)) return "ajoutée";
+    return "absente";
+  }
+
+  /** Our `imageUrl`, downloaded here and given to the gallery's file input. */
+  protected async uploadImageFile(
+    page: import("playwright").Page,
+    deal: Deal,
+  ): Promise<boolean> {
+    if (!deal.imageUrl) return false;
     try {
       const response = await fetch(deal.imageUrl, {
         headers: { "User-Agent": "Mozilla/5.0", Accept: "image/*" },
         signal: AbortSignal.timeout(20_000),
       });
-      if (!response.ok) return "absente";
+      if (!response.ok) return false;
       const buffer = Buffer.from(await response.arrayBuffer());
       const type = imageFileType(buffer);
-      if (!type || buffer.length > 10_000_000) return "absente";
-      const imageInput = page.locator('input[type="file"][accept*="image"]');
+      if (!type || buffer.length > 10_000_000) return false;
+      const imageInput = page.locator(
+        '[data-t="addImages"], input[type="file"][accept*="image"]',
+      );
       const input =
         (await imageInput.count()) > 0
           ? imageInput.first()
@@ -963,15 +997,41 @@ export class DealabsPublisherService {
         { timeout: 5_000 },
       );
       // Dealabs uploads it and shows a preview.
-      return (await this.waitForProductImage(page, 20_000))
-        ? "ajoutée"
-        : "absente";
+      return await this.waitForProductImage(page, 20_000);
     } catch (error) {
-      this.log.warn("Product image not added to the Dealabs form", {
+      this.log.warn("Product image file not added to the Dealabs form", {
         dealId: deal.id,
         error: error instanceof Error ? error.message : String(error),
       });
-      return "absente";
+      return false;
+    }
+  }
+
+  /** The gallery's own « Télécharger via URL » field: Dealabs fetches it. */
+  protected async uploadImageByUrl(
+    page: import("playwright").Page,
+    deal: Deal,
+  ): Promise<boolean> {
+    if (!deal.imageUrl) return false;
+    try {
+      const field = page
+        .locator('[data-t="imageGallery"] input[name="url"]')
+        .first();
+      if ((await field.count()) === 0) return false;
+      await field.fill(deal.imageUrl, { timeout: 5_000 });
+      const send = page.locator('[data-t="uploadImgViaUrl"]').first();
+      if ((await send.count()) > 0) {
+        await send.click({ timeout: 5_000 });
+      } else {
+        await field.press("Enter");
+      }
+      return await this.waitForProductImage(page, 20_000);
+    } catch (error) {
+      this.log.warn("Product image URL not added to the Dealabs form", {
+        dealId: deal.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
     }
   }
 

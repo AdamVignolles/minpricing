@@ -53,4 +53,26 @@ describe("product picture in Dealabs' gallery step (13/11)", () => {
     expect(hasProductImage(await reader.read(page))).toBe(false);
     await page.close();
   });
+
+  test("Amazon-hosted gallery images that don't load here still count (13/11)", async () => {
+    const page = await browser.newPage();
+    await page.route("**/*.jpg", (route) => route.abort());
+    // Dealabs' gallery as captured on the Evolution saw-guide publish.
+    await page.setContent(`
+      <div data-t="imageGallery"><ol><li><div class="threadSubmission-gallery--thumbnail">
+        <img src="https://images-na.ssl-images-amazon.com/images/I/51BTlyoHrsL.jpg">
+      </div></li></ol>
+      <input placeholder="https://" type="text" name="url"></div>`);
+    expect(hasProductImage(await reader.read(page))).toBe(true);
+    await page.close();
+  });
+
+  test("an empty gallery has no product picture", async () => {
+    const page = await browser.newPage();
+    await page.setContent(
+      `<div data-t="imageGallery"><input type="file" data-t="addImages"><input name="url"></div>`,
+    );
+    expect(hasProductImage(await reader.read(page))).toBe(false);
+    await page.close();
+  });
 });
