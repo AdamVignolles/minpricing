@@ -212,7 +212,7 @@ export function excludedProduct(
     /mouvement|mecanisme|type de montre/.test(fold(spec.label)),
   );
   if (
-    /\b(connectee?s?|smart ?watch|montre intelligente|hybride connectee)\b/.test(
+    /\b(connectee?s?|connected|smart ?watch|smartwatch|montre intelligente|hybride connectee)\b/.test(
       text,
     ) ||
     (!!movement && /connect|smart/.test(fold(movement.value)))

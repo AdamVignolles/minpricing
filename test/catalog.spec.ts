@@ -716,6 +716,7 @@ test("excludedProduct: kids, second-hand and connected watches", () => {
   );
   expect(excludedProduct("Montre Tissot PRX", [], "used")).toBe("used");
   expect(excludedProduct("Montre connectée Garmin Venu 3")).toBe("connected");
+  expect(excludedProduct("Montre Lotus Connected 50000/1")).toBe("connected");
   expect(
     excludedProduct("Withings ScanWatch", [
       { label: "Mouvement", value: "Montre connectée" },
