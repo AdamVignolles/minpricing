@@ -21,6 +21,7 @@ import {
 } from "./PublishProgressService.ts";
 import type { PublishStepId } from "./publishSteps.ts";
 import {
+  isAttended,
   launchVisibleBrowser,
   RemoteScreenService,
   SCREEN_VIEWPORT,
@@ -28,9 +29,6 @@ import {
 } from "./RemoteScreenService.ts";
 
 const LOGIN_WAIT_MS = 10 * 60_000;
-
-/** A person can see the browser (local desktop, or the server's virtual display). */
-const isAttended = () => process.platform !== "linux" || !!process.env.DISPLAY;
 
 export const SESSION_PATH = join(appDir(), ".dealabs-session.json");
 const DEBUG_DIR = join(appDir(), ".dealabs-debug");
@@ -55,7 +53,7 @@ export function hasProductImage(images: FormImage[]): boolean {
       image.width >= 60 &&
       image.height >= 60 &&
       /^(https?:|blob:|data:image\/)/.test(image.src) &&
-      !/avatar|logo|placeholder|sprite|icon|emoji|\.svg(\?|$)/i.test(
+      !/avatar|\/users\/|logo|placeholder|sprite|icon|emoji|\.svg(\?|$)/i.test(
         `${image.src} ${image.alt ?? ""}`,
       ),
   );
@@ -863,32 +861,71 @@ export class DealabsPublisherService {
     }
   }
 
-  /** The `<img>` elements of the form's current step. */
+  /**
+   * The pictures of the form's current step: `<img>` elements and elements
+   * drawn with a `background-image` (Dealabs' gallery tiles), anywhere on
+   * the page but the site's header, navigation and footer. Reading only the
+   * first `<form>` missed the gallery (13/11: every automatic publish
+   * stopped at « Image produit absente »). Third-party requests are
+   * blocked in this window, so no ad picture can count.
+   */
   protected async formImages(
     page: import("playwright").Page,
   ): Promise<FormImage[]> {
     return page
       .evaluate(() => {
-        const root =
-          document.querySelector("form") ??
-          document.querySelector("main") ??
-          document.body;
-        return Array.from(root.querySelectorAll("img"))
-          .filter((img) => {
-            const box = img.getBoundingClientRect();
-            return box.width > 0 && box.height > 0;
-          })
-          .map((img) => {
-            const box = img.getBoundingClientRect();
-            return {
-              src: img.currentSrc || img.src,
-              width: Math.round(box.width),
-              height: Math.round(box.height),
-              alt: img.alt,
-            };
+        const out: Array<{
+          src: string;
+          width: number;
+          height: number;
+          alt?: string;
+        }> = [];
+        const outside = (el: Element) =>
+          !el.closest("header, nav, footer, [role=banner], [role=navigation]");
+        const visible = (el: Element) => {
+          const box = el.getBoundingClientRect();
+          return box.width > 0 && box.height > 0 ? box : undefined;
+        };
+        for (const img of Array.from(document.querySelectorAll("img"))) {
+          const box = visible(img);
+          if (!box || !outside(img)) continue;
+          out.push({
+            src: img.currentSrc || img.src,
+            width: Math.round(box.width),
+            height: Math.round(box.height),
+            alt: img.alt,
           });
+        }
+        for (const el of Array.from(
+          document.querySelectorAll("div, span, figure, li, button, label"),
+        )) {
+          const bg = getComputedStyle(el).backgroundImage;
+          const url = /url\(["']?([^"')]+)["']?\)/.exec(bg ?? "")?.[1];
+          const box = url ? visible(el) : undefined;
+          if (!url || !box || !outside(el)) continue;
+          out.push({
+            src: new URL(url, location.href).href,
+            width: Math.round(box.width),
+            height: Math.round(box.height),
+            alt: el.getAttribute("aria-label") ?? undefined,
+          });
+        }
+        return out;
       })
       .catch(() => [] as FormImage[]);
+  }
+
+  /** Waits up to `ms` for a product picture in the gallery. */
+  protected async waitForProductImage(
+    page: import("playwright").Page,
+    ms: number,
+  ): Promise<boolean> {
+    const deadline = Date.now() + ms;
+    do {
+      if (hasProductImage(await this.formImages(page))) return true;
+      await page.waitForTimeout(1_000);
+    } while (Date.now() < deadline);
+    return false;
   }
 
   /**
@@ -901,9 +938,9 @@ export class DealabsPublisherService {
     page: import("playwright").Page,
     deal: Deal,
   ): Promise<"récupérée par Dealabs" | "ajoutée" | "absente"> {
-    // The gallery renders after the step change.
-    await page.waitForTimeout(1_500);
-    if (hasProductImage(await this.formImages(page))) {
+    // The gallery renders after the step change, and Dealabs fetches the
+    // picture it scraped from the link in the background: give it time.
+    if (await this.waitForProductImage(page, 10_000)) {
       return "récupérée par Dealabs";
     }
     if (!deal.imageUrl) return "absente";
@@ -916,17 +953,19 @@ export class DealabsPublisherService {
       const buffer = Buffer.from(await response.arrayBuffer());
       const type = imageFileType(buffer);
       if (!type || buffer.length > 10_000_000) return "absente";
-      const input = page.locator('input[type="file"]').first();
+      const imageInput = page.locator('input[type="file"][accept*="image"]');
+      const input =
+        (await imageInput.count()) > 0
+          ? imageInput.first()
+          : page.locator('input[type="file"]').first();
       await input.setInputFiles(
         { name: `produit.${type.ext}`, mimeType: type.mimeType, buffer },
         { timeout: 5_000 },
       );
       // Dealabs uploads it and shows a preview.
-      for (let i = 0; i < 10; i++) {
-        await page.waitForTimeout(1_000);
-        if (hasProductImage(await this.formImages(page))) return "ajoutée";
-      }
-      return "absente";
+      return (await this.waitForProductImage(page, 20_000))
+        ? "ajoutée"
+        : "absente";
     } catch (error) {
       this.log.warn("Product image not added to the Dealabs form", {
         dealId: deal.id,

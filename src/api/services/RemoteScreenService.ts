@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -32,24 +32,56 @@ export interface RemoteScreenSnapshot {
  * also needs a writable home for its crash reporter, which a Bay app user
  * doesn't have — without one it dies on launch.
  */
+/** A person can see the browser (local desktop, or the server's virtual display). */
+export const isAttended = (): boolean =>
+  process.platform !== "linux" || !!process.env.DISPLAY;
+
+const writable = (dir: string | undefined): dir is string => {
+  if (!dir || !existsSync(dir)) return false;
+  try {
+    accessSync(dir, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * A home Chrome can write to: its crash reporter dies on launch without one
+ * (« chrome_crashpad_handler: --database is required »). The app user's
+ * `HOME` may exist and still be read-only (new VPS, 2026-11-11).
+ */
+export function browserHome(env: NodeJS.ProcessEnv = process.env): string {
+  if (writable(env.HOME)) return env.HOME;
+  const home = join(tmpdir(), "dealradar-browser-home");
+  mkdirSync(home, { recursive: true });
+  return home;
+}
+
 export async function launchVisibleBrowser(): Promise<Browser> {
   const chromium = await getStealthChromium();
-  const home =
-    process.env.HOME && existsSync(process.env.HOME)
-      ? process.env.HOME
-      : join(tmpdir(), "dealradar-browser-home");
-  mkdirSync(home, { recursive: true });
+  const home = browserHome();
   return launchWithInstall(() =>
     chromium.launch(
       withProxy({
-        headless: false,
-        env: { ...process.env, HOME: home },
+        // No display (no Xvfb on the server): a visible Chrome can't start,
+        // so publish headless with the saved session; the robot check and
+        // the login then stop with their « pas d'écran » message.
+        headless: !isAttended(),
+        env: {
+          ...process.env,
+          HOME: home,
+          XDG_CONFIG_HOME: join(home, ".config"),
+          XDG_CACHE_HOME: join(home, ".cache"),
+        },
         // Keep cross-site frames in the page's process: the Bay app's task and
         // memory caps on the VM can't afford one ~100 MB renderer per frame.
         args: [
           "--renderer-process-limit=2",
           "--disable-site-isolation-trials",
           "--disable-features=IsolateOrigins,site-per-process",
+          "--disable-crash-reporter",
+          "--disable-breakpad",
         ],
       }),
     ),
