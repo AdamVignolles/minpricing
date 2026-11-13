@@ -801,6 +801,36 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   (`DealVerdict.tsx`), then tabs Analyse / Historique / Dealabs /
   Brouillon / Données; a running publication (remote screen, stop, steps)
   shows right under the header. `GET /deals/:id` carries `onDealabs`.
+- **Feed and catalogue for the watch site** (`../montres`, a separate
+  app; design in its `docs/`): `FeedController` serves `/feed/*`
+  read-only behind `FEED_TOKEN` (`$feedAuth`: GET only, opens nothing
+  else; the agent token doesn't open it) — `/feed/offers` (deals of
+  every status **and score**, which `GET /deals` hides under the bar),
+  `/feed/prices`, `/feed/catalog`, `/feed/catalog/prices`,
+  `/feed/sources`. Incremental: `since` → `next` (`feedNext` steps 1 ms
+  past a full page of one instant), rows upserted by id on the other
+  side. **Catalogue** (`CatalogService`, `CatalogJob` hourly, local
+  only): whole shop ranges, not sale pages, into `catalog_offers` /
+  `catalog_price_history` (migration `20261112140000_add_catalog_offers`,
+  hand-written with its snapshot) — never into `deals`: no quality gate,
+  score, draft or console list. No code per shop: an entry of
+  `config/watch-sources.json` (`services/catalogSources.ts`) with a
+  generic reader (`collectors/catalogReaders.ts`, pure): `sitemap-jsonld`
+  (sitemap → each page's schema.org `Product`: one product per page, an
+  `AggregateOffer` gives no price, GTIN check digit verified, `mpn` is
+  the reference and the shop's `sku` kept apart) or `shopify`
+  (`products.json`, one row per variant; parser tested on a sample only —
+  Shopify answered 429 to the probe of 12/11). Read only when `verified`
+  (probe passed: `POST /admin/catalog/:id/probe`, ≥ 3 of 5 pages with a
+  product and a price, writes nothing) **and** `enabled`; at
+  `activeHours` (Paris, 0–6), one shop at a time, `perRun` pages (≤ 400),
+  ≥ 1 s apart, `robots.txt` obeyed (`robotsAllows`), known prices before
+  new pages, a 403/429 stops that shop's pass (never worked around),
+  404/410 → `gone`, a non-watch title → `skipped` for good. A price row
+  only on change. `GET /admin/catalog`, `POST /admin/catalog/run`.
+  Timeshop24 and Ocarat's sale collectors also store the page's EAN
+  (`readJsonLdProduct`; `eanChecked` in the facts makes stored watches be
+  read once more). `test/catalog.spec.ts`.
 - **Web**: `src/web/AppRouter.ts` declares `$page` routes and one
   `$client<Controller>()` per backend controller; pages are lazy-loaded.
   New controllers must be registered in `src/api/index.ts` and get a matching

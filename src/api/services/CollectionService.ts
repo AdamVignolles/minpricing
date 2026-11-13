@@ -230,6 +230,9 @@ export class CollectionService {
    */
   protected static readonly DETAILS_TTL_MS = 24 * 60 * 60 * 1000;
 
+  /** Sources whose product page is also read for the EAN. */
+  protected static readonly EAN_FROM_PAGE = new Set(["timeshop24", "ocarat"]);
+
   /**
    * Fallback merchant for sources that discover offers on a single
    * merchant's own site. Without it every auto-discovered deal landed with
@@ -1058,8 +1061,19 @@ export class CollectionService {
         )
         .map((deal) => deal.externalId),
     );
+    // Watch shops' pages also give the EAN: a watch whose facts were
+    // read before that (no `eanChecked`) is read once more.
+    const eanSource = CollectionService.EAN_FROM_PAGE.has(sourceId);
     const withFacts = new Set(
-      rows.filter((deal) => !!deal.extraFacts).map((deal) => deal.externalId),
+      rows
+        .filter(
+          (deal) =>
+            !!deal.extraFacts &&
+            (!eanSource ||
+              !!deal.ean ||
+              deal.extraFacts.includes('"eanChecked"')),
+        )
+        .map((deal) => deal.externalId),
     );
     return {
       needsDetails: (externalId) => !fresh.has(externalId),
