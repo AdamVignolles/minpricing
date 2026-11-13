@@ -448,8 +448,18 @@ describe("catalogue passes and feed", () => {
   test("runDue: only verified and enabled sources, only at active hours", async () => {
     shop.requests = [];
     expect(await shop.runDue(new Date("2026-11-16T12:00:00Z"))).toEqual([]);
+    // Not enabled: never touched.
+    writeConfig([{ ...SOURCE, enabled: false }]);
+    expect(await shop.runDue(new Date("2026-11-16T01:00:00Z"))).toEqual([]);
+    expect(shop.requests).toEqual([]);
+    // Enabled but unverified: the server probes it itself, once a day,
+    // and reads it only if the probe passes (here the shop refuses: 403).
     writeConfig([{ ...SOURCE, verified: false }]);
     expect(await shop.runDue(new Date("2026-11-16T01:00:00Z"))).toEqual([]);
+    expect(shop.requests.length).toBeGreaterThan(0);
+    expect(shop.probes().shop).toMatchObject({ ok: false });
+    shop.requests = [];
+    expect(await shop.runDue(new Date("2026-11-16T02:00:00Z"))).toEqual([]);
     expect(shop.requests).toEqual([]);
     writeConfig([SOURCE]);
   });

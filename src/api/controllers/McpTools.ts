@@ -10,6 +10,7 @@ import { MyDealabsPostsService } from "../services/MyDealabsPostsService.ts";
 import { PublishScheduleService } from "../services/PublishScheduleService.ts";
 import { AdminController } from "./AdminController.ts";
 import { AgentsController } from "./AgentsController.ts";
+import { CatalogAdminController } from "./CatalogAdminController.ts";
 import { DealsController } from "./DealsController.ts";
 import { DraftsController } from "./DraftsController.ts";
 import { SourcesController } from "./SourcesController.ts";
@@ -90,6 +91,7 @@ export class McpTools {
   protected deals = $inject(DealsController);
   protected drafts = $inject(DraftsController);
   protected admin = $inject(AdminController);
+  protected catalog = $inject(CatalogAdminController);
   protected agents = $inject(AgentsController);
   protected sources = $inject(SourcesController);
   protected stats = $inject(StatsController);
@@ -218,6 +220,15 @@ export class McpTools {
       ]);
       return { progress, runs: runs.map(({ logs: _logs, ...run }) => run) };
     },
+  });
+
+  get_catalog_status = $tool({
+    title: "Catalogue montres",
+    description:
+      "The watch-catalogue shops of config/watch-sources.json: verified/enabled, the server's own automatic probe of the unverified ones (date, passed or not, why), and how many pages each holds (pending, active, skipped, gone, with EAN) with the last read.",
+    annotations: readOnly,
+    schema: { params: z.object({}) },
+    handler: async () => this.catalog.catalogStatus.run(),
   });
 
   get_agent_changes = $tool({

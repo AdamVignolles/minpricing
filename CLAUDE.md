@@ -847,7 +847,11 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   hbjo-online jewellers (Jean Mick, Balluais, Thierry, Damade, Azarian,
   Émile Léon: `/fr/p/` pages, `sku` = maker's reference), Maty, Horel;
   Conteenium, Montres & Co and Louis Pion answered 403 (Cloudflare) to
-  the probe — `verified: false`, never worked around.
+  the probe from the cloud — `verified: false`, never worked around. An
+  enabled, unverified source is probed **by the server itself** once a
+  day (`readable`: the same probe, result in `data/catalog-probes.json`)
+  and read only while its last probe passed (7 days); `GET
+/admin/catalog` and MCP `get_catalog_status` show it.
   `test/catalog.spec.ts` (fixtures cut from live pages).
 - **Web**: `src/web/AppRouter.ts` declares `$page` routes and one
   `$client<Controller>()` per backend controller; pages are lazy-loaded.

@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
 import { $logger } from "alepha/logger";
 import { $repository } from "alepha/orm";
 
@@ -12,6 +15,7 @@ import {
   catalogOfferEntity,
   catalogPriceEntity,
 } from "../entities/CatalogOffer.ts";
+import { appDir } from "./appDir.ts";
 import {
   type CatalogSource,
   DEFAULT_ACTIVE_HOURS,
@@ -76,6 +80,20 @@ export interface CatalogProbe {
   problem?: string;
 }
 
+/** The last automatic probe of a source, kept in `data/catalog-probes.json`. */
+export interface StoredProbe {
+  at: string;
+  ok: boolean;
+  problem?: string;
+  /** « 4/5 pages avec produit et prix », « 403 »… */
+  summary: string;
+}
+
+/** An unverified source is probed again after this long. */
+const PROBE_EVERY_MS = 24 * 3_600_000;
+/** A passed probe lets an unverified source be read this long. */
+const PROBE_VALID_MS = 7 * 24 * 3_600_000;
+
 /** Paris hour (0–23) of a date. */
 export function parisHour(date: Date): number {
   return Number(
@@ -122,6 +140,76 @@ export class CatalogService {
     return loadCatalogConfig();
   }
 
+  protected probesFile(): string {
+    return join(appDir(), "data", "catalog-probes.json");
+  }
+
+  /** Automatic probes of the unverified sources, by source id. */
+  probes(): Record<string, StoredProbe> {
+    try {
+      const file = this.probesFile();
+      return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  protected saveProbe(id: string, probe: StoredProbe): void {
+    try {
+      const file = this.probesFile();
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(
+        file,
+        `${JSON.stringify({ ...this.probes(), [id]: probe }, null, 2)}\n`,
+      );
+    } catch (error) {
+      this.log.warn("Catalogue: probe not saved", { id, error });
+    }
+  }
+
+  /**
+   * May this source be read? `verified` in the file, or — for an enabled
+   * source nobody has verified (a shop that refused the probe from
+   * elsewhere) — its own probe from this server passed within 7 days.
+   * The probe is the same test as `POST /admin/catalog/:id/probe`, run at
+   * most once a day; a refusal (403, robot check) is recorded, never
+   * worked around.
+   */
+  protected async readable(source: CatalogSource, now: Date): Promise<boolean> {
+    if (!source.enabled) return false;
+    if (source.verified) return true;
+    let last = this.probes()[source.id];
+    if (!last || now.getTime() - Date.parse(last.at) > PROBE_EVERY_MS) {
+      const report = await this.probe(source.id).catch(
+        (error: unknown) =>
+          ({
+            ok: false,
+            problem: error instanceof Error ? error.message : String(error),
+            samples: [],
+          }) as Pick<CatalogProbe, "ok" | "problem" | "samples">,
+      );
+      const good = report.samples.filter(
+        (sample) => sample.product && sample.price !== undefined,
+      ).length;
+      last = {
+        at: now.toISOString(),
+        ok: report.ok,
+        problem: report.problem,
+        summary: `${good}/${report.samples.length} pages avec produit et prix${
+          report.samples.length
+            ? ` (codes ${[...new Set(report.samples.map((s) => s.status))].join(", ")})`
+            : ""
+        }`,
+      };
+      this.saveProbe(source.id, last);
+      this.log.info("Catalogue: automatic probe", {
+        source: source.id,
+        ...last,
+      });
+    }
+    return last.ok && now.getTime() - Date.parse(last.at) < PROBE_VALID_MS;
+  }
+
   /**
    * Runs the sources that are verified and enabled, side by side: each
    * shop keeps its own pace (`pauseSeconds`), so reading several shops at
@@ -132,10 +220,13 @@ export class CatalogService {
     const config = this.config();
     const hours = config.activeHours ?? DEFAULT_ACTIVE_HOURS;
     if (!force && !hours.includes(parisHour(now))) return [];
-    const due = config.sources.filter(
-      (source) =>
-        source.verified && source.enabled && !this.running.has(source.id),
+    const candidates = config.sources.filter(
+      (source) => source.enabled && !this.running.has(source.id),
     );
+    const due: CatalogSource[] = [];
+    for (const source of candidates) {
+      if (await this.readable(source, now)) due.push(source);
+    }
     const passes = await Promise.all(
       due.map(async (source) => {
         this.running.add(source.id);
@@ -599,6 +690,7 @@ export class CatalogService {
   /** Per source: its settings and what is stored. */
   async status() {
     const config = this.config();
+    const probes = this.probes();
     const rows = await this.offers.findMany({});
     return {
       activeHours: config.activeHours ?? DEFAULT_ACTIVE_HOURS,
@@ -618,6 +710,7 @@ export class CatalogService {
           reader: source.reader,
           verified: !!source.verified,
           enabled: !!source.enabled,
+          probe: probes[source.id],
           perRun: perRunOf(source),
           pending: count("pending"),
           active: count("active"),
