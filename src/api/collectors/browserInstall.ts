@@ -32,6 +32,9 @@ export class BrowserUnavailableError extends Error {
 }
 
 /** The Chromium builds collection (headless) and Dealabs (visible) use. */
+/** Where `docker/runtime` installs the builds. */
+export const IMAGE_BROWSERS_PATH = "/ms-playwright";
+
 export const BROWSER_BUILDS = ["chromium", "chromium-headless-shell"];
 
 let current: BrowserState = { state: "unknown" };
@@ -46,12 +49,27 @@ let movedTo: string | undefined;
  * (`appDir()`) instead. Must run before the first `import("playwright")`,
  * which reads the variable once.
  */
-export function useReachableBrowsersPath(
+export function reachableBrowsersPath(
   env: NodeJS.ProcessEnv = process.env,
   create: (path: string) => void = (path) =>
     mkdirSync(path, { recursive: true }),
   fallback: () => string = () => join(appDir(), "browsers"),
 ): string | undefined {
+  useReachableTmpDir(env, create);
+  // The runtime image's own builds win over any configured folder: a value
+  // left over from the old process-based Bay (its `browsers/` path) would
+  // otherwise send Playwright looking for builds that aren't there.
+  // Bay sets PLAYWRIGHT_BROWSERS_PATH itself at every start (…/browsers),
+  // so an image built before DEALRADAR_BROWSERS_PATH existed falls back to
+  // where docker/runtime puts them.
+  const shipped =
+    env.DEALRADAR_BROWSERS_PREINSTALLED === "1"
+      ? env.DEALRADAR_BROWSERS_PATH || IMAGE_BROWSERS_PATH
+      : undefined;
+  if (shipped) {
+    env.PLAYWRIGHT_BROWSERS_PATH = shipped;
+    return shipped;
+  }
   const configured = env.PLAYWRIGHT_BROWSERS_PATH;
   if (!configured || configured === "0" || configured === movedTo) {
     return configured;
@@ -67,6 +85,46 @@ export function useReachableBrowsersPath(
   env.PLAYWRIGHT_BROWSERS_PATH = movedTo;
   return env.PLAYWRIGHT_BROWSERS_PATH;
 }
+/**
+ * Playwright makes its launch folder under `os.tmpdir()`. A `TMPDIR` left
+ * over from the old process-based Bay (`…/scratch/.tmp`, 2026-11-10) does
+ * not exist in the container and every launch failed with « ENOENT …
+ * mkdtemp ». When it can't be created, the variables go and the system
+ * `/tmp` is used.
+ */
+export function useReachableTmpDir(
+  env: NodeJS.ProcessEnv = process.env,
+  create: (path: string) => void = (path) =>
+    mkdirSync(path, { recursive: true }),
+): void {
+  for (const key of ["TMPDIR", "TMP", "TEMP"]) {
+    const dir = env[key];
+    if (!dir) continue;
+    try {
+      create(dir);
+    } catch {
+      delete env[key];
+    }
+  }
+  // Bay gives the container a 64 MB tmpfs `/tmp`, and Playwright starts
+  // Chromium with `--disable-dev-shm-usage`, so its shared memory goes to
+  // the temp folder: a heavy page (an Amazon product page) fills it and the
+  // renderer dies — « Page crashed », 12 of 13 product pages on 2026-11-10.
+  // In the runtime image, with no temp folder set, use one on the data disk.
+  // The app's persistent files first: Bay's DATA_DIR is its `scratch/`
+  // folder, which a container may not see (« ENOENT … scratch/.tmp »).
+  const base = env.APP_FILES_DIR || env.DATA_DIR;
+  if (env.DEALRADAR_BROWSERS_PREINSTALLED === "1" && base && !env.TMPDIR) {
+    const dir = join(base, ".tmp");
+    try {
+      create(dir);
+      env.TMPDIR = dir;
+    } catch {
+      // Keep the system /tmp.
+    }
+  }
+}
+
 let pending: Promise<BrowserState> | undefined;
 
 export const browserState = (): BrowserState => ({
@@ -88,8 +146,29 @@ const short = (error: unknown) =>
     .trim()
     .slice(0, 500);
 
+/**
+ * The runtime image (`docker/runtime`) ships Chromium and says so with
+ * `DEALRADAR_BROWSERS_PREINSTALLED=1`. Bay runs it on a read-only root
+ * filesystem, where Playwright's installer hangs on its lock file instead
+ * of finding the builds already there — and every launch waits for that
+ * install. So with the flag, « install » only checks the executable.
+ */
+async function checkPreinstalledBrowsers(): Promise<void> {
+  const { existsSync } = await import("node:fs");
+  const { chromium } = await import("playwright");
+  const executable = chromium.executablePath();
+  if (!existsSync(executable)) {
+    throw new Error(
+      `Chromium absent de l'image d'exécution (attendu : ${executable})`,
+    );
+  }
+}
+
 /** Runs `playwright install chromium chromium-headless-shell`. */
 async function runPlaywrightInstall(): Promise<void> {
+  if (process.env.DEALRADAR_BROWSERS_PREINSTALLED === "1") {
+    return checkPreinstalledBrowsers();
+  }
   const { spawn } = await import("node:child_process");
   const { createRequire } = await import("node:module");
   const require = createRequire(import.meta.url);
@@ -135,7 +214,7 @@ async function runPlaywrightInstall(): Promise<void> {
 export function ensureBrowsers(
   install: () => Promise<void> = runPlaywrightInstall,
 ): Promise<BrowserState> {
-  useReachableBrowsersPath();
+  reachableBrowsersPath();
   pending ??= (async () => {
     current = { state: "installing", checkedAt: new Date().toISOString() };
     try {
@@ -164,7 +243,7 @@ export async function launchWithInstall<T>(
   launch: () => Promise<T>,
   install: () => Promise<BrowserState> = () => ensureBrowsers(),
 ): Promise<T> {
-  useReachableBrowsersPath();
+  reachableBrowsersPath();
   if (pending) await pending;
   try {
     const browser = await launch();

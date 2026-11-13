@@ -29,6 +29,7 @@ npm run verify       # clean + lint + typecheck + test + migration check + build
 npm run test -- test/admin-auth.spec.ts   # single spec
 npm run test -- -t "test name"            # single case
 npm run deploy:cloudflare                 # build → patch browser binding → D1 migrate → deploy
+npm run deploy:ovh                        # build → Bay on the OVH VPS (setup: scripts/setup-ovh-vps.sh, DEPLOY.md)
 ```
 
 ## Architecture
@@ -58,7 +59,7 @@ controllers → React console → Dealabs draft / auto-publish.
   `BrowserUnavailableError` (« Navigateur indisponible sur le serveur… »,
   shown as such on a link check and the dashboard's Collecte card;
   `browser` in `/admin/stats`). When Bay's `PLAYWRIGHT_BROWSERS_PATH`
-  can't be created by the app (ENOENT on mkdir, 2026-11-03), `useReachableBrowsersPath` installs to `browsers/` under
+  can't be created by the app (ENOENT on mkdir, 2026-11-03), `reachableBrowsersPath` installs to `browsers/` under
   `appDir()` instead (shown as `browser.path`). Playwright is pinned exactly in
   package.json, and `npm run build` rewrites `dist/package.json`'s caret
   ranges to the installed versions (`scripts/pin-dist-deps.mjs`): deploy

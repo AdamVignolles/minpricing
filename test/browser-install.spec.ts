@@ -13,7 +13,8 @@ import {
   isMissingExecutable,
   launchWithInstall,
   resetBrowserState,
-  useReachableBrowsersPath,
+  reachableBrowsersPath,
+  useReachableTmpDir,
 } from "../src/api/collectors/browserInstall.ts";
 
 /** The error production logged from 2026-11-02 (epic 23). */
@@ -110,12 +111,12 @@ describe("Playwright is pinned to the tested version", () => {
   });
 });
 
-describe("useReachableBrowsersPath", () => {
+describe("reachableBrowsersPath", () => {
   beforeEach(() => resetBrowserState());
 
   test("keeps Bay's folder when it can be created", () => {
     const env = { PLAYWRIGHT_BROWSERS_PATH: "/opt/bay/app/browsers" };
-    const path = useReachableBrowsersPath(
+    const path = reachableBrowsersPath(
       env,
       () => {},
       () => "/files/browsers",
@@ -125,7 +126,7 @@ describe("useReachableBrowsersPath", () => {
 
   test("moves to the app's files when mkdir fails (ENOENT)", () => {
     const env = { PLAYWRIGHT_BROWSERS_PATH: "/opt/bay/app/browsers" };
-    const path = useReachableBrowsersPath(
+    const path = reachableBrowsersPath(
       env,
       () => {
         throw new Error("ENOENT: no such file or directory, mkdir");
@@ -136,9 +137,105 @@ describe("useReachableBrowsersPath", () => {
     expect(env.PLAYWRIGHT_BROWSERS_PATH).toBe("/files/browsers");
   });
 
+  test("the runtime image's builds win over a leftover folder", () => {
+    const env: NodeJS.ProcessEnv = {
+      PLAYWRIGHT_BROWSERS_PATH:
+        "/opt/bay/data/apps/minpricing-production/browsers",
+      DEALRADAR_BROWSERS_PREINSTALLED: "1",
+      DEALRADAR_BROWSERS_PATH: "/ms-playwright",
+    };
+    const path = reachableBrowsersPath(
+      env,
+      () => {
+        throw new Error("must not try the leftover folder");
+      },
+      () => "/files/browsers",
+    );
+    expect(path).toBe("/ms-playwright");
+    expect(env.PLAYWRIGHT_BROWSERS_PATH).toBe("/ms-playwright");
+  });
+
+  test("runtime image built before DEALRADAR_BROWSERS_PATH: its /ms-playwright, not Bay's folder", () => {
+    const env: NodeJS.ProcessEnv = {
+      PLAYWRIGHT_BROWSERS_PATH:
+        "/opt/bay/data/apps/minpricing-production/browsers",
+      DEALRADAR_BROWSERS_PREINSTALLED: "1",
+    };
+    expect(
+      reachableBrowsersPath(
+        env,
+        () => {
+          throw new Error("ENOENT");
+        },
+        () => "/opt/bay/data/apps/minpricing-production/data/browsers",
+      ),
+    ).toBe("/ms-playwright");
+    expect(env.PLAYWRIGHT_BROWSERS_PATH).toBe("/ms-playwright");
+  });
+
   test("no variable: Playwright's default cache, untouched", () => {
     const env: NodeJS.ProcessEnv = {};
-    expect(useReachableBrowsersPath(env, () => {})).toBeUndefined();
+    expect(reachableBrowsersPath(env, () => {})).toBeUndefined();
     expect(env.PLAYWRIGHT_BROWSERS_PATH).toBeUndefined();
+  });
+});
+
+describe("useReachableTmpDir", () => {
+  test("a TMPDIR that can't be created is dropped: the system /tmp is used", () => {
+    const env: NodeJS.ProcessEnv = {
+      TMPDIR: "/opt/bay/data/apps/minpricing-production/scratch/.tmp",
+    };
+    useReachableTmpDir(env, () => {
+      throw new Error("ENOENT: no such file or directory, mkdir");
+    });
+    expect(env.TMPDIR).toBeUndefined();
+  });
+
+  test("runtime image without a temp folder: one on the data disk, not Bay's 64 MB /tmp", () => {
+    const env: NodeJS.ProcessEnv = {
+      DEALRADAR_BROWSERS_PREINSTALLED: "1",
+      DATA_DIR: "/opt/bay/data/apps/minpricing-production/data",
+    };
+    const made: string[] = [];
+    useReachableTmpDir(env, (path) => {
+      made.push(path);
+    });
+    expect(env.TMPDIR).toBe(
+      "/opt/bay/data/apps/minpricing-production/data/.tmp",
+    );
+    expect(made).toEqual([
+      "/opt/bay/data/apps/minpricing-production/data/.tmp",
+    ]);
+  });
+
+  test("Bay's unreachable scratch TMPDIR: the app's files folder instead", () => {
+    const env: NodeJS.ProcessEnv = {
+      DEALRADAR_BROWSERS_PREINSTALLED: "1",
+      DATA_DIR: "/opt/bay/data/apps/minpricing-production/scratch",
+      APP_FILES_DIR: "/opt/bay/data/apps/minpricing-production/data",
+      TMPDIR: "/opt/bay/data/apps/minpricing-production/scratch/.tmp",
+    };
+    useReachableTmpDir(env, (path) => {
+      if (path.includes("scratch")) throw new Error("ENOENT");
+    });
+    expect(env.TMPDIR).toBe(
+      "/opt/bay/data/apps/minpricing-production/data/.tmp",
+    );
+  });
+
+  test("an explicit TMPDIR is never replaced", () => {
+    const env: NodeJS.ProcessEnv = {
+      DEALRADAR_BROWSERS_PREINSTALLED: "1",
+      DATA_DIR: "/data",
+      TMPDIR: "/elsewhere",
+    };
+    useReachableTmpDir(env, () => {});
+    expect(env.TMPDIR).toBe("/elsewhere");
+  });
+
+  test("a TMPDIR that exists or can be made is kept", () => {
+    const env: NodeJS.ProcessEnv = { TMPDIR: "/data/tmp" };
+    useReachableTmpDir(env, () => {});
+    expect(env.TMPDIR).toBe("/data/tmp");
   });
 });

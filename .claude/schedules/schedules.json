@@ -61,7 +61,7 @@
       "model": "claude-sonnet-5-5",
       "connectors": ["DealRadar", "Notion", "Lore"],
       "skills": ["deals-select", "deals-log plan"],
-      "prompt": "in the routine (claude.ai); talks to https://dealradar.vmh1.alepha.dev through dealradar.mjs remote mode (DEALRADAR_URL/DEALRADAR_TOKEN/DEALABS_USERNAME are environment secrets, never in the repo)",
+      "prompt": "in the routine (claude.ai); talks to https://minpricing.141.227.150.42.sslip.io (OVH VPS) through dealradar.mjs remote mode (DEALRADAR_URL/DEALRADAR_TOKEN/DEALABS_USERNAME are environment secrets, never in the repo)",
       "enabled": true
     },
     {
@@ -74,7 +74,7 @@
       "model": "claude-sonnet-5-5",
       "connectors": ["DealRadar", "Notion", "Lore"],
       "skills": ["deals-sources"],
-      "prompt": "in the routine (claude.ai); talks to https://dealradar.vmh1.alepha.dev through dealradar.mjs remote mode (DEALRADAR_URL/DEALRADAR_TOKEN/DEALABS_USERNAME are environment secrets, never in the repo)",
+      "prompt": "in the routine (claude.ai); talks to https://minpricing.141.227.150.42.sslip.io (OVH VPS) through dealradar.mjs remote mode (DEALRADAR_URL/DEALRADAR_TOKEN/DEALABS_USERNAME are environment secrets, never in the repo)",
       "enabled": true
     },
     {
@@ -87,7 +87,7 @@
       "model": "claude-sonnet-5-5",
       "connectors": ["DealRadar", "Notion", "Lore"],
       "skills": ["deals-log final", "deals-debrief"],
-      "prompt": "in the routine (claude.ai); talks to https://dealradar.vmh1.alepha.dev through dealradar.mjs remote mode (DEALRADAR_URL/DEALRADAR_TOKEN/DEALABS_USERNAME are environment secrets, never in the repo)",
+      "prompt": "in the routine (claude.ai); talks to https://minpricing.141.227.150.42.sslip.io (OVH VPS) through dealradar.mjs remote mode (DEALRADAR_URL/DEALRADAR_TOKEN/DEALABS_USERNAME are environment secrets, never in the repo)",
       "enabled": true
     },
     {
@@ -100,7 +100,7 @@
       "model": "claude-sonnet-5-5",
       "connectors": ["DealRadar", "Notion", "Lore"],
       "skills": ["deals-weekly"],
-      "prompt": "in the routine (claude.ai); talks to https://dealradar.vmh1.alepha.dev through dealradar.mjs remote mode (DEALRADAR_URL/DEALRADAR_TOKEN/DEALABS_USERNAME are environment secrets, never in the repo)",
+      "prompt": "in the routine (claude.ai); talks to https://minpricing.141.227.150.42.sslip.io (OVH VPS) through dealradar.mjs remote mode (DEALRADAR_URL/DEALRADAR_TOKEN/DEALABS_USERNAME are environment secrets, never in the repo)",
       "enabled": true
     }
   ],
