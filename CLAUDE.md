@@ -823,14 +823,32 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   Shopify answered 429 to the probe of 12/11). Read only when `verified`
   (probe passed: `POST /admin/catalog/:id/probe`, ≥ 3 of 5 pages with a
   product and a price, writes nothing) **and** `enabled`; at
-  `activeHours` (Paris, 0–6), one shop at a time, `perRun` pages (≤ 400),
-  ≥ 1 s apart, `robots.txt` obeyed (`robotsAllows`), known prices before
+  `activeHours` (Paris; all day since 13/11 so every price is read again
+  within 24 h), every shop side by side at its own pace (`running` per
+  source), `perRun` pages (≤ 400) per hourly pass, ≥ 1 s apart, `robots.txt` obeyed (`robotsAllows`), known prices before
   new pages, a 403/429 stops that shop's pass (never worked around),
   404/410 → `gone`, a non-watch title → `skipped` for good. A price row
   only on change. `GET /admin/catalog`, `POST /admin/catalog/run`.
   Timeshop24 and Ocarat's sale collectors also store the page's EAN
   (`readJsonLdProduct`; `eanChecked` in the facts makes stored watches be
-  read once more). `test/catalog.spec.ts`.
+  read once more). **Characteristics** (13/11): `readProductPage` = the
+  JSON-LD plus `readSpecs`, a generic reader of the page's label → value
+  rows (`<tr>`, `<dt>/<dd>`, two-element rows, « Label : valeur »),
+  watch labels only (`WATCH_LABEL`: genre, verre, bracelet, mouvement,
+  boîtier, étanchéité, référence, EAN…), stored as `catalog_offers.specs`
+  (migration `20261113160000_add_catalog_specs`) and served as `facts`
+  on `/feed/catalog`; a « Référence (fournisseur) » / « Code EAN » line
+  fills what the JSON-LD lacks. Timeshop24/Ocarat sale pages add the
+  same table to their facts (`specsRead`: stored watches read once
+  more). **Children's watches** (`isKidsProduct`: title or « Genre »)
+  are `skipped`; one read before is served as `gone`. The config is
+  bundled (`import … with { type: "json" }`): the copy under `appDir()`
+  wins only with a later `updated` date. Shops (13/11): Ocarat, the six
+  hbjo-online jewellers (Jean Mick, Balluais, Thierry, Damade, Azarian,
+  Émile Léon: `/fr/p/` pages, `sku` = maker's reference), Maty, Horel;
+  Conteenium, Montres & Co and Louis Pion answered 403 (Cloudflare) to
+  the probe — `verified: false`, never worked around.
+  `test/catalog.spec.ts` (fixtures cut from live pages).
 - **Web**: `src/web/AppRouter.ts` declares `$page` routes and one
   `$client<Controller>()` per backend controller; pages are lazy-loaded.
   New controllers must be registered in `src/api/index.ts` and get a matching

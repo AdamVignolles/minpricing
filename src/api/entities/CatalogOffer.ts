@@ -26,6 +26,11 @@ export const catalogOfferEntity = $entity({
     ean: z.text({ maxLength: 20 }).optional(),
     imageUrl: z.text({ maxLength: 2000 }).optional(),
     description: z.text({ size: "rich" }).optional(),
+    /**
+     * JSON `[{ label, value }]`: the page's characteristics table as the
+     * shop writes it (genre, glass, strap, movement…), watch labels only.
+     */
+    specs: z.text({ size: "rich" }).optional(),
     price: z.number().min(0).optional(),
     listPrice: z.number().min(0).optional(),
     currency: z.text({ maxLength: 8 }).optional(),

@@ -1061,17 +1061,16 @@ export class CollectionService {
         )
         .map((deal) => deal.externalId),
     );
-    // Watch shops' pages also give the EAN: a watch whose facts were
-    // read before that (no `eanChecked`) is read once more.
+    // Watch shops' pages also give the EAN and the whole characteristics
+    // table: a watch whose facts were read before that (no `specsRead`)
+    // is read once more.
     const eanSource = CollectionService.EAN_FROM_PAGE.has(sourceId);
     const withFacts = new Set(
       rows
         .filter(
           (deal) =>
             !!deal.extraFacts &&
-            (!eanSource ||
-              !!deal.ean ||
-              deal.extraFacts.includes('"eanChecked"')),
+            (!eanSource || deal.extraFacts.includes('"specsRead"')),
         )
         .map((deal) => deal.externalId),
     );

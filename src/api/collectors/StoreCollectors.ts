@@ -1,4 +1,4 @@
-import { readJsonLdProduct } from "./catalogReaders.ts";
+import { readJsonLdProduct, readSpecs } from "./catalogReaders.ts";
 import type {
   DealSource,
   DiscoverContext,
@@ -487,8 +487,22 @@ abstract class WatchShopCollector implements DealSource {
         if (ean) deal.details = { ...deal.details, ean };
         // `eanChecked`: this page was read for its EAN, found or not —
         // so a watch stored before EANs were read is read once more,
-        // and one whose page has none isn't read forever.
-        return { ...this.productFacts(html), eanChecked: true };
+        // and one whose page has none isn't read forever. `specsRead`:
+        // the page's whole characteristics table was read (genre, glass,
+        // strap…), on top of the shop's own parser.
+        const facts = this.productFacts(html) ?? {};
+        const extra = readSpecs(html).filter(
+          (spec) =>
+            !(facts.specs ?? []).some(
+              (known) => known.label.toLowerCase() === spec.label.toLowerCase(),
+            ),
+        );
+        return {
+          ...facts,
+          specs: [...(facts.specs ?? []), ...extra].slice(0, 30),
+          eanChecked: true,
+          specsRead: true,
+        };
       },
       sleep: this.sleep,
       pauseMs: 1_500 + Math.random() * 1_500,

@@ -3,7 +3,7 @@ import { $repository } from "alepha/orm";
 
 import {
   type CatalogProduct,
-  readJsonLdProduct,
+  readProductPage,
   readShopifyProducts,
   readSitemap,
   robotsAllows,
@@ -15,6 +15,7 @@ import {
 import {
   type CatalogSource,
   DEFAULT_ACTIVE_HOURS,
+  isKidsProduct,
   loadCatalogConfig,
   pauseMsOf,
   perRunOf,
@@ -101,7 +102,8 @@ export class CatalogService {
   protected log = $logger();
   protected offers = $repository(catalogOfferEntity);
   protected prices = $repository(catalogPriceEntity);
-  protected running = false;
+  /** Sources whose pass is under way (each shop runs on its own). */
+  protected running = new Set<string>();
   protected sitemapReadAt = new Map<string, number>();
 
   protected sleep(ms: number): Promise<void> {
@@ -120,31 +122,38 @@ export class CatalogService {
     return loadCatalogConfig();
   }
 
-  /** Runs the sources that are verified and enabled, one after another. */
+  /**
+   * Runs the sources that are verified and enabled, side by side: each
+   * shop keeps its own pace (`pauseSeconds`), so reading several shops at
+   * once asks no shop more, and every price can be read again within a
+   * day. A shop whose previous pass is still running is left to finish.
+   */
   async runDue(now = new Date(), force = false): Promise<CatalogPass[]> {
     const config = this.config();
     const hours = config.activeHours ?? DEFAULT_ACTIVE_HOURS;
     if (!force && !hours.includes(parisHour(now))) return [];
-    if (this.running) return [];
-    this.running = true;
-    const passes: CatalogPass[] = [];
-    try {
-      for (const source of config.sources) {
-        if (!source.verified || !source.enabled) continue;
+    const due = config.sources.filter(
+      (source) =>
+        source.verified && source.enabled && !this.running.has(source.id),
+    );
+    const passes = await Promise.all(
+      due.map(async (source) => {
+        this.running.add(source.id);
         try {
-          passes.push(await this.runSource(source, now));
+          return await this.runSource(source, now);
         } catch (error) {
           // One shop failing never stops the others.
           this.log.warn("Catalogue: source failed", {
             source: source.id,
             error: error instanceof Error ? error.message : String(error),
           });
+          return undefined;
+        } finally {
+          this.running.delete(source.id);
         }
-      }
-    } finally {
-      this.running = false;
-    }
-    return passes;
+      }),
+    );
+    return passes.filter((pass): pass is CatalogPass => !!pass);
   }
 
   async runSource(
@@ -325,12 +334,15 @@ export class CatalogService {
         continue;
       }
       const product =
-        answer.status === 200 ? readJsonLdProduct(answer.body) : undefined;
+        answer.status === 200 ? readProductPage(answer.body) : undefined;
       if (!product) {
         await this.failed(row, now, pass);
         continue;
       }
-      if (!wantedTitle(source, product.title)) {
+      if (
+        !wantedTitle(source, product.title) ||
+        isKidsProduct(product.title, product.specs)
+      ) {
         await this.offers.updateById(row.id, {
           status: "skipped",
           title: product.title.slice(0, 1000),
@@ -373,6 +385,10 @@ export class CatalogService {
       ean: product.ean,
       imageUrl: cut(product.imageUrl, 2000),
       description: product.description,
+      // A read without a table keeps what an earlier read found.
+      ...(product.specs?.length
+        ? { specs: JSON.stringify(product.specs.slice(0, 40)) }
+        : {}),
       price: product.price,
       listPrice:
         product.listPrice !== undefined &&
@@ -450,7 +466,10 @@ export class CatalogService {
         const id = product.externalId as string;
         if (seen.has(id)) continue;
         seen.add(id);
-        if (!wantedTitle(source, product.title)) {
+        if (
+          !wantedTitle(source, product.title) ||
+          isKidsProduct(product.title, product.specs)
+        ) {
           pass.skipped++;
           continue;
         }
@@ -552,7 +571,7 @@ export class CatalogService {
       try {
         const answer = await this.fetchPage(url);
         const product =
-          answer.status === 200 ? readJsonLdProduct(answer.body) : undefined;
+          answer.status === 200 ? readProductPage(answer.body) : undefined;
         report.samples.push({
           url,
           status: answer.status,
@@ -583,7 +602,7 @@ export class CatalogService {
     const rows = await this.offers.findMany({});
     return {
       activeHours: config.activeHours ?? DEFAULT_ACTIVE_HOURS,
-      running: this.running,
+      running: [...this.running],
       sources: config.sources.map((source) => {
         const mine = rows.filter((row) => row.sourceId === source.id);
         const count = (status: string) =>

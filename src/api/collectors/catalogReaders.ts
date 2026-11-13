@@ -6,6 +6,14 @@
  * shop is an entry of `config/watch-sources.json`.
  */
 
+import { load } from "cheerio";
+
+/** One line of a product's characteristics, as the shop writes it. */
+export interface CatalogSpec {
+  label: string;
+  value: string;
+}
+
 /** What one product page (or feed row) says, nothing guessed. */
 export interface CatalogProduct {
   /** Shop's own key when the reader has one (Shopify variant id). */
@@ -29,6 +37,8 @@ export interface CatalogProduct {
   rating?: number;
   reviewCount?: number;
   description?: string;
+  /** The page's characteristics table (watch labels only). */
+  specs?: CatalogSpec[];
 }
 
 const text = (value: unknown): string | undefined => {
@@ -174,6 +184,10 @@ export function readJsonLdProduct(html: string): CatalogProduct | undefined {
       : undefined,
     description: text(product.description)?.slice(0, 2000),
     url: text(product.url) ?? (single ? text(single.url) : undefined),
+    specs: (() => {
+      const specs = propertySpecs(product.additionalProperty);
+      return specs.length ? specs : undefined;
+    })(),
   };
 }
 
@@ -288,4 +302,159 @@ export function readShopifyProducts(
       ];
     });
   });
+}
+
+// ------------------------------------------------------ characteristics
+
+const foldLabel = (value: string) =>
+  value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\(s\)/g, "")
+    .replace(/\s*:\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/**
+ * Labels a watch's characteristics table uses (folded: lower case, no
+ * accents). Anything else on the page — menus, delivery, reviews — is
+ * left out, so a stray « Genre » menu title never becomes a spec.
+ */
+const WATCH_LABEL =
+  /^(genre|sexe|pour|public|mouvement|type de mouvement|mecanisme|calibre|verre|type de verre|glace|bracelet|type de bracelet|matiere du bracelet|matiere bracelet|bracelet matiere|materiau du bracelet|couleur du bracelet|couleur bracelet|largeur du bracelet|matiere|matiere du boitier|matiere boitier|materiau du boitier|boitier|forme du boitier|forme boitier|cadran|couleur du cadran|couleur cadran|type de cadran|diametre|diametre du boitier|taille du boitier|taille boitier|taille|epaisseur|epaisseur du boitier|etancheite|etanche|resistance a l'eau|fonctions?|complications?|affichage|fermoir|type de fermoir|boucle|type de boucle|reserve de marche|garantie|collection|lunette|couronne|style|reference|ref|reference fabricant|reference fournisseur|reference constructeur|code ean|ean)$/;
+
+const cleanText = (value: string) =>
+  value
+    .replace(/\s*\n\s*/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(", ")
+    .replace(/\s+/g, " ")
+    .replace(/\s*:\s*$/, "")
+    .trim();
+
+/**
+ * A product page's characteristics, whatever the shop's markup: a label
+ * element followed by a value element in the same row (`<tr><th><td>`,
+ * `<dt><dd>`, `<span class="…label">` / `<span class="…value">`,
+ * `<b>Label</b><p>Value</p>`), or « Label : valeur » in one line. Only
+ * labels a watch's table uses are kept (`WATCH_LABEL`); the first one
+ * of each label wins. Nothing is guessed: no table, no specs.
+ */
+export function readSpecs(html: string): CatalogSpec[] {
+  const $ = load(html);
+  $("script, style, noscript, nav, header, footer, svg").remove();
+  // Several values in one cell (« Femme<br>Homme ») stay apart.
+  $("br").replaceWith("\n");
+  /** A cell's text; a cell made of several items lists them. */
+  const cell = (el: Parameters<typeof $>[0]) => {
+    const items = $(el)
+      .children()
+      .toArray()
+      .map((child) => $(child).text().trim())
+      .filter(Boolean);
+    return items.length > 1 ? items.join("\n") : $(el).text();
+  };
+  const specs: CatalogSpec[] = [];
+  const seen = new Set<string>();
+  const add = (rawLabel: string, rawValue: string) => {
+    const label = cleanText(rawLabel);
+    const value = cleanText(rawValue);
+    const key = foldLabel(label);
+    if (!label || !value || seen.has(key)) return;
+    if (!WATCH_LABEL.test(key)) return;
+    if (value.length > 200 || foldLabel(value) === key) return;
+    seen.add(key);
+    specs.push({ label, value });
+  };
+  // `<dt>` / `<dd>` pairs.
+  $("dt").each((_, dt) => {
+    const dd = $(dt).next("dd");
+    if (dd.length) add($(dt).text(), cell(dd[0]));
+  });
+  // Rows of two texts: a label element, then a value element.
+  $("tr, li, div, p").each((_, row) => {
+    const parts = $(row)
+      .children()
+      .toArray()
+      .map((child) => ({ label: $(child).text(), value: cell(child) }))
+      .filter((part) => part.label.trim());
+    if (parts.length === 2 && cleanText(parts[0].label).length <= 60) {
+      add(parts[0].label, parts[1].value);
+    }
+  });
+  // « Label : valeur », one per line of an element of text.
+  $("li, p, td, span, div").each((_, el) => {
+    if ($(el).children().not("b, strong, em, i, span, br").length > 0) return;
+    for (const line of $(el).text().split("\n")) {
+      const match = line
+        .replace(/\s+/g, " ")
+        .trim()
+        .match(/^([^:]{2,40}?)\s*:\s*(.{1,150})$/);
+      if (match) add(match[1], match[2]);
+    }
+  });
+  return specs;
+}
+
+/** A schema.org `additionalProperty` list as specs. */
+function propertySpecs(value: unknown): CatalogSpec[] {
+  const list = Array.isArray(value) ? value : value ? [value] : [];
+  return list.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const record = raw as Record<string, unknown>;
+    const label = text(record.name);
+    const shown = Array.isArray(record.value)
+      ? record.value
+          .map((v) => text(v))
+          .filter(Boolean)
+          .join(", ")
+      : text(record.value);
+    return label && shown ? [{ label, value: shown }] : [];
+  });
+}
+
+/** Merges spec lists, the first one of a label winning. */
+export function mergeCatalogSpecs(...lists: CatalogSpec[][]): CatalogSpec[] {
+  const out: CatalogSpec[] = [];
+  const seen = new Set<string>();
+  for (const spec of lists.flat()) {
+    const key = foldLabel(spec.label);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(spec);
+  }
+  return out;
+}
+
+/** The value of the first spec whose folded label matches. */
+export function specValue(
+  specs: CatalogSpec[] | undefined,
+  label: RegExp,
+): string | undefined {
+  return specs?.find((spec) => label.test(foldLabel(spec.label)))?.value;
+}
+
+/**
+ * A product page in full: its JSON-LD `Product`, completed by the page's
+ * characteristics table. A maker's reference or an EAN the table states
+ * fills what the JSON-LD left empty, never replaces it.
+ */
+export function readProductPage(html: string): CatalogProduct | undefined {
+  const product = readJsonLdProduct(html);
+  if (!product) return undefined;
+  const specs = mergeCatalogSpecs(product.specs ?? [], readSpecs(html));
+  const reference = specValue(
+    specs,
+    /^(reference fabricant|reference fournisseur|reference constructeur|reference|ref)$/,
+  );
+  const ean = cleanGtin(specValue(specs, /^(code ean|ean)$/));
+  return {
+    ...product,
+    specs: specs.length ? specs : undefined,
+    reference: product.reference ?? reference,
+    ean: product.ean ?? ean,
+  };
 }

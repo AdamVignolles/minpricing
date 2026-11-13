@@ -192,8 +192,20 @@ export class FeedController {
         where: {
           and: [
             { updatedAt: { gte: since } },
-            // Pages never read or not of the wanted kind say nothing.
-            { status: { inArray: ["active", "gone"] } },
+            // Pages never read or not of the wanted kind say nothing —
+            // except a product read before and left out since (a kids'
+            // watch): served as gone, so the other side drops it.
+            {
+              or: [
+                { status: { inArray: ["active", "gone"] } },
+                {
+                  and: [
+                    { status: { eq: "skipped" } },
+                    { price: { isNotNull: true } },
+                  ],
+                },
+              ],
+            },
             ...(ids.length ? [{ sourceId: { inArray: ids } }] : []),
           ],
         },
@@ -220,7 +232,15 @@ export class FeedController {
           availability: row.availability,
           rating: row.rating,
           reviewCount: row.reviewCount,
-          status: row.status,
+          // Same shape as a deal's `extraFacts`: the page's table.
+          facts: row.specs
+            ? JSON.stringify({
+                brand: row.brand,
+                reference: row.reference,
+                specs: JSON.parse(row.specs),
+              })
+            : undefined,
+          status: row.status === "skipped" ? "gone" : row.status,
           firstSeenAt: iso(row.firstSeenAt),
           lastReadAt: row.lastReadAt ? iso(row.lastReadAt) : undefined,
           updatedAt: iso(row.updatedAt),

@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import shipped from "../../../config/watch-sources.json" with { type: "json" };
 import { appDir } from "./appDir.ts";
 
 /**
@@ -40,6 +41,8 @@ export interface CatalogSource {
 }
 
 export interface CatalogConfig {
+  /** Date of the file (« 2026-11-13 »): the later of two copies wins. */
+  updated?: string;
   /** Paris hours when passes run (default 0–6: the radar's quiet hours). */
   activeHours?: number[];
   sources: CatalogSource[];
@@ -96,12 +99,24 @@ export function sourceProblem(source: CatalogSource): string | undefined {
   return undefined;
 }
 
+/**
+ * The configuration in force: the copy shipped in the code (bundled, so a
+ * deploy always brings it), unless the file under `appDir()` — edited on
+ * the server — carries a later `updated` date.
+ */
+function rawConfig(file: string | undefined): CatalogConfig {
+  const bundled = shipped as CatalogConfig;
+  const path = file ?? join(appDir(), "config", "watch-sources.json");
+  if (!existsSync(path)) return file ? { sources: [] } : bundled;
+  const local = JSON.parse(readFileSync(path, "utf8")) as CatalogConfig;
+  if (file) return local;
+  return (local.updated ?? "") > (bundled.updated ?? "") ? local : bundled;
+}
+
 /** Usable sources of the file; a bad entry is left out, never fatal. */
-export function loadCatalogConfig(
-  file = join(appDir(), "config", "watch-sources.json"),
-): CatalogConfig {
+export function loadCatalogConfig(file?: string): CatalogConfig {
   try {
-    const raw = JSON.parse(readFileSync(file, "utf8")) as CatalogConfig;
+    const raw = rawConfig(file);
     const seen = new Set<string>();
     const sources = (Array.isArray(raw.sources) ? raw.sources : []).filter(
       (source) => {
@@ -141,6 +156,35 @@ export function wantedUrls(source: CatalogSource, urls: string[]): string[] {
     }
   }
   return [...kept];
+}
+
+const fold = (value: string) =>
+  value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+/**
+ * A children's watch, by its title or its « Genre » line: left out of the
+ * catalogue and of the price watch (owner's decision, 13/11/2026).
+ */
+export function isKidsProduct(
+  title: string,
+  specs: Array<{ label: string; value: string }> = [],
+): boolean {
+  if (
+    /\b(enfants?|junior|kids?|gar[cç]ons?|fillettes?|bebes?|ado|adolescents?)\b/.test(
+      fold(title),
+    )
+  ) {
+    return true;
+  }
+  const genre = specs.find((spec) =>
+    /^(genre|sexe|pour|public)/.test(fold(spec.label)),
+  );
+  return (
+    !!genre && /enfant|junior|kids?|garcon|fille\b/.test(fold(genre.value))
+  );
 }
 
 /** Is this product of the wanted kind, by its title? */

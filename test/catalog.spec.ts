@@ -9,6 +9,8 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import {
   cleanGtin,
+  readProductPage,
+  readSpecs,
   readJsonLdProduct,
   readShopifyProducts,
   readSitemap,
@@ -32,6 +34,8 @@ import {
   parisHour,
 } from "../src/api/services/CatalogService.ts";
 import {
+  isKidsProduct,
+  loadCatalogConfig,
   sourceProblem,
   wantedTitle,
   wantedUrls,
@@ -300,7 +304,8 @@ describe("catalogue passes and feed", () => {
   const writeConfig = (sources: CatalogSource[]) =>
     writeFileSync(
       join(dir, "config", "watch-sources.json"),
-      JSON.stringify({ sources }),
+      // A later date than the shipped copy: this file is the one in force.
+      JSON.stringify({ updated: "9999-12-31", sources }),
     );
 
   beforeAll(async () => {
@@ -566,4 +571,146 @@ describe("catalogue passes and feed", () => {
       expect.objectContaining({ id: "shop", verified: true, enabled: true }),
     ]);
   });
+
+  test("characteristics are stored and served; a kids' watch leaves", async () => {
+    const feed = alepha.inject(FeedController);
+    const auth = { headers: { authorization: `Bearer ${FEED_TOKEN}` } };
+    const table = `<div class="tab-carac__row"><span>Genre</span><span>Homme</span></div>
+      <div class="tab-carac__row"><span>Type de verre</span><span>Verre saphir</span></div>`;
+    shop.pages.set(url("montre-a.html"), {
+      status: 200,
+      body: productPage({
+        name: "Montre Seiko 5 SRPD55K1",
+        offers: { "@type": "Offer", price: "199.00" },
+      }).replace("</html>", `<body>${table}</body></html>`),
+    });
+    await shop.runSource(SOURCE, new Date("2026-11-20T01:00:00Z"));
+    const row = (await rows.offers.findMany({})).find(
+      (r) => r.url === url("montre-a.html"),
+    );
+    expect(JSON.parse(row?.specs ?? "[]")).toEqual([
+      { label: "Genre", value: "Homme" },
+      { label: "Type de verre", value: "Verre saphir" },
+    ]);
+    let page = await feed.catalogOffers.fetch(auth);
+    const served = page.data.rows.find((r) => r.url === url("montre-a.html"));
+    expect(JSON.parse(served.facts).specs).toHaveLength(2);
+
+    // The same page, now a children's watch: left out, served as gone.
+    shop.pages.set(url("montre-a.html"), {
+      status: 200,
+      body: productPage({
+        name: "Montre enfant Seiko 5",
+        offers: { "@type": "Offer", price: "199.00" },
+      }),
+    });
+    await shop.runSource(SOURCE, new Date("2026-11-21T03:00:00Z"));
+    page = await feed.catalogOffers.fetch(auth);
+    expect(
+      page.data.rows.find((r) => r.url === url("montre-a.html"))?.status,
+    ).toBe("gone");
+  });
+
+  test("runDue: the shops run side by side", async () => {
+    writeConfig([
+      { ...SOURCE, activeHours: undefined } as CatalogSource,
+      { ...SOURCE, id: "shop-2", name: "Shop 2" },
+    ]);
+    const passes = await shop.runDue(new Date("2026-11-22T01:00:00Z"));
+    expect(passes.map((pass) => pass.sourceId).sort()).toEqual([
+      "shop",
+      "shop-2",
+    ]);
+    writeConfig([SOURCE]);
+  });
+});
+
+describe("readProductPage: characteristics of real pages (13/11/2026)", () => {
+  test("hbjo-online jewellers (Azarian, Jean Mick, Émile Léon…)", () => {
+    const product = readProductPage(fixture("hbjo-azarian-product.html"));
+    expect(product).toMatchObject({
+      title: "Montre Tissot Le Locle Powermatic 80",
+      price: 745,
+      reference: "T006.407.11.033.00",
+    });
+    expect(product?.specs).toEqual(
+      expect.arrayContaining([
+        { label: "Genre", value: "Homme" },
+        { label: "Matière du bracelet", value: "Acier" },
+        { label: "Mouvement", value: "Montre automatique" },
+        { label: "Type de verre", value: "Verre saphir" },
+        { label: "Etanchéité", value: "30m (3 bar)" },
+        { label: "Taille du boîtier", value: "39.3mm" },
+      ]),
+    );
+  });
+
+  test("Maty: supplier reference and EAN from the table", () => {
+    const product = readProductPage(fixture("maty-product.html"));
+    expect(product).toMatchObject({
+      price: 2080,
+      reference: "245a45ca",
+      ean: "3661132224770",
+    });
+    expect(product?.specs).toEqual(
+      expect.arrayContaining([
+        { label: "Genre", value: "Homme" },
+        { label: "Matière(s) bracelet", value: "Caoutchouc" },
+        { label: "Type de mouvement", value: "Montre automatique" },
+      ]),
+    );
+  });
+
+  test("Horel: features list", () => {
+    const product = readProductPage(fixture("horel-product.html"));
+    expect(product).toMatchObject({
+      reference: "GA-110GB-1AER",
+      ean: "4971850943235",
+    });
+    expect(product?.specs).toEqual(
+      expect.arrayContaining([
+        { label: "Verre", value: "Minéral durci" },
+        { label: "Bracelet", value: "Résine" },
+        { label: "Mouvement", value: "Electronique" },
+      ]),
+    );
+  });
+
+  test("several values in a cell stay apart; menus are not specs", () => {
+    expect(
+      readSpecs(`<table><tr class="feature_1"><td>Genre</td><td>Femme<br>Homme</td></tr></table>
+        <ul class="submenu"><li>Genre</li><li>Femme</li><li>Homme</li><li>Enfant</li></ul>
+        <p>Livraison : 48 h</p>`),
+    ).toEqual([{ label: "Genre", value: "Femme, Homme" }]);
+  });
+});
+
+test("isKidsProduct: title or « Genre » line", () => {
+  expect(isKidsProduct("Montre Enfant Flik Flak")).toBe(true);
+  expect(isKidsProduct("Montre Casio Junior")).toBe(true);
+  expect(
+    isKidsProduct("Montre Tissot", [{ label: "Genre", value: "Enfant" }]),
+  ).toBe(true);
+  expect(
+    isKidsProduct("Montre Tissot", [{ label: "Genre", value: "Femme, Homme" }]),
+  ).toBe(false);
+  expect(isKidsProduct("Montre Seiko Presage")).toBe(false);
+});
+
+test("the shipped watch-sources.json: every entry usable, read all day", () => {
+  const config = loadCatalogConfig(
+    join(import.meta.dirname, "../config/watch-sources.json"),
+  );
+  expect(config.sources.map((s) => s.id)).toEqual(
+    expect.arrayContaining([
+      "jeanmick",
+      "maty",
+      "horel",
+      "emileleon",
+      "louispion",
+    ]),
+  );
+  // Ocarat and Bijourama, then the 11 shops asked for on 13/11/2026.
+  expect(config.sources).toHaveLength(13);
+  expect(config.activeHours).toHaveLength(24);
 });
