@@ -160,3 +160,115 @@ freeze whatever `cloudflare.env` looked like the one time the singleton
 was first constructed (often `undefined`, before any request had bound
 `env`), and every collection run afterwards would silently fall back to
 the (non-existent-on-Workers) `playwright` path forever.
+
+# Deploying to the OVH VPS (Bay)
+
+Environment `ovh` in `alepha.config.ts`. Bay (Alepha's self-hosted app
+server: reverse proxy, TLS, releases, rollback) runs on the VPS; deploys go
+over SSH. Reference: https://alepha.dev/bay/docs/guides-installation.md
+
+## One-time setup
+
+1. **SSH alias** on the deploying machine, `~/.ssh/config`:
+
+   ```
+   Host minpricing-ovh
+       HostName <VPS IP>
+       User ubuntu
+       IdentityFile ~/.ssh/ovh
+   ```
+
+2. **Bay on the VPS — one command from the project** (steps 2–3 below,
+   done by `scripts/setup-ovh-vps.sh`; safe to run again):
+
+   ```bash
+   ssh minpricing-ovh 'bash -s' -- <you@example.com> < scripts/setup-ovh-vps.sh
+   ```
+
+   Then reconnect once (the new group is read at login). By hand instead:
+   install Bay (also installs Docker), then check the host.
+
+   ```bash
+   curl -sSL https://alepha.dev/bay/install.sh | sudo sh
+   sudo bay doctor
+   ```
+
+3. **systemd unit** `/etc/systemd/system/bay.service` — replace `<VPS IP>`
+   and the e-mail (Let's Encrypt). Never add `PrivateTmp=yes` (secrets are
+   staged in `/tmp`).
+
+   ```ini
+   [Unit]
+   Description=Bay - Alepha application server
+   After=network-online.target docker.service
+   Wants=network-online.target
+
+   [Service]
+   Type=simple
+   Restart=always
+   RestartSec=2
+   WorkingDirectory=/opt/bay
+   RuntimeDirectory=bay
+   RuntimeDirectoryMode=0755
+   ExecStart=/opt/bay/bin/bay serve \
+     --root /opt/bay/data \
+     --base-domain <VPS IP>.sslip.io \
+     --addr :80 \
+     --tls --tls-addr :443 \
+     --acme-email <you@example.com> \
+     --control-socket /run/bay/control.sock
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+   ```bash
+   sudo systemctl daemon-reload && sudo systemctl enable --now bay
+   sudo usermod -aG bay-control ubuntu   # then log out and back in
+   sudo bay status
+   ```
+
+   Firewall, if `ufw` is on: `sudo ufw allow OpenSSH && sudo ufw allow 80 && sudo ufw allow 443`.
+
+4. **Secrets** on the deploying machine: `.env.ovh` at the project root
+   (gitignored), same variables as production (`ADMIN_USERNAME`,
+   `ADMIN_PASSWORD`, `AGENT_TOKEN`, `DEALABS_USERNAME`…). `APP_SECRET` and
+   `DATABASE_URL` are Bay's own — don't set them.
+
+## Deploy
+
+```bash
+npx alepha platform login --env ovh    # checks SSH, the group and Bay's socket
+npm run deploy:ovh                     # npm run build + alepha platform deploy --env ovh
+```
+
+Production (Lore copy `minpricing/production`, estate `ovh-adam`) is served at
+`https://minpricing.141.227.150.42.sslip.io`; deploy it with
+`npx lore deploy -p minpricing -e production` (Lore keeps its secrets). The
+`ovh` environment above is only for a deploy over SSH without Lore.
+
+## Runtime image (Playwright + Chromium)
+
+The container-based Bay runs the app in `node:22-slim` and installs nothing,
+so `playwright` (the build's one external dependency) and Chromium are
+missing: « Browsers: install failed — Cannot find module
+'playwright/package.json' ». `docker/runtime/` is that base plus Playwright
+(pinned to package.json), Chromium + headless shell with their libraries,
+and Xvfb on `:99` for the visible Dealabs browser. Built and checked on the
+VPS (Docker is there), pushed to ghcr.io, then given to the app:
+
+```bash
+echo <token with write:packages> | docker login ghcr.io -u <github user> --password-stdin
+bash scripts/build-runtime-image.sh <github user>   # prints the line below with the digest
+sudo bay runtimes set minpricing/production ghcr.io/<user>/dealradar-runtime:…@sha256:…
+sudo bay harden minpricing/production --memory 1g   # restarts the app on the new image
+```
+
+There is no `bay restart`: `bay stop` then `bay start` restarts an app. Bay's
+512 MB default is short for the app plus Chromium (the old VM gave it 900 MB),
+hence `--memory 1g`. The image sets `DEALRADAR_BROWSERS_PREINSTALLED=1`: on
+Bay's read-only root filesystem Playwright's installer hangs on its lock, so
+the app only checks that Chromium is there.
+
+Make the ghcr package public once (Bay pulls without credentials). Rebuild
+and set again when Playwright's pin or the build's Node major changes.

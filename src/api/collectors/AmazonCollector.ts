@@ -14,6 +14,7 @@ import {
   readProductPages,
   scrollAndCollect,
   withBrowser,
+  withDeadline,
   withPage,
 } from "./browser.ts";
 import type {
@@ -27,6 +28,13 @@ import { currentLoad, noteTiming, percentile } from "./runTimings.ts";
 
 /** Cards announcing less than this ("-12 %") aren't worth opening. */
 const MIN_BADGE_PERCENT = 20;
+/**
+ * Overall limits per page, above the steps' own timeouts (goto 25 s, price
+ * 12 s; a listing scrolls 10 rounds): past them the page is given up so one
+ * hung browser call can't hold the run (`withDeadline`).
+ */
+const PRODUCT_PAGE_DEADLINE_MS = 90_000;
+const LISTING_PAGE_DEADLINE_MS = 180_000;
 
 /** Listing pages read at the same time. */
 const LISTING_CONCURRENCY = 2;
@@ -258,6 +266,12 @@ export class AmazonCollector implements DealSource {
       // gets its share of `limit` (see `interleave`).
       const cardsPerPage: Card[][] = [];
 
+      // Why a listing or product page gave nothing, noted once per run:
+      // these failures are skipped on purpose, and were silent (2026-11-10,
+      // 12 of 13 product pages « Page crashed » with nothing in the log).
+      const failures = new Map<string, number>();
+      const countFailure = (reason: string) =>
+        failures.set(reason, (failures.get(reason) ?? 0) + 1);
       // Listing pages a few at a time too (each in its own context).
       let pagesRead = 0;
       const perPage = await mapWithConcurrency(
@@ -276,65 +290,71 @@ export class AmazonCollector implements DealSource {
           )?.[1];
           const categoryHint = collection ? `amazon:${collection}` : undefined;
           try {
-            const cards = await withPage(browser, async (page) => {
-              const response = await page.goto(dealsUrl, {
-                waitUntil: "domcontentloaded",
-                timeout: 20_000,
-              });
-              if (!response || !response.ok()) {
-                throw new Error(
-                  `Amazon deals page returned ${response?.status() ?? "no response"}`,
-                );
-              }
-
-              await page
-                .waitForSelector('[data-testid="product-card"]', {
-                  timeout: 10_000,
-                })
-                .catch(() => {
-                  // No card showed up in time: the extract() below just
-                  // finds none, and this URL simply contributes 0 cards.
+            const cards = await withDeadline(
+              withPage(browser, async (page) => {
+                const response = await page.goto(dealsUrl, {
+                  waitUntil: "domcontentloaded",
+                  timeout: 20_000,
                 });
+                if (!response || !response.ok()) {
+                  throw new Error(
+                    `Amazon deals page returned ${response?.status() ?? "no response"}`,
+                  );
+                }
 
-              // Collected across every scroll step, not read once at the
-              // end: see `scrollAndCollect`'s doc — Amazon's grid is
-              // virtualized, so a single read only ever sees whichever
-              // batch happened to be mounted at the final scroll position.
-              return scrollAndCollect(
-                page,
-                () =>
-                  page.evaluate(() =>
-                    Array.from(
-                      document.querySelectorAll('[data-testid="product-card"]'),
-                    ).map((el) => {
-                      const link = el.querySelector(
-                        'a[data-testid="product-card-link"]',
-                      ) as HTMLAnchorElement | null;
-                      const img = el.querySelector(
-                        "img",
-                      ) as HTMLImageElement | null;
-                      const badge = (el as HTMLElement).innerText.match(
-                        /-\s?(\d{1,2})\s?%/,
-                      );
-                      return {
-                        asin: el.getAttribute("data-asin"),
-                        url: link?.href ?? null,
-                        title: img?.alt || null,
-                        imageUrl: img?.src || null,
-                        badgePercent: badge ? Number(badge[1]) : null,
-                        priceText:
-                          (el as HTMLElement).innerText.match(
-                            /Prix[^:\n]*:\s*([\d\s.]+,\d{2})\s?€/,
-                          )?.[1] ?? null,
-                      };
-                    }),
-                  ),
-                (card) => card.asin,
-                // Deep enough for a 200-page cap shared across ~15
-                // collections once the "-20 %" card filter has run.
-                { rounds: 10 },
-              );
-            });
+                await page
+                  .waitForSelector('[data-testid="product-card"]', {
+                    timeout: 10_000,
+                  })
+                  .catch(() => {
+                    // No card showed up in time: the extract() below just
+                    // finds none, and this URL simply contributes 0 cards.
+                  });
+
+                // Collected across every scroll step, not read once at the
+                // end: see `scrollAndCollect`'s doc — Amazon's grid is
+                // virtualized, so a single read only ever sees whichever
+                // batch happened to be mounted at the final scroll position.
+                return scrollAndCollect(
+                  page,
+                  () =>
+                    page.evaluate(() =>
+                      Array.from(
+                        document.querySelectorAll(
+                          '[data-testid="product-card"]',
+                        ),
+                      ).map((el) => {
+                        const link = el.querySelector(
+                          'a[data-testid="product-card-link"]',
+                        ) as HTMLAnchorElement | null;
+                        const img = el.querySelector(
+                          "img",
+                        ) as HTMLImageElement | null;
+                        const badge = (el as HTMLElement).innerText.match(
+                          /-\s?(\d{1,2})\s?%/,
+                        );
+                        return {
+                          asin: el.getAttribute("data-asin"),
+                          url: link?.href ?? null,
+                          title: img?.alt || null,
+                          imageUrl: img?.src || null,
+                          badgePercent: badge ? Number(badge[1]) : null,
+                          priceText:
+                            (el as HTMLElement).innerText.match(
+                              /Prix[^:\n]*:\s*([\d\s.]+,\d{2})\s?€/,
+                            )?.[1] ?? null,
+                        };
+                      }),
+                    ),
+                  (card) => card.asin,
+                  // Deep enough for a 200-page cap shared across ~15
+                  // collections once the "-20 %" card filter has run.
+                  { rounds: 10 },
+                );
+              }),
+              LISTING_PAGE_DEADLINE_MS,
+              "page bons plans",
+            );
 
             return cards
               .filter((card) => card.asin && card.url && card.title)
@@ -349,9 +369,10 @@ export class AmazonCollector implements DealSource {
                   ? parsePriceFr(card.priceText)
                   : undefined,
               }));
-          } catch {
+          } catch (error) {
             // One listing page failing (challenge, layout change, timeout)
             // must not block the other entry points from contributing cards.
+            countFailure(`liste : ${failureReason(error)}`);
             return [];
           }
         },
@@ -417,11 +438,14 @@ export class AmazonCollector implements DealSource {
             if (priced) {
               byFetch++;
             } else {
-              priced = await withPage(browser, (page) =>
-                this.fetchPrice(page, card.url),
+              priced = await withDeadline(
+                withPage(browser, (page) => this.fetchPrice(page, card.url)),
+                PRODUCT_PAGE_DEADLINE_MS,
+                "fiche produit",
               );
             }
             if (!priced) {
+              countFailure("fiche : prix introuvable");
               return undefined;
             }
 
@@ -447,9 +471,10 @@ export class AmazonCollector implements DealSource {
               // extra request, so always fresh (no DiscoverContext needed).
               details: priced.details,
             };
-          } catch {
+          } catch (error) {
             // One product page failing (challenge, layout change, timeout)
             // must not block the rest of the deals found this run.
+            countFailure(`fiche : ${failureReason(error)}`);
             return undefined;
           } finally {
             pageTimes.push(Date.now() - pageStartedAt);
@@ -462,6 +487,19 @@ export class AmazonCollector implements DealSource {
         },
       );
       deals.push(...found.filter((deal): deal is RawDeal => !!deal));
+      const emptyListings = perPage.filter(
+        (cards) => cards.length === 0,
+      ).length;
+      if (failures.size > 0 || emptyListings > 0) {
+        context?.note?.(
+          formatAmazonFailures({
+            listings: this.dealsUrls.length,
+            emptyListings,
+            candidates: candidates.length,
+            failures,
+          }),
+        );
+      }
 
       noteTiming(this.id, {
         listingMs,
@@ -681,4 +719,37 @@ export async function readAmazonBullets(
     .join("\n");
 
   return text.length > 600 ? `${text.slice(0, 600)}…` : text;
+}
+
+/** A page failure in a few French words, for the run's note. */
+export function failureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/Page crashed|Target crashed/i.test(message)) return "page plantée";
+  if (/captcha|robot/i.test(message)) return "vérification anti-robot";
+  if (/Timeout|timed out/i.test(message)) return "délai dépassé";
+  const status = message.match(/returned (\d{3})/)?.[1];
+  if (status) return `réponse ${status}`;
+  return message.replace(/\s+/g, " ").trim().slice(0, 60) || "erreur";
+}
+
+/** « Amazon : 13 listes (2 vides), 12 fiche(s) sans résultat sur 13 — … » */
+export function formatAmazonFailures(run: {
+  listings: number;
+  emptyListings: number;
+  candidates: number;
+  failures: Map<string, number>;
+}): string {
+  const product = [...run.failures.entries()].filter(([reason]) =>
+    reason.startsWith("fiche"),
+  );
+  const failedProducts = product.reduce((sum, [, n]) => sum + n, 0);
+  const reasons = [...run.failures.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, n]) => `${reason} ×${n}`)
+    .join(", ");
+  return (
+    `Amazon : ${run.listings} liste(s) (${run.emptyListings} vide(s)), ` +
+    `${failedProducts} fiche(s) sans résultat sur ${run.candidates}` +
+    (reasons ? ` — ${reasons}` : "")
+  );
 }
