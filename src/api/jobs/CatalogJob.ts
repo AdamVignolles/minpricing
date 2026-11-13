@@ -16,7 +16,9 @@ export class CatalogJob {
     name: "catalog.read",
     description:
       "Reads the verified shop catalogues of config/watch-sources.json (every shop at its own pace, each price read again within 24 h).",
-    cron: "35 * * * *",
+    // Every 15 min: a pass is ≤ 400 pages at ≥ 1 s each, and a shop whose
+    // pass still runs is skipped — each shop keeps its own pace.
+    cron: "5,20,35,50 * * * *",
     handler: async () => {
       if (this.alepha.isServerless()) return;
       await this.catalog.runDue();

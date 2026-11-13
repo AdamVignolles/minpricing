@@ -840,8 +840,14 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   on `/feed/catalog`; a « Référence (fournisseur) » / « Code EAN » line
   fills what the JSON-LD lacks. Timeshop24/Ocarat sale pages add the
   same table to their facts (`specsRead`: stored watches read once
-  more). **Children's watches** (`isKidsProduct`: title or « Genre »)
-  are `skipped`; one read before is served as `gone`. The config is
+  more). Labels are matched by keyword, units and plurals dropped
+  (« Qualité du verre », « Diamètre (en mm) », « Mouvements » — Ocarat's
+  table was lost to exact labels until 13/11); `READER_VERSION_AT`: a
+  page read before the reader last improved is read again first.
+  **Left out** (`excludedProduct`): children's, second-hand (title or
+  JSON-LD `itemCondition`) and connected watches are `skipped`; one read
+  before is served as `gone`. `CatalogJob` runs every 15 min (a shop
+  whose pass still runs is skipped), so each price is read again daily. The config is
   bundled (`import … with { type: "json" }`): the copy under `appDir()`
   wins only with a later `updated` date. Shops (13/11): Ocarat, the six
   hbjo-online jewellers (Jean Mick, Balluais, Thierry, Damade, Azarian,

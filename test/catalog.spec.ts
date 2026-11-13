@@ -34,6 +34,7 @@ import {
   parisHour,
 } from "../src/api/services/CatalogService.ts";
 import {
+  excludedProduct,
   isKidsProduct,
   loadCatalogConfig,
   sourceProblem,
@@ -276,6 +277,7 @@ const AGENT_TOKEN = "agent-token-0123456789abcdef0123456789";
 
 /** The shop, as a table of answers; every request is recorded. */
 class FakeShop extends CatalogService {
+  protected override readerVersionAt = 0;
   pages = new Map<string, PageAnswer>();
   requests: string[] = [];
   protected override sleep(): Promise<void> {
@@ -671,6 +673,19 @@ describe("readProductPage: characteristics of real pages (13/11/2026)", () => {
     );
   });
 
+  test("Ocarat: labels with units and plurals (« Diamètre (en mm) », « Mouvements »)", () => {
+    const product = readProductPage(fixture("ocarat-full-product.html"));
+    expect(product?.specs).toEqual(
+      expect.arrayContaining([
+        { label: "Qualité du verre", value: "Verre saphir" },
+        { label: "Diamètre (en mm)", value: "41,00" },
+        { label: "Mouvements", value: "Automatique (masse oscillante)" },
+        { label: "Étanchéité (en ATM)", value: "20" },
+        { label: "Matière du bracelet", value: "Acier inoxydable" },
+      ]),
+    );
+  });
+
   test("Horel: features list", () => {
     const product = readProductPage(fixture("horel-product.html"));
     expect(product).toMatchObject({
@@ -693,6 +708,22 @@ describe("readProductPage: characteristics of real pages (13/11/2026)", () => {
         <p>Livraison : 48 h</p>`),
     ).toEqual([{ label: "Genre", value: "Femme, Homme" }]);
   });
+});
+
+test("excludedProduct: kids, second-hand and connected watches", () => {
+  expect(excludedProduct("Montre Hamilton d'occasion Khaki Navy Frogman")).toBe(
+    "used",
+  );
+  expect(excludedProduct("Montre Tissot PRX", [], "used")).toBe("used");
+  expect(excludedProduct("Montre connectée Garmin Venu 3")).toBe("connected");
+  expect(
+    excludedProduct("Withings ScanWatch", [
+      { label: "Mouvement", value: "Montre connectée" },
+    ]),
+  ).toBe("connected");
+  expect(
+    excludedProduct("Montre Seiko Presage SRPD37J1", [], "new"),
+  ).toBeUndefined();
 });
 
 test("isKidsProduct: title or « Genre » line", () => {

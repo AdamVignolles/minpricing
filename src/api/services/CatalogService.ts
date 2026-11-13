@@ -19,7 +19,7 @@ import { appDir } from "./appDir.ts";
 import {
   type CatalogSource,
   DEFAULT_ACTIVE_HOURS,
-  isKidsProduct,
+  excludedProduct,
   loadCatalogConfig,
   pauseMsOf,
   perRunOf,
@@ -89,6 +89,14 @@ export interface StoredProbe {
   summary: string;
 }
 
+/**
+ * When the page reader last learned to read more (13/11/2026: labels
+ * matched by keyword — « Qualité du verre », « Diamètre (en mm) »,
+ * « Mouvements » —, used and connected watches left out). A product read
+ * before is read again first; bump it when the reader improves.
+ */
+export const READER_VERSION_AT = Date.parse("2026-11-13T23:00:00Z");
+
 /** An unverified source is probed again after this long. */
 const PROBE_EVERY_MS = 24 * 3_600_000;
 /** A passed probe lets an unverified source be read this long. */
@@ -122,6 +130,8 @@ export class CatalogService {
   protected prices = $repository(catalogPriceEntity);
   /** Sources whose pass is under way (each shop runs on its own). */
   protected running = new Set<string>();
+  /** See {@link READER_VERSION_AT}; tests set their own. */
+  protected readerVersionAt = READER_VERSION_AT;
   protected sitemapReadAt = new Map<string, number>();
 
   protected sleep(ms: number): Promise<void> {
@@ -377,16 +387,21 @@ export class CatalogService {
     const staleBefore = now.getTime() - (source.everyHours ?? 24) * 3_600_000;
     const readAt = (row: (typeof known)[number]) =>
       row.lastReadAt ? new Date(row.lastReadAt).getTime() : 0;
+    // A page read by an older reader (fewer characteristics) is due now.
+    const oldReader = (row: (typeof known)[number]) =>
+      row.status === "active" && readAt(row) < this.readerVersionAt;
     const due = known
       .filter(
         (row) =>
           (row.status === "pending" || row.status === "active") &&
           row.readFailures < MAX_READ_FAILURES &&
-          readAt(row) < staleBefore,
+          (readAt(row) < staleBefore || oldReader(row)),
       )
-      // Prices of known products first (that is the history), then new pages.
+      // Pages read by an older reader first, then prices of known products
+      // (that is the history), then new pages.
       .sort(
         (a, b) =>
+          Number(oldReader(b)) - Number(oldReader(a)) ||
           Number(a.status === "pending") - Number(b.status === "pending") ||
           readAt(a) - readAt(b),
       )
@@ -432,7 +447,7 @@ export class CatalogService {
       }
       if (
         !wantedTitle(source, product.title) ||
-        isKidsProduct(product.title, product.specs)
+        excludedProduct(product.title, product.specs, product.condition)
       ) {
         await this.offers.updateById(row.id, {
           status: "skipped",
@@ -559,7 +574,7 @@ export class CatalogService {
         seen.add(id);
         if (
           !wantedTitle(source, product.title) ||
-          isKidsProduct(product.title, product.specs)
+          excludedProduct(product.title, product.specs, product.condition)
         ) {
           pass.skipped++;
           continue;

@@ -39,6 +39,8 @@ export interface CatalogProduct {
   description?: string;
   /** The page's characteristics table (watch labels only). */
   specs?: CatalogSpec[];
+  /** The offer's `itemCondition`, when stated. */
+  condition?: "new" | "used" | "refurbished";
 }
 
 const text = (value: unknown): string | undefined => {
@@ -184,6 +186,17 @@ export function readJsonLdProduct(html: string): CatalogProduct | undefined {
       : undefined,
     description: text(product.description)?.slice(0, 2000),
     url: text(product.url) ?? (single ? text(single.url) : undefined),
+    condition: (() => {
+      const raw = (
+        text(single?.itemCondition) ??
+        text(product.itemCondition) ??
+        ""
+      ).toLowerCase();
+      if (/used|damaged/.test(raw)) return "used" as const;
+      if (/refurbished/.test(raw)) return "refurbished" as const;
+      if (/new/.test(raw)) return "new" as const;
+      return undefined;
+    })(),
     specs: (() => {
       const specs = propertySpecs(product.additionalProperty);
       return specs.length ? specs : undefined;
@@ -312,6 +325,8 @@ const foldLabel = (value: string) =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\(s\)/g, "")
+    // « Diamètre (en mm) », « Étanchéité (en ATM) », « Calibres (mouvements) »
+    .replace(/\s*\([^)]*\)/g, "")
     .replace(/\s*:\s*$/, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -322,7 +337,7 @@ const foldLabel = (value: string) =>
  * left out, so a stray « Genre » menu title never becomes a spec.
  */
 const WATCH_LABEL =
-  /^(genre|sexe|pour|public|mouvement|type de mouvement|mecanisme|calibre|verre|type de verre|glace|bracelet|type de bracelet|matiere du bracelet|matiere bracelet|bracelet matiere|materiau du bracelet|couleur du bracelet|couleur bracelet|largeur du bracelet|matiere|matiere du boitier|matiere boitier|materiau du boitier|boitier|forme du boitier|forme boitier|cadran|couleur du cadran|couleur cadran|type de cadran|diametre|diametre du boitier|taille du boitier|taille boitier|taille|epaisseur|epaisseur du boitier|etancheite|etanche|resistance a l'eau|fonctions?|complications?|affichage|fermoir|type de fermoir|boucle|type de boucle|reserve de marche|garantie|collection|lunette|couronne|style|reference|ref|reference fabricant|reference fournisseur|reference constructeur|code ean|ean)$/;
+  /^(?=.{2,40}$)(?:[a-z' ]*\b)?(genre|sexe|mouvements?|mecanisme|calibres?|verre|glace|bracelet|matiere|materiau|boitier|cadran|diametre|taille|epaisseur|etanche|etancheite|resistance a l'eau|fonctions?|complications?|affichage|fermoir|boucle|reserve de marche|garantie|collection|lunette|couronne|style|reference|ref|ean|fond)\b/;
 
 const cleanText = (value: string) =>
   value

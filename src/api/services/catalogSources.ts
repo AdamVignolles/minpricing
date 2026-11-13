@@ -187,6 +187,41 @@ export function isKidsProduct(
   );
 }
 
+/**
+ * A watch the catalogue leaves out (owner's decisions, 13/11/2026), and
+ * why: a children's watch, a second-hand one (title or the page's
+ * `itemCondition`), a connected watch (title or « Mouvement » line).
+ */
+export function excludedProduct(
+  title: string,
+  specs: Array<{ label: string; value: string }> = [],
+  condition?: string,
+): "kids" | "used" | "connected" | undefined {
+  if (isKidsProduct(title, specs)) return "kids";
+  const text = fold(title);
+  if (
+    condition === "used" ||
+    condition === "refurbished" ||
+    /\b(d'occasion|occasion|seconde main|reconditionnee?s?|pre-?owned|vintage d'occasion)\b/.test(
+      text,
+    )
+  ) {
+    return "used";
+  }
+  const movement = specs.find((spec) =>
+    /mouvement|mecanisme|type de montre/.test(fold(spec.label)),
+  );
+  if (
+    /\b(connectee?s?|smart ?watch|montre intelligente|hybride connectee)\b/.test(
+      text,
+    ) ||
+    (!!movement && /connect|smart/.test(fold(movement.value)))
+  ) {
+    return "connected";
+  }
+  return undefined;
+}
+
 /** Is this product of the wanted kind, by its title? */
 export function wantedTitle(source: CatalogSource, title: string): boolean {
   if (
