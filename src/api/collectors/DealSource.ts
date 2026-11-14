@@ -184,6 +184,10 @@ export interface StoredFacts {
   colors?: string[];
   /** Mobile plans and boxes: commitment, price after the promo… */
   planTerms?: string[];
+  /** Watch shops: the product page was read for its EAN (found or not). */
+  eanChecked?: boolean;
+  /** Watch shops: the page's whole characteristics table was read. */
+  specsRead?: boolean;
 }
 
 /**

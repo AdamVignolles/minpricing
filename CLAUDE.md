@@ -801,6 +801,64 @@ checkLink` (one at a time per shop, steps in `linkSteps.ts` stored on
   (`DealVerdict.tsx`), then tabs Analyse / Historique / Dealabs /
   Brouillon / Données; a running publication (remote screen, stop, steps)
   shows right under the header. `GET /deals/:id` carries `onDealabs`.
+- **Feed and catalogue for the watch site** (`../montres`, a separate
+  app; design in its `docs/`): `FeedController` serves `/feed/*`
+  read-only behind `FEED_TOKEN` (`$feedAuth`: GET only, opens nothing
+  else; the agent token doesn't open it) — `/feed/offers` (deals of
+  every status **and score**, which `GET /deals` hides under the bar),
+  `/feed/prices`, `/feed/catalog`, `/feed/catalog/prices`,
+  `/feed/sources`. Incremental: `since` → `next` (`feedNext` steps 1 ms
+  past a full page of one instant), rows upserted by id on the other
+  side. **Catalogue** (`CatalogService`, `CatalogJob` hourly, local
+  only): whole shop ranges, not sale pages, into `catalog_offers` /
+  `catalog_price_history` (migration `20261112140000_add_catalog_offers`,
+  hand-written with its snapshot) — never into `deals`: no quality gate,
+  score, draft or console list. No code per shop: an entry of
+  `config/watch-sources.json` (`services/catalogSources.ts`) with a
+  generic reader (`collectors/catalogReaders.ts`, pure): `sitemap-jsonld`
+  (sitemap → each page's schema.org `Product`: one product per page, an
+  `AggregateOffer` gives no price, GTIN check digit verified, `mpn` is
+  the reference and the shop's `sku` kept apart) or `shopify`
+  (`products.json`, one row per variant; parser tested on a sample only —
+  Shopify answered 429 to the probe of 12/11). Read only when `verified`
+  (probe passed: `POST /admin/catalog/:id/probe`, ≥ 3 of 5 pages with a
+  product and a price, writes nothing) **and** `enabled`; at
+  `activeHours` (Paris; all day since 13/11 so every price is read again
+  within 24 h), every shop side by side at its own pace (`running` per
+  source), `perRun` pages (≤ 400) per hourly pass, ≥ 1 s apart, `robots.txt` obeyed (`robotsAllows`), known prices before
+  new pages, a 403/429 stops that shop's pass (never worked around),
+  404/410 → `gone`, a non-watch title → `skipped` for good. A price row
+  only on change. `GET /admin/catalog`, `POST /admin/catalog/run`.
+  Timeshop24 and Ocarat's sale collectors also store the page's EAN
+  (`readJsonLdProduct`; `eanChecked` in the facts makes stored watches be
+  read once more). **Characteristics** (13/11): `readProductPage` = the
+  JSON-LD plus `readSpecs`, a generic reader of the page's label → value
+  rows (`<tr>`, `<dt>/<dd>`, two-element rows, « Label : valeur »),
+  watch labels only (`WATCH_LABEL`: genre, verre, bracelet, mouvement,
+  boîtier, étanchéité, référence, EAN…), stored as `catalog_offers.specs`
+  (migration `20261113160000_add_catalog_specs`) and served as `facts`
+  on `/feed/catalog`; a « Référence (fournisseur) » / « Code EAN » line
+  fills what the JSON-LD lacks. Timeshop24/Ocarat sale pages add the
+  same table to their facts (`specsRead`: stored watches read once
+  more). Labels are matched by keyword, units and plurals dropped
+  (« Qualité du verre », « Diamètre (en mm) », « Mouvements » — Ocarat's
+  table was lost to exact labels until 13/11); `READER_VERSION_AT`: a
+  page read before the reader last improved is read again first.
+  **Left out** (`excludedProduct`): children's, second-hand (title or
+  JSON-LD `itemCondition`) and connected watches are `skipped`; one read
+  before is served as `gone`. `CatalogJob` runs every 15 min (a shop
+  whose pass still runs is skipped), so each price is read again daily. The config is
+  bundled (`import … with { type: "json" }`): the copy under `appDir()`
+  wins only with a later `updated` date. Shops (13/11): Ocarat, the six
+  hbjo-online jewellers (Jean Mick, Balluais, Thierry, Damade, Azarian,
+  Émile Léon: `/fr/p/` pages, `sku` = maker's reference), Maty, Horel;
+  Conteenium, Montres & Co and Louis Pion answered 403 (Cloudflare) to
+  the probe from the cloud — `verified: false`, never worked around. An
+  enabled, unverified source is probed **by the server itself** once a
+  day (`readable`: the same probe, result in `data/catalog-probes.json`)
+  and read only while its last probe passed (7 days); `GET
+/admin/catalog` and MCP `get_catalog_status` show it.
+  `test/catalog.spec.ts` (fixtures cut from live pages).
 - **Web**: `src/web/AppRouter.ts` declares `$page` routes and one
   `$client<Controller>()` per backend controller; pages are lazy-loaded.
   New controllers must be registered in `src/api/index.ts` and get a matching
